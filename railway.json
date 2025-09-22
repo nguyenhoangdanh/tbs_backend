@@ -1,0 +1,23 @@
+{
+  "name": "weekly-report-backend",
+  "build": {
+    "builder": "NIXPACKS",
+    "buildCommand": "npm install && npx prisma generate && npm run build"
+  },
+  "deploy": {
+    "startCommand": "npm run start:prod",
+    "healthcheckPath": "/health",
+    "healthcheckTimeout": 300,
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
+  },
+  "environment": {
+    "NODE_ENV": "production",
+    "PORT": 8080
+  },
+  "region": "singapore",
+  "healthcheck": {
+    "path": "/health",
+    "timeout": 30
+  }
+}

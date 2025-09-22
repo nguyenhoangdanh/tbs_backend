@@ -1,0 +1,689 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["relationJoins"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model JobPosition {
+  id           String     @id @default(uuid())
+  jobName      String
+  code         String
+  description  String?
+  positionId   String
+  departmentId String
+  officeId     String
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  office       Office     @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  position     Position   @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  users        User[]
+
+  @@unique([positionId, jobName, departmentId])
+  @@index([departmentId])
+  @@index([positionId])
+  @@index([isActive])
+  @@index([officeId])
+  @@map("job_positions")
+}
+
+model Office {
+  id           String        @id @default(uuid())
+  name         String        @unique
+  type         OfficeType
+  description  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  departments  Department[]
+  factories    Factory[]
+  jobPositions JobPosition[]
+  users        User[]
+
+  @@index([type])
+  @@map("offices")
+}
+
+model Department {
+  id           String                     @id @default(uuid())
+  name         String
+  description  String?
+  officeId     String
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+  office       Office                     @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  jobPositions JobPosition[]
+  managers     UserDepartmentManagement[]
+
+  @@unique([name, officeId])
+  @@index([officeId])
+  @@map("departments")
+}
+
+model Position {
+  id               String        @id @default(uuid())
+  name             String        @unique
+  description      String?
+  level            Int           @default(0)
+  priority         Int           @default(0)
+  isManagement     Boolean       @default(false)
+  isReportable     Boolean       @default(true)
+  canViewHierarchy Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  jobPositions     JobPosition[]
+
+  @@map("positions")
+}
+
+model User {
+  id                 String                     @id @default(uuid())
+  employeeCode       String                     @unique
+  email              String?                    @unique
+  password           String
+  firstName          String
+  lastName           String
+  phone              String?
+  avatar             String?
+  role               Role                       @default(USER)
+  jobPositionId      String
+  isActive           Boolean                    @default(false)
+  officeId           String
+  groupId            String?
+  createdAt          DateTime                   @default(now())
+  updatedAt          DateTime                   @updatedAt
+  attendanceEvents   AttendanceEvent[]
+  gatePassApprovals  GatePassApproval[]         @relation("GatePassApprovals")
+  gatePasses         GatePass[]
+  ledGroups          Group[]                    @relation("GroupLeader")
+  reports            Report[]
+  evaluations        TaskEvaluation[]
+  managedDepartments UserDepartmentManagement[] @relation("UserToManagedDepartments")
+  group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
+  jobPosition        JobPosition                @relation(fields: [jobPositionId], references: [id])
+  office             Office                     @relation(fields: [officeId], references: [id])
+  workerWorkSheets   WorkSheetItem[]            @relation("WorkerWorkSheets")
+  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater")
+  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator")
+  pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
+
+
+  medicalRecordsAsPatient MedicalRecord[]          @relation("PatientMedicalRecords")
+  medicalRecordsAsDoctor MedicalRecord[]          @relation("DoctorMedicalRecords")
+  prescriptionsDispensed MedicalPrescription[]   @relation("MedicineDispenser")
+
+  @@index([jobPositionId])
+  @@index([officeId])
+  @@index([isActive])
+  @@index([role])
+  @@index([firstName, lastName])
+  @@index([groupId])
+  @@map("users")
+}
+
+model Report {
+  id          String       @id @default(uuid())
+  weekNumber  Int
+  year        Int
+  userId      String
+  isCompleted Boolean      @default(false)
+  isLocked    Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tasks       ReportTask[]
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([weekNumber, year, userId])
+  @@index([userId])
+  @@index([year, weekNumber])
+  @@index([isCompleted])
+  @@index([isLocked])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model ReportTask {
+  id            String           @id @default(uuid())
+  reportId      String
+  taskName      String
+  monday        Boolean          @default(false)
+  tuesday       Boolean          @default(false)
+  wednesday     Boolean          @default(false)
+  thursday      Boolean          @default(false)
+  friday        Boolean          @default(false)
+  saturday      Boolean          @default(false)
+  isCompleted   Boolean          @default(false)
+  reasonNotDone String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  report        Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  evaluations   TaskEvaluation[]
+
+  @@index([reportId])
+  @@index([isCompleted])
+  @@map("report_tasks")
+}
+
+model TaskEvaluation {
+  id                     String         @id @default(uuid())
+  taskId                 String
+  evaluatorId            String
+  originalIsCompleted    Boolean        @default(false)
+  evaluatedIsCompleted   Boolean        @default(false)
+  originalReasonNotDone  String?
+  evaluatedReasonNotDone String?
+  evaluatorComment       String?
+  evaluationType         EvaluationType @default(REVIEW)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  evaluator              User           @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  task                   ReportTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, evaluatorId])
+  @@index([taskId])
+  @@index([evaluatorId])
+  @@index([evaluationType])
+  @@index([createdAt])
+  @@map("task_evaluations")
+}
+
+model UserDepartmentManagement {
+  id           String     @id @default(uuid())
+  userId       String
+  departmentId String
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  user         User       @relation("UserToManagedDepartments", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, departmentId])
+  @@index([userId])
+  @@index([departmentId])
+  @@map("user_department_managements")
+}
+
+model Factory {
+  id          String      @id @default(uuid())
+  name        String
+  code        String      @unique
+  description String?
+  officeId    String
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  office      Office      @relation(fields: [officeId], references: [id], onDelete: Cascade)
+  lines       Line[]
+  worksheets  WorkSheet[]
+
+  @@index([officeId])
+  @@index([isActive])
+  @@map("factories")
+}
+
+model Line {
+  id          String   @id @default(uuid())
+  name        String
+  code        String
+  description String?
+  factoryId   String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  factory     Factory  @relation(fields: [factoryId], references: [id], onDelete: Cascade)
+  teams       Team[]
+
+  @@unique([code, factoryId])
+  @@index([factoryId])
+  @@index([isActive])
+  @@map("lines")
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  name        String
+  code        String
+  description String?
+  lineId      String
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  groups      Group[]
+  line        Line     @relation(fields: [lineId], references: [id], onDelete: Cascade)
+
+  @@unique([code, lineId])
+  @@index([lineId])
+  @@index([isActive])
+  @@map("teams")
+}
+
+model Group {
+  id          String      @id @default(uuid())
+  name        String
+  code        String
+  description String?
+  teamId      String
+  leaderId    String?
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  leader      User?       @relation("GroupLeader", fields: [leaderId], references: [id])
+  team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  members     User[]      @relation("GroupMembers")
+  worksheets  WorkSheet[]
+
+  @@unique([code, teamId])
+  @@index([teamId])
+  @@index([leaderId])
+  @@index([isActive])
+  @@map("groups")
+}
+
+model Product {
+  id             String                @id @default(uuid())
+  name           String
+  code           String                @unique
+  description    String?
+  imageUrl       String?
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  processes      ProductProcess[]
+  itemRecords    WorkSheetItemRecord[]
+  worksheetItems WorkSheetItem[]
+
+  @@index([isActive])
+  @@index([code])
+  @@map("products")
+}
+
+model Process {
+  id             String                @id @default(uuid())
+  name           String
+  code           String                @unique
+  description    String?
+  isActive       Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  products       ProductProcess[]
+  itemRecords    WorkSheetItemRecord[]
+  worksheetItems WorkSheetItem[]
+
+  @@index([isActive])
+  @@index([code])
+  @@map("processes")
+}
+
+model ProductProcess {
+  id                    String   @id @default(uuid())
+  productId             String
+  processId             String
+  standardOutputPerHour Int
+  standardWorkers       Int      @default(1)
+  sequence              Int      @default(0)
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  process               Process  @relation(fields: [processId], references: [id], onDelete: Cascade)
+  product               Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, processId])
+  @@index([productId])
+  @@index([processId])
+  @@index([isActive])
+  @@map("product_processes")
+}
+
+model WorkSheet {
+  id                  String            @id @default(uuid())
+  date                DateTime          @db.Date
+  factoryId           String
+  groupId             String
+  shiftType           ShiftType
+  totalWorkers        Int
+  targetOutputPerHour Int
+  createdById         String
+  status              WorkSheetStatus   @default(ACTIVE)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  attendanceEvents    AttendanceEvent[]
+  items               WorkSheetItem[]
+  records             WorkSheetRecord[]
+  createdBy           User              @relation("WorkSheetCreator", fields: [createdById], references: [id])
+  factory             Factory           @relation(fields: [factoryId], references: [id])
+  group               Group             @relation(fields: [groupId], references: [id])
+
+  @@unique([date, groupId])
+  @@index([date])
+  @@index([factoryId])
+  @@index([groupId])
+  @@index([createdById])
+  @@index([status])
+  @@map("worksheets")
+}
+
+model WorkSheetItem {
+  id                  String                @id @default(uuid())
+  worksheetId         String
+  workerId            String
+  productId           String
+  processId           String
+  targetOutputPerHour Int?
+  isActive            Boolean               @default(true)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  records             WorkSheetItemRecord[]
+  process             Process               @relation(fields: [processId], references: [id])
+  product             Product               @relation(fields: [productId], references: [id])
+  worker              User                  @relation("WorkerWorkSheets", fields: [workerId], references: [id])
+  worksheet           WorkSheet             @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+
+  @@unique([worksheetId, workerId])
+  @@index([worksheetId])
+  @@index([workerId])
+  @@index([productId, processId])
+  @@map("worksheet_items")
+}
+
+model WorkSheetRecord {
+  id                  String                 @id @default(uuid())
+  worksheetId         String
+  workHour            Int
+  startTime           DateTime               @db.Time(6)
+  endTime             DateTime               @db.Time(6)
+  expectedOutputTotal Int?
+  status              WorkRecordStatus       @default(PENDING)
+  updatedById         String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+  itemRecords         WorkSheetItemRecord[]
+  causes              WorkSheetRecordCause[]
+  updatedBy           User?                  @relation("WorkRecordUpdater", fields: [updatedById], references: [id])
+  worksheet           WorkSheet              @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+
+  @@unique([worksheetId, workHour])
+  @@index([worksheetId])
+  @@index([workHour])
+  @@index([status])
+  @@map("worksheet_records")
+}
+
+model WorkSheetItemRecord {
+  id           String          @id @default(uuid())
+  recordId     String
+  itemId       String
+  entryIndex   Int             @default(1)
+  productId    String?
+  processId    String?
+  targetOutput Int?
+  actualOutput Int             @default(0)
+  variance     Int?
+  note         String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  item         WorkSheetItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  process      Process?        @relation(fields: [processId], references: [id])
+  product      Product?        @relation(fields: [productId], references: [id])
+  record       WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, itemId, entryIndex])
+  @@index([recordId])
+  @@index([itemId])
+  @@index([productId, processId])
+  @@map("worksheet_item_records")
+}
+
+model WorkSheetRecordCause {
+  id        String          @id @default(uuid())
+  recordId  String
+  cause     CauseType
+  delta     Int
+  note      String?
+  createdAt DateTime        @default(now())
+  record    WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+
+  @@unique([recordId, cause])
+  @@index([recordId])
+  @@map("worksheet_record_causes")
+}
+
+model WorkSheetMonthlyBackup {
+  id              String   @id @default(uuid())
+  month           Int
+  year            Int
+  factoryId       String
+  groupId         String
+  totalWorksheets Int
+  totalOutput     Int
+  avgEfficiency   Float
+  backupData      Json
+  createdAt       DateTime @default(now())
+
+  @@unique([month, year, factoryId, groupId])
+  @@index([year, month])
+  @@index([factoryId])
+  @@map("worksheet_monthly_backups")
+}
+
+model AttendanceEvent {
+  id          String              @id @default(uuid())
+  worksheetId String
+  userId      String
+  eventType   AttendanceEventType
+  minutes     Int
+  hourStart   Int?
+  hourEnd     Int?
+  note        String?
+  createdAt   DateTime            @default(now())
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  worksheet   WorkSheet           @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+
+  @@index([worksheetId])
+  @@index([userId])
+  @@index([eventType])
+  @@map("attendance_events")
+}
+
+model GatePass {
+  id            String             @id @default(uuid())
+  passNumber    String             @unique
+  userId        String
+  reasonType    GatePassReason
+  reasonDetail  String?
+  startDateTime DateTime
+  endDateTime   DateTime
+  status        GatePassStatus     @default(PENDING)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+  approvals     GatePassApproval[]
+  user          User               @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([startDateTime])
+  @@map("gate_passes")
+}
+
+model GatePassApproval {
+  id            String                 @id @default(uuid())
+  gatePassId    String
+  approverId    String
+  approvalLevel Int
+  status        GatePassApprovalStatus @default(PENDING)
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  comment       String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  approver      User                   @relation("GatePassApprovals", fields: [approverId], references: [id])
+  gatePass      GatePass               @relation(fields: [gatePassId], references: [id], onDelete: Cascade)
+
+  @@unique([gatePassId, approvalLevel])
+  @@index([gatePassId])
+  @@index([approverId])
+  @@map("gate_pass_approvals")
+}
+
+// -------------------------------------Medical Management-------------------------------------
+// 1. Quản lý thuốc cơ bản
+model Medicine {
+  id                String                 @id @default(uuid())
+  name              String                 @unique
+  dosage            String                 // Liều dùng: ví dụ "2 viên", "1 thìa"
+  frequency         String                 // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
+  instructions      String                 // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
+  units             String                 // Đơn vị: "viên", "chai", "lọ"
+  isActive          Boolean                @default(true)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  prescriptions     MedicalPrescription[]
+
+  @@index([isActive])
+  @@index([name])
+  @@map("medicines")
+}
+
+// 2. Lịch sử khám bệnh (đơn giản hóa)
+model MedicalRecord {
+  id                String                 @id @default(uuid())
+  patientId         String                 // ID nhân viên khám
+  doctorId          String                 // ID nhân viên y tế
+  visitDate         DateTime               @default(now())
+  symptoms          String?                // Triệu chứng
+  diagnosis         String?                // Chẩn đoán
+  notes             String?                // Ghi chú
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  
+  patient           User                   @relation("PatientMedicalRecords", fields: [patientId], references: [id])
+  doctor            User                   @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
+  prescriptions     MedicalPrescription[]
+
+  @@index([patientId])
+  @@index([doctorId])
+  @@index([visitDate])
+  @@map("medical_records")
+}
+
+// 3. Đơn thuốc
+model MedicalPrescription {
+  id              String        @id @default(uuid())
+  medicalRecordId String
+  medicineId      String
+  quantity        Int           // Số lượng cấp
+  dosage          String        // Liều dùng: 2 viên/ngày
+  duration        String?       // Thời gian dùng: 7 ngày
+  instructions    String?       // Hướng dẫn sử dụng
+  notes           String?       // Ghi chú
+  isDispensed     Boolean       @default(false) // Đã cấp thuốc chưa
+  dispensedAt     DateTime?     // Thời gian cấp thuốc
+  dispensedBy     String?       // Người cấp thuốc
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  
+  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  medicine        Medicine      @relation(fields: [medicineId], references: [id])
+  dispenser       User?         @relation("MedicineDispenser", fields: [dispensedBy], references: [id])
+
+  @@index([medicalRecordId])
+  @@index([medicineId])
+  @@index([isDispensed])
+  @@map("medical_prescriptions")
+}
+
+enum ShiftType {
+  NORMAL_8H
+  EXTENDED_9_5H
+  OVERTIME_11H
+}
+
+enum WorkSheetStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum WorkRecordStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum Role {
+  SUPERADMIN
+  ADMIN
+  USER
+  WORKER
+  MEDICAL_STAFF
+}
+
+enum OfficeType {
+  HEAD_OFFICE
+  FACTORY_OFFICE
+}
+
+enum EvaluationType {
+  REVIEW
+  APPROVAL
+  REJECTION
+}
+
+enum CauseType {
+  MATERIALS
+  TECHNOLOGY
+  QUALITY
+  MACHINERY
+  OTHER
+}
+
+enum AttendanceEventType {
+  LATE
+  EARLY_LEAVE
+  ABSENT
+  REASSIGNMENT
+  BREAK
+  OTHER
+}
+
+enum GatePassReason {
+  BUSINESS
+  DISCIPLINE
+  SICK
+  PERSONAL
+  OTHER
+}
+
+enum GatePassStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  USED
+  CANCELLATION_REQUESTED
+}
+
+enum GatePassApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model PushSubscription {
+  id         String   @id @default(uuid())
+  userId     String
+  endpoint   String
+  p256dhKey  String
+  authKey    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, endpoint])
+  @@index([userId])
+  @@map("push_subscriptions")
+}
