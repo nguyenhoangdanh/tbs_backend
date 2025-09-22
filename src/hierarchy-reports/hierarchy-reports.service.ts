@@ -1836,7 +1836,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
     if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
       // No additional filters for super admin/admin
-    } else if (userRole === Role.USER) {
+    } else if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
       // Check if user has hierarchy viewing permission
       if (user.jobPosition?.position?.canViewHierarchy === true) {
         // Management user can see their department
