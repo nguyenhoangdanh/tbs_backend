@@ -302,19 +302,71 @@ export class HealthcareService {
     symptoms?: string;
     diagnosis?: string;
     notes?: string;
+    prescriptions?: Array<{
+      medicineId: string;
+      quantity: number;
+      dosage: string;
+      duration?: string;
+      instructions?: string;
+      notes?: string;
+    }>;
   }) {
-    return this.prisma.medicalRecord.update({
-      where: { id },
-      data,
-      include: {
-        patient: { select: { firstName: true, lastName: true, employeeCode: true } },
-        doctor: { select: { firstName: true, lastName: true, employeeCode: true } },
-        prescriptions: {
-          include: {
-            medicine: true
+    const { prescriptions, ...recordData } = data;
+
+    // Use transaction to ensure data consistency
+    return this.prisma.$transaction(async (prisma) => {
+      // Update medical record basic info
+      const updatedRecord = await prisma.medicalRecord.update({
+        where: { id },
+        data: recordData
+      });
+
+      // If prescriptions are provided, replace existing ones
+      if (prescriptions && prescriptions.length > 0) {
+        // First, delete existing prescriptions for this medical record
+        await prisma.medicalPrescription.deleteMany({
+          where: { medicalRecordId: id }
+        });
+
+        // Get doctor ID from the medical record
+        const medicalRecord = await prisma.medicalRecord.findUnique({
+          where: { id },
+          select: { doctorId: true }
+        });
+
+        // Create new prescriptions with auto-dispensed status
+        const prescriptionCreateData = prescriptions.map(prescription => ({
+          medicalRecordId: id,
+          medicineId: prescription.medicineId,
+          quantity: prescription.quantity,
+          dosage: prescription.dosage,
+          duration: prescription.duration || null,
+          instructions: prescription.instructions || null,
+          notes: prescription.notes || null,
+          isDispensed: true, // Auto-dispensed when created/updated
+          dispensedAt: new Date(),
+          dispensedBy: medicalRecord?.doctorId || null
+        }));
+
+        await prisma.medicalPrescription.createMany({
+          data: prescriptionCreateData
+        });
+      }
+
+      // Return updated record with full relations
+      return prisma.medicalRecord.findUnique({
+        where: { id },
+        include: {
+          patient: { select: { firstName: true, lastName: true, employeeCode: true } },
+          doctor: { select: { firstName: true, lastName: true, employeeCode: true } },
+          prescriptions: {
+            include: {
+              medicine: true,
+              dispenser: { select: { firstName: true, lastName: true } }
+            }
           }
         }
-      }
+      });
     });
   }
 

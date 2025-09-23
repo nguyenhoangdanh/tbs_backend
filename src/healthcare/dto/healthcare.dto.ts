@@ -79,6 +79,13 @@ export class UpdateMedicalRecordDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'List of prescriptions to update/add', type: [CreatePrescriptionDto] })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePrescriptionDto)
+  prescriptions?: CreatePrescriptionDto[];
 }
 
 export class CreateMedicineDto {
