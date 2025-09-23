@@ -224,7 +224,6 @@ export class HealthcareService {
       orderBy: { visitDate: 'desc' }
     });
 
-
     return {
       patient: {
         firstName: user.firstName,
@@ -234,6 +233,11 @@ export class HealthcareService {
         email: user.email,
         position: user.jobPosition.position.description,
         jobPositionName: user.jobPosition.jobName,
+        department: user.jobPosition.department ? {
+          name: user.jobPosition.department.name,
+          description: user.jobPosition.department.description,
+          officeName: user.jobPosition.department.office.name,
+        } : null,
         group: user.group ? {
           name: user.group?.name || null,
           teamName: user.group?.team?.name || null,
