@@ -448,7 +448,7 @@ export class HierarchyReportsController {
 
     if (year) {
       const parsedYear = parseInt(year, 10);
-      if (!isNaN(parsedYear) && parsedYear >= 2020 && parsedYear <= 2030) {
+      if (!isNaN(parsedYear) && parsedYear >= 2020 && parsedYear <= 2050) {
         filters.year = parsedYear;
       }
     }

@@ -90,6 +90,9 @@ model User {
   lastName           String
   phone              String?
   avatar             String?
+  dateOfBirth        DateTime? @db.Date
+  address            String?
+  sex                Sex?
   role               Role                       @default(USER)
   jobPositionId      String
   isActive           Boolean                    @default(false)
@@ -620,6 +623,12 @@ enum Role {
   USER
   WORKER
   MEDICAL_STAFF
+}
+
+enum Sex {
+  MALE
+  FEMALE
+  OTHER
 }
 
 enum OfficeType {

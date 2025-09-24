@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/commo
 import { PrismaService } from '../common/prisma.service';
 import { Role } from '@prisma/client';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
+import { off } from 'node:process';
 
 interface HierarchyFilters {
   weekNumber?: number;
@@ -73,6 +74,7 @@ export class HierarchyReportsService {
             users: {
               some: { 
                 isActive: true,
+                role: { not: Role.WORKER },
                 ...(await this.buildUserAccessFilter(userId, userRole))
               }
             }
@@ -86,6 +88,7 @@ export class HierarchyReportsService {
             users: {
               some: { 
                 isActive: true,
+                role: { not: Role.WORKER },
                 ...(await this.buildUserAccessFilter(userId, userRole))
               }
             }
@@ -224,6 +227,7 @@ export class HierarchyReportsService {
         users: {
           some: { 
             isActive: true,
+            role: { not: Role.WORKER },
             ...(await this.buildUserAccessFilter(userId, userRole))
           }
         }
@@ -385,7 +389,11 @@ private async buildUserAccessFilter(userId: string, userRole: Role) {
   
   if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { 
+        id: userId,
+        isActive: true,
+        role: { not: Role.WORKER },
+      },
       include: {
         jobPosition: {
           include: {
@@ -461,7 +469,8 @@ private async getSubordinates(manager: any, userRole: Role) {
     return await this.prisma.user.findMany({
       where: {
         isActive: true,
-        id: { not: manager.id }
+        id: { not: manager.id },
+        role: { not: Role.WORKER }
       },
       include: {
         office: true,
@@ -483,12 +492,17 @@ private async getSubordinates(manager: any, userRole: Role) {
   if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
     // Get manager's information with managed departments
     const managerWithDepartments = await this.prisma.user.findUnique({
-      where: { id: manager.id },
+      where: { 
+        id: manager.id,
+        isActive: true,
+        role: { not: Role.WORKER },
+      },
       include: {
         jobPosition: {
           include: {
             position: true,
-            department: true
+            department: true,
+            office: true
           }
         },
         managedDepartments: {
@@ -506,6 +520,7 @@ private async getSubordinates(manager: any, userRole: Role) {
     const managerLevel = position?.level || 999;
     const managerDepartmentId = managerWithDepartments.jobPosition?.departmentId;
     const managedDepartmentIds = managerWithDepartments.managedDepartments.map(md => md.departmentId);
+    const managerOfficeId = managerWithDepartments.jobPosition?.officeId;
 
     // Build subordinates query conditions
     const subordinateConditions = [];
@@ -513,15 +528,36 @@ private async getSubordinates(manager: any, userRole: Role) {
     // 1. Users in directly managed departments
     if (managedDepartmentIds.length > 0) {
       subordinateConditions.push({
+        // users:{
+        //   some: { 
+        //     isActive: true,
+        //     role: { not: Role.WORKER },
+        //   },
+        // },
+        // position: {
+        //    isManagement: false,
+        //    level: { gt: 5 } // Non-management only
+        // },
         jobPosition: {
           departmentId: { in: managedDepartmentIds }
         }
       });
     }
 
+    // Check office constraint
+    // const managerOfficeId = managerWithDepartments.jobPosition?.officeId;
+    // if (!managerOfficeId) {
+    //   return [];
+    // }
+    // // Always include users in the same office
+    // subordinateConditions.push({
+    //   officeId: managerOfficeId
+    // });
+
     // 2. Hierarchical subordinates in same department
     if (managerDepartmentId && position?.canViewHierarchy) {
       const targetLevels = this.getTargetLevelsForManager(managerLevel);
+
       if (targetLevels.length > 0) {
         subordinateConditions.push({
           AND: [
@@ -550,6 +586,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         isActive: true,
         id: { not: manager.id },
+        role: { not: Role.WORKER },
         officeId: managerWithDepartments.officeId, // Same office constraint
         OR: subordinateConditions
       },
@@ -581,7 +618,11 @@ private async getSubordinates(manager: any, userRole: Role) {
 
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { 
+        id: userId,
+        isActive: true,
+        role: { not: Role.WORKER },
+      },
       include: {
         office: true,
         jobPosition: {
@@ -620,6 +661,7 @@ private async getSubordinates(manager: any, userRole: Role) {
               users: {
                 some: { 
                   isActive: true,
+                  role: { not: Role.WORKER },
                   ...(await this.buildUserAccessFilter(userId, userRole))
                 }
               }
@@ -937,7 +979,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   private async getUserOfficeId(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
       select: { officeId: true }
     });
     return user?.officeId || '';
@@ -945,7 +987,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   private async getUserDepartmentId(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
       include: { jobPosition: { select: { departmentId: true } } }
     });
     return user?.jobPosition?.departmentId || '';
@@ -1036,7 +1078,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         },
         // Fix: Get users directly from office relation
         users: {
-          where: { isActive: true },
+          where: { isActive: true, role: { not: Role.WORKER } },
           include: {
             reports: {
               where: { weekNumber, year },
@@ -1182,7 +1224,8 @@ private async getSubordinates(manager: any, userRole: Role) {
         jobPosition: {
           positionId: positionId
         },
-        isActive: true
+        isActive: true,
+        role: { not: Role.WORKER }
       },
       include: {
         office: true,
@@ -1220,7 +1263,7 @@ private async getSubordinates(manager: any, userRole: Role) {
     const { weekNumber, year, limit } = filters;
 
     const user = await this.prisma.user.findUnique({
-      where: { id: targetUserId },
+      where: { id: targetUserId, isActive: true, role: { not: Role.WORKER } },
       include: {
         office: true,
         jobPosition: {
@@ -1347,6 +1390,8 @@ private async getSubordinates(manager: any, userRole: Role) {
     const users = await this.prisma.user.findMany({
       where: {
         ...whereClause,
+        isActive: true,
+        role: { not: Role.WORKER },
         reports: {
           none: {
             weekNumber: currentWeek,
@@ -1374,6 +1419,8 @@ private async getSubordinates(manager: any, userRole: Role) {
     const total = await this.prisma.user.count({
       where: {
         ...whereClause,
+        isActive: true,
+        role: { not: Role.WORKER },
         reports: {
           none: {
             weekNumber: currentWeek,
@@ -1426,6 +1473,8 @@ private async getSubordinates(manager: any, userRole: Role) {
     const users = await this.prisma.user.findMany({
       where: {
         ...whereClause,
+        isActive: true,
+        role: { not: Role.WORKER },
         reports: {
           some: {
             weekNumber: currentWeek,
@@ -1463,6 +1512,8 @@ private async getSubordinates(manager: any, userRole: Role) {
     const total = await this.prisma.user.count({
       where: {
         ...whereClause,
+        isActive: true,
+        role: { not: Role.WORKER },
         reports: {
           some: {
             weekNumber: currentWeek,
@@ -1562,7 +1613,9 @@ private async getSubordinates(manager: any, userRole: Role) {
     const users = await this.prisma.user.findMany({
       where: {
         ...whereClause,
-        ...statusWhere
+        ...statusWhere,
+        isActive: true,
+        role: { not: Role.WORKER },
       },
       include: {
         office: true,
@@ -1816,7 +1869,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   private async buildUserWhereClause(userId: string, userRole: Role, filters: any = {}) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
       include: { 
         office: true, 
         jobPosition: { 
@@ -2024,7 +2077,11 @@ private async getSubordinates(manager: any, userRole: Role) {
   async getReportDetailsForAdmin(userId: string, reportId: string, currentUser: any) {
     // Verify the target user exists
     const targetUser = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { 
+        id: userId,
+        isActive: true,
+        role: { not: Role.WORKER },
+      },
       include: {
         office: true,
         jobPosition: {
@@ -2166,7 +2223,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   async getManagerReports(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
     // Get the manager's information
     const manager = await this.prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
       include: {
         office: true,
         jobPosition: {
@@ -2346,276 +2403,12 @@ private async getSubordinates(manager: any, userRole: Role) {
         return [7];
       case 7: // Nhân viên
         return [];
+      case 8: // Intern or other roles below Nhân viên
+        return [];
       default:
         // Level 0 or undefined should be handled as ADMIN
         return [];
     }
-  }
-
-  /**
-   * Get department filter based on manager level to restrict access to department-specific employees
-   * 
-   * DEPARTMENT RESTRICTIONS:
-   * - Level 1 (Phó Tổng Giám Đốc): Can view across departments (management scope)
-   * - Level 2 (Giám Đốc): Can view across departments within their management area
-   * - Level 3+ (Phó Giám đốc and below): MUST be same department only
-   * 
-   * This ensures that same-level managers (e.g., Trưởng phòng A vs Trưởng phòng B) 
-   * can only see employees in their own department
-   */
-  private getDepartmentFilterForLevel(managerLevel: number, managerDepartmentId: string) {
-    switch (managerLevel) {
-      case 1: // Phó Tổng Giám Đốc
-        // Can view across departments (no department restriction)
-        return {};
-        
-      case 2: // Giám Đốc
-        // Can view across departments in their management area (no strict department restriction)
-        // But this might be configurable based on business rules
-        return {};
-        
-      case 3: // Phó Giám đốc
-      case 4: // Đội trưởng/Trưởng Line/Trưởng phòng  
-      case 5: // Trưởng Team/Trưởng ca
-      case 6: // Tổ trưởng
-        // MUST be same department - this prevents same-level cross-department access
-        return {
-          departmentId: managerDepartmentId
-        };
-        
-      case 7: // Nhân viên
-        // No access anyway
-        return {};
-        
-      default:
-        // Default to department restriction for safety
-        return {
-          departmentId: managerDepartmentId
-        };
-    }
-  }
-
-  /**
-   * Helper method to check if a position is an Assistant role (Trợ lý)
-   */
-  private isAssistantRole(positionName: string): boolean {
-    if (!positionName) return false;
-    const name = positionName.toLowerCase();
-    return name.includes('trợ lý') || name.includes('assistant') || name.includes('tro ly');
-  }
-
-  /**
-   * Get subordinates by level and management scope with precise departmental restrictions
-   */
-  private async getSubordinatesByLevelAndScope(
-    manager: any, 
-    targetLevels: number[], 
-    scope: 'group' | 'team_or_shift' | 'department_or_team' | 'department' | 'management_scope'
-  ) {
-    const managerLevel = manager.jobPosition?.position?.level;
-    const managerDepartmentId = manager.jobPosition?.departmentId;
-    const managerOfficeId = manager.officeId;
-
-    const whereClause: any = {
-      isActive: true,
-      id: { not: manager.id },
-      jobPosition: {
-        position: {
-          level: { in: targetLevels }
-        }
-      }
-    };
-
-    // Apply scope-based filtering
-    switch (scope) {
-      case 'group':
-        // Tổ trưởng: Only view employees in the same department and directly under them
-        whereClause.jobPosition.departmentId = managerDepartmentId;
-        break;
-
-      case 'team_or_shift':
-        // Trưởng Team/Trưởng ca: View employees in same department under their team/shift
-        whereClause.jobPosition.departmentId = managerDepartmentId;
-        break;
-
-      case 'department_or_team':
-        // Đội trưởng/Trưởng Line/Trưởng phòng: View employees in their department or team
-        whereClause.jobPosition.departmentId = managerDepartmentId;
-        break;
-
-      case 'department':
-        // Giám Đốc/Phó Giám đốc: View all employees in their department
-        whereClause.jobPosition.departmentId = managerDepartmentId;
-        break;
-
-      case 'management_scope':
-        // Phó Tổng Giám Đốc: View employees across multiple departments in their management scope
-        // This might encompass multiple departments within the same office or division
-        whereClause.officeId = managerOfficeId;
-        break;
-
-      default:
-        // Default to department scope
-        whereClause.jobPosition.departmentId = managerDepartmentId;
-        break;
-    }
-
-    return await this.prisma.user.findMany({
-      where: whereClause,
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: {
-              include: {
-                office: true
-              }
-            }
-          }
-        }
-      },
-      orderBy: [
-        { jobPosition: { position: { level: 'asc' } } },
-        { jobPosition: { department: { name: 'asc' } } },
-        { lastName: 'asc' },
-        { firstName: 'asc' }
-      ]
-    });
-  }
-
-  /**
-   * Get all subordinates recursively for a management position (Legacy method - kept for compatibility)
-   */
-  private async getAllSubordinatesRecursively(manager: any): Promise<any[]> {
-    const managerLevel = manager.jobPosition?.position?.level;
-    const managerDepartmentId = manager.jobPosition?.departmentId;
-    const managerOfficeId = manager.officeId;
-
-    // Get all users in the same office with lower hierarchy levels
-    const allUsers = await this.prisma.user.findMany({
-      where: {
-        isActive: true,
-        id: { not: manager.id },
-        officeId: managerOfficeId,
-        jobPosition: {
-          position: {
-            level: {
-              gt: managerLevel // Higher level number = lower in hierarchy
-            }
-          }
-        }
-      },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: {
-              include: {
-                office: true
-              }
-            }
-          }
-        }
-      }
-    });
-
-    // Build hierarchy tree to find actual subordinates
-    const subordinates = new Set<string>();
-    const processed = new Set<string>();
-
-    // Start with direct subordinates (same department, next level down)
-    const directSubordinates = allUsers.filter(user => 
-      user.jobPosition?.departmentId === managerDepartmentId &&
-      user.jobPosition?.position?.level === managerLevel + 1
-    );
-
-    // Add direct subordinates
-    directSubordinates.forEach(user => subordinates.add(user.id));
-
-    // Recursively find subordinates of subordinates
-    const findSubordinatesRecursively = (currentManagers: any[]) => {
-      const nextLevelManagers: any[] = [];
-      
-      currentManagers.forEach(currentManager => {
-        if (processed.has(currentManager.id)) return;
-        processed.add(currentManager.id);
-
-        const currentManagerLevel = currentManager.jobPosition?.position?.level;
-        const currentManagerDepartmentId = currentManager.jobPosition?.departmentId;
-
-        // Find users who report to this current manager
-        const reportsTo = allUsers.filter(user => {
-          // Skip if already processed
-          if (subordinates.has(user.id) || processed.has(user.id)) return false;
-
-          const userLevel = user.jobPosition?.position?.level;
-          const userDepartmentId = user.jobPosition?.departmentId;
-
-          // Check if this user could be subordinate to current manager
-          // 1. Must be in same department OR in a sub-department structure
-          // 2. Must be exactly one level below OR in management chain
-          if (userLevel === currentManagerLevel + 1) {
-            // Same department - direct report
-            if (userDepartmentId === currentManagerDepartmentId) return true;
-            
-            // Cross-department management (e.g., Plant Director managing multiple departments)
-            if (currentManager.jobPosition?.position?.isManagement && userLevel > managerLevel) {
-              return true;
-            }
-          }
-
-          return false;
-        });
-
-        // Add these subordinates and prepare them for next iteration
-        reportsTo.forEach(user => {
-          subordinates.add(user.id);
-          // If this user is also a manager, they might have subordinates
-          if (user.jobPosition?.position?.isManagement || user.jobPosition?.position?.canViewHierarchy) {
-            nextLevelManagers.push(user);
-          }
-        });
-      });
-
-      // Continue recursively if there are more managers to process
-      if (nextLevelManagers.length > 0) {
-        findSubordinatesRecursively(nextLevelManagers);
-      }
-    };
-
-    // Start recursive search with direct subordinates who are managers
-    const managerSubordinates = directSubordinates.filter(user => 
-      user.jobPosition?.position?.isManagement || user.jobPosition?.position?.canViewHierarchy
-    );
-    
-    if (managerSubordinates.length > 0) {
-      findSubordinatesRecursively(managerSubordinates);
-    }
-
-    // Return all found subordinates
-    const result = allUsers.filter(user => subordinates.has(user.id));
-
-    // Sort by hierarchy level and name
-    result.sort((a, b) => {
-      const levelA = a.jobPosition?.position?.level || 999;
-      const levelB = b.jobPosition?.position?.level || 999;
-      
-      if (levelA !== levelB) return levelA - levelB;
-      
-      const deptA = a.jobPosition?.department?.name || '';
-      const deptB = b.jobPosition?.department?.name || '';
-      if (deptA !== deptB) return deptA.localeCompare(deptB);
-      
-      const lastNameA = a.lastName || '';
-      const lastNameB = b.lastName || '';
-      if (lastNameA !== lastNameB) return lastNameA.localeCompare(lastNameB);
-      
-      return (a.firstName || '').localeCompare(b.firstName || '');
-    });
-
-    return result;
   }
 
   /**
@@ -2656,140 +2449,6 @@ private async getSubordinates(manager: any, userRole: Role) {
       status
     };
   }
-
-  /**
-   * Group reports by Position and Job Position for frontend display
-   */
-  // private groupReportsByPositionAndJobPosition(subordinates: any[], reports: any[]) {
-  //   const positionGroups = new Map();
-    
-  //   subordinates.forEach(subordinate => {
-  //     const position = subordinate.jobPosition?.position;
-  //     const jobPosition = subordinate.jobPosition;
-  //     const userReport = reports.find(r => r.userId === subordinate.id);
-      
-  //     if (!position || !jobPosition) return;
-      
-  //     // Create position group key
-  //     const positionKey = `${position.id}_${position.name}_${position.level}`;
-      
-  //     if (!positionGroups.has(positionKey)) {
-  //       positionGroups.set(positionKey, {
-  //         position: {
-  //           id: position.id,
-  //           name: position.name,
-  //           level: position.level,
-  //           description: position.description,
-  //           isManagement: position.isManagement
-  //         },
-  //         jobPositionGroups: new Map(),
-  //         totalUsers: 0,
-  //         usersWithReports: 0,
-  //         usersWithCompletedReports: 0
-  //       });
-  //     }
-      
-  //     const positionGroup = positionGroups.get(positionKey);
-      
-  //     // Create job position group key
-  //     // const jobPositionKey = `${jobPosition.id}_${jobPosition.jobName}_${jobPosition.departmentId}`;
-  //     const jobPositionKey = `${jobPosition.id}_${jobPosition.jobName}_${jobPosition.departmentId}`;
-      
-  //     if (!positionGroup.jobPositionGroups.has(jobPositionKey)) {
-  //       positionGroup.jobPositionGroups.set(jobPositionKey, {
-  //         jobPosition: {
-  //           id: jobPosition.id,
-  //           jobName: jobPosition.jobName,
-  //           code: jobPosition.code,
-  //           description: jobPosition.description,
-  //           department: jobPosition.department,
-  //           position: position
-  //         },
-  //         employees: [],
-  //         stats: {
-  //           totalUsers: 0,
-  //           usersWithReports: 0,
-  //           usersWithCompletedReports: 0,
-  //           totalTasks: 0,
-  //           completedTasks: 0,
-  //           taskCompletionRate: 0
-  //         }
-  //       });
-  //     }
-      
-  //     // const jobPositionGroup = positionGroup.jobPositionGroups.get(jobPositionKey);
-  //     const jobPositionGroup = positionGroup.jobPositionGroups.get(jobPositionKey);
-  //     const stats = this.calculateSubordinateStats(subordinate, userReport);
-      
-  //     // Add employee to job position group
-  //     jobPositionGroup.employees.push({
-  //       user: {
-  //         id: subordinate.id,
-  //         employeeCode: subordinate.employeeCode,
-  //         firstName: subordinate.firstName,
-  //         lastName: subordinate.lastName,
-  //         fullName: `${subordinate.firstName} ${subordinate.lastName}`,
-  //         email: subordinate.email,
-  //         office: subordinate.office,
-  //         jobPosition: subordinate.jobPosition
-  //       },
-  //       report: userReport ? {
-  //         id: userReport.id,
-  //         weekNumber: userReport.weekNumber,
-  //         year: userReport.year,
-  //         isCompleted: userReport.isCompleted,
-  //         isLocked: userReport.isLocked,
-  //         createdAt: userReport.createdAt.toISOString(),
-  //         updatedAt: userReport.updatedAt.toISOString(),
-  //         tasks: userReport.tasks
-  //       } : null,
-  //       stats
-  //     });
-      
-  //     // Update job position group stats
-  //     jobPositionGroup.stats.totalUsers++;
-  //     if (stats.hasReport) {
-  //       jobPositionGroup.stats.usersWithReports++;
-  //       jobPositionGroup.stats.totalTasks += stats.totalTasks;
-  //       jobPositionGroup.stats.completedTasks += stats.completedTasks;
-  //     }
-  //     if (stats.isCompleted) {
-  //       jobPositionGroup.stats.usersWithCompletedReports++;
-  //     }
-      
-  //     // Update position group stats
-  //     positionGroup.totalUsers++;
-  //     if (stats.hasReport) {
-  //       positionGroup.usersWithReports++;
-  //     }
-  //     if (stats.isCompleted) {
-  //       positionGroup.usersWithCompletedReports++;
-  //     }
-  //   });
-
-  //   // Convert Maps to Arrays and calculate final stats
-  //   const result = Array.from(positionGroups.values()).map(positionGroup => {
-  //     const jobPositions = Array.from(positionGroup.jobPositionGroups.values()).map((jobPositionGroup: any) => {
-  //       // Calculate task completion rate for job position
-  //       jobPositionGroup.stats.taskCompletionRate = jobPositionGroup.stats.totalTasks > 0
-  //         ? Math.round((jobPositionGroup.stats.completedTasks / jobPositionGroup.stats.totalTasks) * 100)
-  //         : 0;
-        
-  //       return jobPositionGroup;
-  //     });
-
-  //     return {
-  //       ...positionGroup,
-  //       jobPositions: jobPositions.sort((a: any, b: any) => a.jobPosition.jobName.localeCompare(b.jobPosition.jobName))
-  //     };
-  //   });
-
-  //   // Sort by position level
-  //   return result.sort((a, b) => a.position.level - b.position.level);
-  // }
-
-
-  // Thay thế logic trong hàm groupReportsByPositionAndJobPosition
   
   
   private groupReportsByPositionAndJobPosition(subordinates: any[], reports: any[]) {
@@ -2956,45 +2615,6 @@ private async getSubordinates(manager: any, userRole: Role) {
   // Sort by position level (TGĐ -> PTGĐ -> GĐ -> ... -> NV)
   return result.sort((a, b) => a.position.level - b.position.level);
 }
-  
-  /**
-   * Calculate manager summary from grouped data
-   */
-  // private calculateManagerSummaryFromGrouped(groupedData: any[]) {
-  //   let totalSubordinates = 0;
-  //   let subordinatesWithReports = 0;
-  //   let subordinatesWithCompletedReports = 0;
-  //   let totalTasks = 0;
-  //   let totalCompletedTasks = 0;
-
-  //   groupedData.forEach(positionGroup => {
-  //     totalSubordinates += positionGroup.totalUsers;
-  //     subordinatesWithReports += positionGroup.usersWithReports;
-  //     subordinatesWithCompletedReports += positionGroup.usersWithCompletedReports;
-
-  //     positionGroup.jobPositions.forEach((jobPositionGroup: any) => {
-  //       totalTasks += jobPositionGroup.stats.totalTasks;
-  //       totalCompletedTasks += jobPositionGroup.stats.completedTasks;
-  //     });
-  //   });
-
-  //   const reportSubmissionRate = totalSubordinates > 0 ? Math.round((subordinatesWithReports / totalSubordinates) * 100) : 0;
-  //   const overallTaskCompletionRate = totalTasks > 0 ? Math.round((totalCompletedTasks / totalTasks) * 100) : 0;
-
-  //   return {
-  //     totalSubordinates,
-  //     subordinatesWithReports,
-  //     subordinatesWithoutReports: totalSubordinates - subordinatesWithReports,
-  //     subordinatesWithCompletedReports,
-  //     subordinatesWithIncompleteReports: subordinatesWithReports - subordinatesWithCompletedReports,
-  //     reportSubmissionRate,
-  //     totalTasks,
-  //     totalCompletedTasks,
-  //     overallTaskCompletionRate,
-  //     totalPositions: groupedData.length,
-  //     totalJobPositions: groupedData.reduce((sum, pg) => sum + pg.jobPositions.length, 0)
-  //   };
-  // }
 
   /**
  * Calculate manager summary from grouped data
@@ -3042,69 +2662,5 @@ private calculateManagerSummaryFromGrouped(groupedData: any[]) {
     totalJobPositions
   };
 }
-
-  /**
-   * Calculate manager summary statistics (Legacy method - kept for compatibility)
-   */
-  private calculateManagerSummary(subordinateReports: any[]) {
-    const totalSubordinates = subordinateReports.length;
-    const subordinatesWithReports = subordinateReports.filter(sr => sr.stats.hasReport).length;
-    const subordinatesWithoutReports = totalSubordinates - subordinatesWithReports;
-    const subordinatesWithCompletedReports = subordinateReports.filter(sr => sr.stats.isCompleted).length;
-    const subordinatesWithIncompleteReports = subordinateReports.filter(sr => 
-      sr.stats.hasReport && !sr.stats.isCompleted
-    ).length;
-
-    const totalTasks = subordinateReports.reduce((sum, sr) => sum + sr.stats.totalTasks, 0);
-    const totalCompletedTasks = subordinateReports.reduce((sum, sr) => sum + sr.stats.completedTasks, 0);
-    const overallTaskCompletionRate = totalTasks > 0 ? Math.round((totalCompletedTasks / totalTasks) * 100) : 0;
-
-    const reportSubmissionRate = totalSubordinates > 0 ? Math.round((subordinatesWithReports / totalSubordinates) * 100) : 0;
-
-    // Group by department
-    const departmentBreakdown = new Map();
-    subordinateReports.forEach(sr => {
-      const deptId = sr.user.jobPosition?.department?.id;
-      const deptName = sr.user.jobPosition?.department?.name;
-      
-      if (deptId && deptName) {
-        if (!departmentBreakdown.has(deptId)) {
-          departmentBreakdown.set(deptId, {
-            id: deptId,
-            name: deptName,
-            totalSubordinates: 0,
-            subordinatesWithReports: 0,
-            subordinatesWithCompletedReports: 0,
-            totalTasks: 0,
-            completedTasks: 0
-          });
-        }
-        
-        const dept = departmentBreakdown.get(deptId);
-        dept.totalSubordinates++;
-        dept.totalTasks += sr.stats.totalTasks;
-        dept.completedTasks += sr.stats.completedTasks;
-        
-        if (sr.stats.hasReport) {
-          dept.subordinatesWithReports++;
-        }
-        if (sr.stats.isCompleted) {
-          dept.subordinatesWithCompletedReports++;
-        }
-      }
-    });
-
-    return {
-      totalSubordinates,
-      subordinatesWithReports,
-      subordinatesWithoutReports,
-      subordinatesWithCompletedReports,
-      subordinatesWithIncompleteReports,
-      reportSubmissionRate,
-      totalTasks,
-      totalCompletedTasks,
-      overallTaskCompletionRate,
-      departmentBreakdown: Array.from(departmentBreakdown.values())
-    };
-  }
+ 
 }

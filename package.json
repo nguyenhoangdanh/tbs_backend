@@ -26,6 +26,7 @@
     "local:create:worker": "dotenv -e .env.local -- npx tsx prisma/create-sample-workers.ts",
     "local:sample:manufacturing": "dotenv -e .env.local -- npx tsx prisma/sample-manufacturing-data.ts",
     "local:import:medicine": "dotenv -e .env.local -- npx tsx prisma/seed-medicines.ts",
+    "local:import:worker": "dotenv -e .env.local -- npx tsx prisma/import-worker.ts",
     "prod:setup": "dotenv -e .env.production -- npx prisma generate && dotenv -e .env.production -- npx prisma migrate deploy",
     "prod:import": "dotenv -e .env.production -- npx tsx prisma/import-all-data-from-excel.ts",
     "prod:seed": "dotenv -e .env.production -- npx tsx prisma/seed.ts",
