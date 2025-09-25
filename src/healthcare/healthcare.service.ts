@@ -471,31 +471,45 @@ export class HealthcareService {
     const start = startDate ? new Date(startDate) : this.getDefaultStartDate(period);
     const end = endDate ? new Date(endDate) : new Date();
 
-    const prescriptions = await this.prisma.medicalPrescription.findMany({
-      where: {
-        createdAt: {
-          gte: start,
-          lte: end
-        }
-      },
-      include: {
-        medicine: {
-          select: {
-            id: true,
-            name: true,
-            dosage: true,
-            frequency: true,
-            instructions: true,
-            units: true
+    // Get prescriptions and medical records data
+    const [prescriptions, medicalRecords] = await Promise.all([
+      this.prisma.medicalPrescription.findMany({
+        where: {
+          createdAt: {
+            gte: start,
+            lte: end
           }
         },
-        medicalRecord: {
-          select: {
-            visitDate: true
+        include: {
+          medicine: {
+            select: {
+              id: true,
+              name: true,
+              dosage: true,
+              frequency: true,
+              instructions: true,
+              units: true
+            }
+          },
+          medicalRecord: {
+            select: {
+              visitDate: true
+            }
           }
         }
-      }
-    });
+      }),
+      this.prisma.medicalRecord.findMany({
+        where: {
+          visitDate: {
+            gte: start,
+            lte: end
+          }
+        },
+        include: {
+          prescriptions: true
+        }
+      })
+    ]);
 
     // Group by medicine and calculate totals
     const medicineStats = prescriptions.reduce((acc, prescription) => {
@@ -523,6 +537,9 @@ export class HealthcareService {
       return acc;
     }, {} as any);
 
+    // Generate weekly/daily trends for chart
+    const trends = this.generateTrendsData(medicalRecords, prescriptions, period, start, end);
+
     return {
       period,
       dateRange: { start, end },
@@ -530,8 +547,82 @@ export class HealthcareService {
       totalPrescriptions: prescriptions.length,
       medicineStatistics: Object.values(medicineStats).sort((a: any, b: any) => 
         b.totalQuantity - a.totalQuantity
-      )
+      ),
+      // Add trends data for charts
+      weeklyTrends: trends,
+      medicineDistribution: Object.values(medicineStats).slice(0, 10) // Top 10 medicines
     };
+  }
+
+  // Helper method to generate trends data for charts
+  private generateTrendsData(medicalRecords: any[], prescriptions: any[], period: 'day' | 'week' | 'month', start: Date, end: Date) {
+    const trends = [];
+    const limit = period === 'day' ? 7 : period === 'week' ? 4 : 12;
+    
+    for (let i = limit - 1; i >= 0; i--) {
+      let periodStart: Date, periodEnd: Date, label: string;
+      
+      switch (period) {
+        case 'day': {
+          periodStart = new Date(end.getTime() - (i * 24 * 60 * 60 * 1000));
+          periodStart.setHours(0, 0, 0, 0);
+          periodEnd = new Date(periodStart);
+          periodEnd.setHours(23, 59, 59, 999);
+          // Format: T2, T3, T4, T5, T6, T7, CN
+          const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+          label = dayNames[periodStart.getDay()];
+          break;
+        }
+          
+        case 'week': {
+          const weekStart = new Date(end.getTime() - (i * 7 * 24 * 60 * 60 * 1000));
+          const dayOfWeek = weekStart.getDay();
+          periodStart = new Date(weekStart.getTime() - (dayOfWeek * 24 * 60 * 60 * 1000));
+          periodStart.setHours(0, 0, 0, 0);
+          periodEnd = new Date(periodStart.getTime() + (6 * 24 * 60 * 60 * 1000));
+          periodEnd.setHours(23, 59, 59, 999);
+          const weekNumber = Math.ceil(periodStart.getDate() / 7);
+          label = `Tuần ${weekNumber}`;
+          break;
+        }
+          
+        case 'month': {
+          const monthDate = new Date(end.getFullYear(), end.getMonth() - i, 1);
+          periodStart = monthDate;
+          periodEnd = new Date(end.getFullYear(), end.getMonth() - i + 1, 0);
+          periodEnd.setHours(23, 59, 59, 999);
+          label = `T${monthDate.getMonth() + 1}`;
+          break;
+        }
+          
+        default:
+          continue;
+      }
+
+      // Count examinations in this period
+      const periodExaminations = medicalRecords.filter(record => {
+        const visitDate = new Date(record.visitDate);
+        return visitDate >= periodStart && visitDate <= periodEnd;
+      }).length;
+
+      // Count medicines dispensed in this period
+      const periodPrescriptions = prescriptions.filter(p => {
+        const createdAt = new Date(p.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      });
+
+      const medicinesDispensed = periodPrescriptions.reduce((sum, p) => sum + p.quantity, 0);
+
+      trends.push({
+        day: label,
+        period: label,
+        examinations: periodExaminations,
+        medicines: medicinesDispensed,
+        date: periodStart.toISOString()
+      });
+    }
+
+    return trends;
   }
 
   async getPrescriptionTrends(period: 'day' | 'week' | 'month' = 'month', limit: number = 12) {
@@ -623,20 +714,35 @@ export class HealthcareService {
     };
   }
 
-  // Helper methods for date calculations
+  // Helper methods for date calculations - from working old code
   private getDefaultStartDate(period: 'day' | 'week' | 'month', limit?: number): Date {
     const now = new Date();
-    const multiplier = limit || (period === 'day' ? 30 : period === 'week' ? 12 : 12);
     
     switch (period) {
-      case 'day':
-        return new Date(now.getTime() - (multiplier * 24 * 60 * 60 * 1000));
-      case 'week':
-        return new Date(now.getTime() - (multiplier * 7 * 24 * 60 * 60 * 1000));
-      case 'month':
-        return new Date(now.getFullYear(), now.getMonth() - multiplier, 1);
+      case 'day': {
+        // Today only
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        return today;
+      }
+      case 'week': {
+        // This week (Monday to Sunday)
+        const startOfWeek = new Date();
+        const dayOfWeek = startOfWeek.getDay();
+        const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+        startOfWeek.setDate(startOfWeek.getDate() - daysToMonday);
+        startOfWeek.setHours(0, 0, 0, 0);
+        return startOfWeek;
+      }
+      case 'month': {
+        // This month
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        return startOfMonth;
+      }
       default:
-        return new Date(now.getFullYear(), now.getMonth() - 12, 1);
+        return new Date(now.getFullYear(), now.getMonth() - 1, 1);
     }
   }
 
@@ -706,4 +812,6 @@ export class HealthcareService {
     const pastDaysOfYear = (date.getTime() - firstDayOfYear.getTime()) / 86400000;
     return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
   }
+
+
 }
