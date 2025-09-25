@@ -231,6 +231,8 @@ export class HealthcareService {
         employeeCode: user.employeeCode,
         phone: user.phone,
         email: user.email,
+        sex: user.sex,
+        dateOfBirth: user.dateOfBirth,
         position: user.jobPosition.position.description,
         jobPositionName: user.jobPosition.jobName,
         department: user.jobPosition.department ? {
