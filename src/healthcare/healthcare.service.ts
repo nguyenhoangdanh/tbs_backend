@@ -538,7 +538,7 @@ export class HealthcareService {
     }, {} as any);
 
     // Generate weekly/daily trends for chart
-    const trends = this.generateTrendsData(medicalRecords, prescriptions, period, start, end);
+    const trends = await this.generateTrendsData(medicalRecords, prescriptions, period, start, end);
 
     return {
       period,
@@ -555,7 +555,7 @@ export class HealthcareService {
   }
 
   // Helper method to generate trends data for charts
-  private generateTrendsData(medicalRecords: any[], prescriptions: any[], period: 'day' | 'week' | 'month', start: Date, end: Date) {
+  private async generateTrendsData(medicalRecords: any[], prescriptions: any[], period: 'day' | 'week' | 'month', start: Date, end: Date) {
     const trends = [];
     const limit = period === 'day' ? 7 : period === 'week' ? 4 : 12;
     
@@ -564,6 +564,8 @@ export class HealthcareService {
       
       switch (period) {
         case 'day': {
+          // For day filter: show last 7 days for weekly context in chart
+          // But main statistics are still filtered by today only (handled in main method)
           periodStart = new Date(end.getTime() - (i * 24 * 60 * 60 * 1000));
           periodStart.setHours(0, 0, 0, 0);
           periodEnd = new Date(periodStart);
@@ -599,19 +601,52 @@ export class HealthcareService {
           continue;
       }
 
-      // Count examinations in this period
-      const periodExaminations = medicalRecords.filter(record => {
-        const visitDate = new Date(record.visitDate);
-        return visitDate >= periodStart && visitDate <= periodEnd;
-      }).length;
+            // For day filter, we need to fetch data for each day from database
+      // For week/month, use filtered data as before
+      let periodExaminations = 0;
+      let medicinesDispensed = 0;
 
-      // Count medicines dispensed in this period
-      const periodPrescriptions = prescriptions.filter(p => {
-        const createdAt = new Date(p.createdAt);
-        return createdAt >= periodStart && createdAt <= periodEnd;
-      });
+      if (period === 'day') {
+        // Fetch actual data for this specific day from database
+        const [dayRecords, dayPrescriptions] = await Promise.all([
+          this.prisma.medicalRecord.count({
+            where: {
+              visitDate: {
+                gte: periodStart,
+                lte: periodEnd
+              }
+            }
+          }),
+          this.prisma.medicalPrescription.aggregate({
+            where: {
+              createdAt: {
+                gte: periodStart,
+                lte: periodEnd
+              }
+            },
+            _sum: {
+              quantity: true
+            }
+          })
+        ]);
+        
+        periodExaminations = dayRecords;
+        medicinesDispensed = dayPrescriptions._sum.quantity || 0;
+      } else {
+        // For week/month: use filtered data as before
+        const filteredRecords = medicalRecords.filter(record => {
+          const visitDate = new Date(record.visitDate);
+          return visitDate >= periodStart && visitDate <= periodEnd;
+        });
 
-      const medicinesDispensed = periodPrescriptions.reduce((sum, p) => sum + p.quantity, 0);
+        const filteredPrescriptions = prescriptions.filter(p => {
+          const createdAt = new Date(p.createdAt);
+          return createdAt >= periodStart && createdAt <= periodEnd;
+        });
+
+        periodExaminations = filteredRecords.length;
+        medicinesDispensed = filteredPrescriptions.reduce((sum, p) => sum + p.quantity, 0);
+      }
 
       trends.push({
         day: label,
