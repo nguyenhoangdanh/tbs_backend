@@ -468,8 +468,17 @@ export class HealthcareService {
     startDate?: string,
     endDate?: string
   ) {
-    const start = startDate ? new Date(startDate) : this.getDefaultStartDate(period);
     const end = endDate ? new Date(endDate) : new Date();
+    // Set end date to end of day to include all data from that day
+    if (endDate) {
+      end.setHours(23, 59, 59, 999);
+    }
+    
+    const start = startDate ? new Date(startDate) : this.getDefaultStartDate(period, end);
+    // Set start date to beginning of day
+    if (startDate) {
+      start.setHours(0, 0, 0, 0);
+    }
 
     // Get prescriptions and medical records data
     const [prescriptions, medicalRecords] = await Promise.all([
@@ -540,17 +549,41 @@ export class HealthcareService {
     // Generate weekly/daily trends for chart
     const trends = await this.generateTrendsData(medicalRecords, prescriptions, period, start, end);
 
+    // Get accurate medicine distribution for the entire period
+    const medicineDistribution = await this.getTopPrescribedMedicines(period, 10, startDate, endDate);
+    
+    // Get accurate total counts for the entire period  
+    const totalStats = await Promise.all([
+      this.prisma.medicalPrescription.groupBy({
+        by: ['medicineId'],
+        where: {
+          createdAt: {
+            gte: start,
+            lte: end
+          }
+        }
+      }),
+      this.prisma.medicalPrescription.count({
+        where: {
+          createdAt: {
+            gte: start,
+            lte: end
+          }
+        }
+      })
+    ]);
+
     return {
       period,
       dateRange: { start, end },
-      totalMedicines: Object.keys(medicineStats).length,
-      totalPrescriptions: prescriptions.length,
+      totalMedicines: totalStats[0].length, // Accurate count of unique medicines
+      totalPrescriptions: totalStats[1], // Accurate count of total prescriptions
       medicineStatistics: Object.values(medicineStats).sort((a: any, b: any) => 
         b.totalQuantity - a.totalQuantity
       ),
       // Add trends data for charts
       weeklyTrends: trends,
-      medicineDistribution: Object.values(medicineStats).slice(0, 10) // Top 10 medicines
+      medicineDistribution: medicineDistribution.topMedicines // Use accurate data from getTopPrescribedMedicines
     };
   }
 
@@ -588,7 +621,7 @@ export class HealthcareService {
         }
           
         case 'week': {
-          // For week filter: show individual days of the current week (last 7 days)
+          // For week filter: show individual days from end date backwards (last 7 days from endDate)
           periodStart = new Date(end.getTime() - (i * 24 * 60 * 60 * 1000));
           periodStart.setHours(0, 0, 0, 0);
           periodEnd = new Date(periodStart);
@@ -708,8 +741,17 @@ export class HealthcareService {
     startDate?: string,
     endDate?: string
   ) {
-    const start = startDate ? new Date(startDate) : this.getDefaultStartDate(period);
     const end = endDate ? new Date(endDate) : new Date();
+    // Set end date to end of day to include all data from that day
+    if (endDate) {
+      end.setHours(23, 59, 59, 999);
+    }
+    
+    const start = startDate ? new Date(startDate) : this.getDefaultStartDate(period, end);
+    // Set start date to beginning of day
+    if (startDate) {
+      start.setHours(0, 0, 0, 0);
+    }
 
     const result = await this.prisma.medicalPrescription.groupBy({
       by: ['medicineId'],
@@ -762,19 +804,19 @@ export class HealthcareService {
   }
 
   // Helper methods for date calculations - from working old code
-  private getDefaultStartDate(period: 'day' | 'week' | 'month', limit?: number): Date {
-    const now = new Date();
+  private getDefaultStartDate(period: 'day' | 'week' | 'month', endDate?: Date | number): Date {
+    const now = endDate ? (endDate instanceof Date ? endDate : new Date()) : new Date();
     
     switch (period) {
       case 'day': {
-        // Today only
-        const today = new Date();
+        // Use endDate as today
+        const today = new Date(now);
         today.setHours(0, 0, 0, 0);
         return today;
       }
       case 'week': {
-        // This week (Monday to Sunday)
-        const startOfWeek = new Date();
+        // Start of week based on endDate
+        const startOfWeek = new Date(now);
         const dayOfWeek = startOfWeek.getDay();
         const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
         startOfWeek.setDate(startOfWeek.getDate() - daysToMonday);
@@ -782,8 +824,8 @@ export class HealthcareService {
         return startOfWeek;
       }
       case 'month': {
-        // This month
-        const startOfMonth = new Date();
+        // Start of month based on endDate
+        const startOfMonth = new Date(now);
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
         return startOfMonth;
