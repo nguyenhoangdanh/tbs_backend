@@ -557,41 +557,53 @@ export class HealthcareService {
   // Helper method to generate trends data for charts
   private async generateTrendsData(medicalRecords: any[], prescriptions: any[], period: 'day' | 'week' | 'month', start: Date, end: Date) {
     const trends = [];
-    const limit = period === 'day' ? 7 : period === 'week' ? 4 : 12;
     
-    for (let i = limit - 1; i >= 0; i--) {
+    // For day filter with custom date range, calculate actual days between start and end
+    let limit: number;
+    if (period === 'day') {
+      const diffTime = end.getTime() - start.getTime();
+      const diffDays = Math.ceil(diffTime / (24 * 60 * 60 * 1000));
+      limit = Math.min(diffDays + 1, 31); // Max 31 days, +1 to include both start and end dates
+    } else {
+      limit = period === 'week' ? 7 : 12;
+    }
+    
+    for (let i = 0; i < limit; i++) {
       let periodStart: Date, periodEnd: Date, label: string;
       
       switch (period) {
         case 'day': {
-          // For day filter: show last 7 days for weekly context in chart
-          // But main statistics are still filtered by today only (handled in main method)
-          periodStart = new Date(end.getTime() - (i * 24 * 60 * 60 * 1000));
+          // For day filter: show days from start to end date
+          periodStart = new Date(start.getTime() + (i * 24 * 60 * 60 * 1000));
           periodStart.setHours(0, 0, 0, 0);
           periodEnd = new Date(periodStart);
           periodEnd.setHours(23, 59, 59, 999);
-          // Format: T2, T3, T4, T5, T6, T7, CN
-          const dayNames = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
-          label = dayNames[periodStart.getDay()];
+          
+          // Skip if this date is beyond end date
+          if (periodStart > end) break;
+          
+          // Format: 10/9, 12/9, etc.
+          label = `${periodStart.getDate()}/${periodStart.getMonth() + 1}`;
           break;
         }
           
         case 'week': {
-          const weekStart = new Date(end.getTime() - (i * 7 * 24 * 60 * 60 * 1000));
-          const dayOfWeek = weekStart.getDay();
-          periodStart = new Date(weekStart.getTime() - (dayOfWeek * 24 * 60 * 60 * 1000));
+          // For week filter: show individual days of the current week (last 7 days)
+          periodStart = new Date(end.getTime() - (i * 24 * 60 * 60 * 1000));
           periodStart.setHours(0, 0, 0, 0);
-          periodEnd = new Date(periodStart.getTime() + (6 * 24 * 60 * 60 * 1000));
+          periodEnd = new Date(periodStart);
           periodEnd.setHours(23, 59, 59, 999);
-          const weekNumber = Math.ceil(periodStart.getDate() / 7);
-          label = `Tuần ${weekNumber}`;
+          
+          // Format: 23/9, 24/9, 25/9, etc. (same as day format)
+          label = `${periodStart.getDate()}/${periodStart.getMonth() + 1}`;
           break;
         }
           
         case 'month': {
-          const monthDate = new Date(end.getFullYear(), end.getMonth() - i, 1);
+          const reverseIndex = limit - 1 - i; // Reverse index for month counting
+          const monthDate = new Date(end.getFullYear(), end.getMonth() - reverseIndex, 1);
           periodStart = monthDate;
-          periodEnd = new Date(end.getFullYear(), end.getMonth() - i + 1, 0);
+          periodEnd = new Date(end.getFullYear(), end.getMonth() - reverseIndex + 1, 0);
           periodEnd.setHours(23, 59, 59, 999);
           label = `T${monthDate.getMonth() + 1}`;
           break;
@@ -606,8 +618,8 @@ export class HealthcareService {
       let periodExaminations = 0;
       let medicinesDispensed = 0;
 
-      if (period === 'day') {
-        // Fetch actual data for this specific day from database
+      if (period === 'day' || period === 'week') {
+        // Fetch actual data for this specific day from database (both day and week use daily data)
         const [dayRecords, dayPrescriptions] = await Promise.all([
           this.prisma.medicalRecord.count({
             where: {
@@ -633,7 +645,7 @@ export class HealthcareService {
         periodExaminations = dayRecords;
         medicinesDispensed = dayPrescriptions._sum.quantity || 0;
       } else {
-        // For week/month: use filtered data as before
+        // For month: use filtered data as before
         const filteredRecords = medicalRecords.filter(record => {
           const visitDate = new Date(record.visitDate);
           return visitDate >= periodStart && visitDate <= periodEnd;
@@ -805,7 +817,31 @@ export class HealthcareService {
           periodStart.setHours(0, 0, 0, 0);
           periodEnd = new Date(periodStart.getTime() + (6 * 24 * 60 * 60 * 1000));
           periodEnd.setHours(23, 59, 59, 999);
-          label = `Week ${this.getWeekNumber(periodStart)}/${periodStart.getFullYear()}`;
+          
+          // Calculate week number correctly within the month
+          const firstDayOfMonth = new Date(periodStart.getFullYear(), periodStart.getMonth(), 1);
+          const firstDayWeekday = firstDayOfMonth.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+          
+          // Find the date of the first Monday in the month
+          let firstMondayDate;
+          if (firstDayWeekday === 1) {
+            firstMondayDate = 1; // Month starts on Monday
+          } else if (firstDayWeekday === 0) {
+            firstMondayDate = 2; // Month starts on Sunday, first Monday is 2nd
+          } else {
+            firstMondayDate = 8 - firstDayWeekday + 1; // Days until next Monday
+          }
+          
+          // Calculate which week this Monday belongs to
+          const mondayDate = periodStart.getDate();
+          let weekNumber;
+          if (mondayDate < firstMondayDate) {
+            weekNumber = 1; // Before first Monday = week 1
+          } else {
+            weekNumber = Math.floor((mondayDate - firstMondayDate) / 7) + 2; // Weeks after first Monday
+          }
+          
+          label = `Tuần ${weekNumber} T${periodStart.getMonth() + 1}`;
           break;
         }
           
