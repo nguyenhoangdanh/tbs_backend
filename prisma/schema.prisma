@@ -537,10 +537,11 @@ model GatePassApproval {
 model Medicine {
   id                String                 @id @default(uuid())
   name              String                 @unique
-  dosage            String                 // Liều dùng: ví dụ "2 viên", "1 thìa"
-  frequency         String                 // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
-  instructions      String                 // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
-  units             String                 // Đơn vị: "viên", "chai", "lọ"
+  strength          String?                // Hàm lượng
+  dosage            String?                // Liều dùng: ví dụ "2 viên", "1 thìa"
+  frequency         String?                 // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
+  instructions      String?                // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
+  units             String?                 // Đơn vị: "viên", "chai", "lọ"
   isActive          Boolean                @default(true)
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
@@ -579,8 +580,9 @@ model MedicalPrescription {
   medicalRecordId String
   medicineId      String
   quantity        Int           // Số lượng cấp
-  dosage          String        // Liều dùng: 2 viên/ngày
-  duration        String?       // Thời gian dùng: 7 ngày
+  dosage          String?       // Liều dùng: "2 viên/lần", "1 thìa"
+  strength        String?       // Hàm lượng: 500mg
+  duration        String?       // Thời gian dùng: 2 ngày
   instructions    String?       // Hướng dẫn sử dụng
   notes           String?       // Ghi chú
   isDispensed     Boolean       @default(false) // Đã cấp thuốc chưa

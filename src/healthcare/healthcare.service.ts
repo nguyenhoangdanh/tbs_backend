@@ -135,10 +135,11 @@ export class HealthcareService {
 
   async createMedicine(data: { 
     name: string; 
-    dosage: string; 
-    frequency: string; 
-    instructions: string; 
-    units: string;
+    dosage?: string;
+    strength?: string; 
+    frequency?: string; 
+    instructions?: string; 
+    units?: string;
   }) {
     return this.prisma.medicine.create({
       data
@@ -147,7 +148,8 @@ export class HealthcareService {
 
   async updateMedicine(id: string, data: { 
     name?: string; 
-    dosage?: string; 
+    dosage?: string;
+    strength?: string; 
     frequency?: string; 
     instructions?: string; 
     units?: string;
@@ -260,7 +262,7 @@ export class HealthcareService {
     prescriptions?: Array<{
       medicineId: string;
       quantity: number;
-      dosage: string;
+      dosage?: string;
       duration?: string;
       instructions?: string;
       notes?: string;
@@ -307,7 +309,7 @@ export class HealthcareService {
     prescriptions?: Array<{
       medicineId: string;
       quantity: number;
-      dosage: string;
+      dosage?: string;
       duration?: string;
       instructions?: string;
       notes?: string;
@@ -400,7 +402,8 @@ export class HealthcareService {
     prescriptions?: Array<{
       medicineId: string;
       quantity: number;
-      dosage: string;
+      dosage?: string;
+      strength?: string;
       duration?: string;
       instructions?: string;
       notes?: string;

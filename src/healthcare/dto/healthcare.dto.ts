@@ -12,9 +12,10 @@ export class CreatePrescriptionDto {
   @IsNumber()
   quantity: number;
 
-  @ApiProperty({ description: 'Dosage instruction' })
+  @ApiPropertyOptional({ description: 'Dosage instruction' })
+  @IsOptional()
   @IsString()
-  dosage: string;
+  dosage?: string;
 
   @ApiPropertyOptional({ description: 'Duration of treatment' })
   @IsOptional()
@@ -93,21 +94,30 @@ export class CreateMedicineDto {
   @IsString()
   name: string;
 
-  @ApiProperty({ description: 'Dosage instruction' })
+  @ApiPropertyOptional({ description: 'Dosage instruction' })
+  @IsOptional()
   @IsString()
-  dosage: string;
+  dosage?: string;
 
-  @ApiProperty({ description: 'Usage frequency' })
+  @ApiPropertyOptional({ description: 'Medicine strength' })
+  @IsOptional()
   @IsString()
-  frequency: string;
+  strength?: string;
 
-  @ApiProperty({ description: 'Usage instructions' })
+  @ApiPropertyOptional({ description: 'Usage frequency' })
+  @IsOptional()
   @IsString()
-  instructions: string;
+  frequency?: string;
 
-  @ApiProperty({ description: 'Units of the medicine, e.g., "tablet", "bottle"' })
+  @ApiPropertyOptional({ description: 'Usage instructions' })
+  @IsOptional()
   @IsString()
-  units: string;
+  instructions?: string;
+
+  @ApiPropertyOptional({ description: 'Units of the medicine, e.g., "tablet", "bottle"' })
+  @IsOptional()
+  @IsString()
+  units?: string;
 }
 
 export class UpdateMedicineDto {
@@ -120,6 +130,11 @@ export class UpdateMedicineDto {
   @IsOptional()
   @IsString()
   dosage?: string;
+
+  @ApiPropertyOptional({ description: 'Medicine strength' })
+  @IsOptional()
+  @IsString()
+  strength?: string;
 
   @ApiPropertyOptional({ description: 'Usage frequency' })
   @IsOptional()
