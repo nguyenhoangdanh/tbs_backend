@@ -503,6 +503,7 @@ export class HealthcareService {
               name: true,
               dosage: true,
               frequency: true,
+              strength: true,
               instructions: true,
               units: true
             }
