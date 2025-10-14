@@ -581,6 +581,7 @@ model MedicalPrescription {
   medicineId      String
   quantity        Int           // Số lượng cấp
   dosage          String?       // Liều dùng: "2 viên/lần", "1 thìa"
+  frequency       String?       // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
   strength        String?       // Hàm lượng: 500mg
   duration        String?       // Thời gian dùng: 2 ngày
   instructions    String?       // Hướng dẫn sử dụng

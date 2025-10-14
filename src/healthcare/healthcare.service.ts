@@ -310,6 +310,7 @@ export class HealthcareService {
       medicineId: string;
       quantity: number;
       dosage?: string;
+      frequency?: string;
       duration?: string;
       instructions?: string;
       notes?: string;
@@ -346,6 +347,7 @@ export class HealthcareService {
           dosage: prescription.dosage,
           duration: prescription.duration || null,
           instructions: prescription.instructions || null,
+          frequency: prescription.frequency || null,
           notes: prescription.notes || null,
           isDispensed: true, // Auto-dispensed when created/updated
           dispensedAt: new Date(),
@@ -403,6 +405,7 @@ export class HealthcareService {
       medicineId: string;
       quantity: number;
       dosage?: string;
+      frequency?: string;
       strength?: string;
       duration?: string;
       instructions?: string;
@@ -426,6 +429,7 @@ export class HealthcareService {
       quantity: prescription.quantity,
       dosage: prescription.dosage,
       duration: prescription.duration || null,
+      frequency: prescription.frequency || null,
       instructions: prescription.instructions || null,
       notes: prescription.notes || null,
       isDispensed: true, // Auto-dispensed when created

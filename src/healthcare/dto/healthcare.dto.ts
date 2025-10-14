@@ -17,6 +17,11 @@ export class CreatePrescriptionDto {
   @IsString()
   dosage?: string;
 
+  @ApiPropertyOptional({ description: 'Frequency of intake' })
+  @IsOptional()
+  @IsString()
+  frequency?: string;
+
   @ApiPropertyOptional({ description: 'Duration of treatment' })
   @IsOptional()
   @IsString()
@@ -34,7 +39,7 @@ export class CreatePrescriptionDto {
 }
 
 export class CreateMedicalRecordDto {
-  @ApiProperty({ description: 'Patient employee code' })
+  @ApiProperty({ description: 'Patiennt employee code' })
   @IsString()
   patientEmployeeCode: string;
 
