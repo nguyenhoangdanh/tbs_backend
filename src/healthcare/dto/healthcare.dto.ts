@@ -47,6 +47,11 @@ export class CreateMedicalRecordDto {
   @IsString()
   doctorId: string;
 
+  @ApiPropertyOptional({ description: 'Visit date - defaults to current date if not provided' })
+  @IsOptional()
+  @IsString()
+  visitDate?: string;
+
   @ApiPropertyOptional({ description: 'Patient symptoms' })
   @IsOptional()
   @IsString()
@@ -71,6 +76,11 @@ export class CreateMedicalRecordDto {
 }
 
 export class UpdateMedicalRecordDto {
+  @ApiPropertyOptional({ description: 'Visit date' })
+  @IsOptional()
+  @IsString()
+  visitDate?: string;
+
   @ApiPropertyOptional({ description: 'Patient symptoms' })
   @IsOptional()
   @IsString()

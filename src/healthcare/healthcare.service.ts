@@ -256,6 +256,7 @@ export class HealthcareService {
   async createMedicalRecord(data: {
     patientId: string;
     doctorId: string;
+    visitDate?: string;
     symptoms?: string;
     diagnosis?: string;
     notes?: string;
@@ -286,6 +287,7 @@ export class HealthcareService {
     return this.prisma.medicalRecord.create({
       data: {
         ...recordData,
+        visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
         prescriptions: prescriptionCreateData.length > 0 ? {
           create: prescriptionCreateData
         } : undefined
@@ -303,6 +305,7 @@ export class HealthcareService {
   }
 
   async updateMedicalRecord(id: string, data: {
+    visitDate?: string;
     symptoms?: string;
     diagnosis?: string;
     notes?: string;
@@ -320,10 +323,16 @@ export class HealthcareService {
 
     // Use transaction to ensure data consistency
     return this.prisma.$transaction(async (prisma) => {
+      // Prepare update data with visitDate handling
+      const updateData = {
+        ...recordData,
+        ...(data.visitDate && { visitDate: new Date(data.visitDate) })
+      };
+
       // Update medical record basic info
       const updatedRecord = await prisma.medicalRecord.update({
         where: { id },
-        data: recordData
+        data: updateData
       });
 
       // If prescriptions are provided, replace existing ones
@@ -398,6 +407,7 @@ export class HealthcareService {
   async createMedicalRecordByEmployeeCode(data: {
     patientEmployeeCode: string;
     doctorId: string;
+    visitDate?: string;
     symptoms?: string;
     diagnosis?: string;
     notes?: string;
@@ -441,6 +451,7 @@ export class HealthcareService {
       data: {
         ...recordData,
         patientId: patient.id,
+        visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
         prescriptions: prescriptionCreateData.length > 0 ? {
           create: prescriptionCreateData
         } : undefined
