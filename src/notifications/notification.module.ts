@@ -13,7 +13,7 @@ import { EmailService } from 'src/common/email.service';
     ConfigModule,
     JwtModule.register({
       secret: process.env.JWT_SECRET,
-      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN || '1d' },
+      signOptions: { (expiresIn: process.env.JWT_EXPIRES_IN || '1d') as any },
     }),
   ],
   controllers: [NotificationController],
