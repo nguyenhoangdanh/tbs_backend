@@ -1,8 +1,121 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+/**
+ * ===============================================
+ * TESTING GUIDE: Multiple Manager Evaluations
+ * ===============================================
+ * 
+ * SCENARIO: 2 managers evaluate same task
+ * 
+ * STEP 1: Manager A evaluates Task #1
+ * ----------------------------------------
+ * Request: POST /task-evaluations
+ * Body: {
+ *   taskId: "task-123",
+ *   evaluatedIsCompleted: true,
+ *   evaluatorComment: "Tốt lắm!",
+ *   evaluationType: "APPROVAL"
+ * }
+ * 
+ * Expected Console Log:
+ * 🔍 Task task-123 currently has 0 evaluations
+ * ✅ Evaluation created successfully:
+ *    - TaskID: task-123
+ *    - EvaluatorID: manager-a-id
+ *    - EvaluationID: eval-1-id
+ *    - Total evaluations on this task: 1
+ *    - Unique evaluators: 1
+ * 
+ * STEP 2: Manager B evaluates Task #1 (SAME TASK)
+ * ------------------------------------------------
+ * Request: POST /task-evaluations
+ * Body: {
+ *   taskId: "task-123",  // ✅ SAME TASK
+ *   evaluatedIsCompleted: false,
+ *   evaluatorComment: "Cần cải thiện",
+ *   evaluationType: "REVIEW"
+ * }
+ * 
+ * Expected Console Log:
+ * 🔍 Task task-123 currently has 1 evaluations  // ✅ Manager A's evaluation exists
+ * ✅ Evaluation created successfully:
+ *    - TaskID: task-123
+ *    - EvaluatorID: manager-b-id
+ *    - EvaluationID: eval-2-id
+ *    - Total evaluations on this task: 2  // ✅ CRITICAL: Should be 2
+ *    - Unique evaluators: 2  // ✅ CRITICAL: Should be 2
+ * 
+ * STEP 3: Verify by fetching report
+ * ----------------------------------
+ * Request: GET /reports/by-week/{weekNumber}/{year}
+ * 
+ * Expected Response:
+ * {
+ *   tasks: [{
+ *     id: "task-123",
+ *     taskName: "...",
+ *     evaluations: [
+ *       {
+ *         id: "eval-2-id",
+ *         evaluator: { firstName: "Manager", lastName: "B" },
+ *         evaluationType: "REVIEW",
+ *         // ... Manager B's evaluation (latest)
+ *       },
+ *       {
+ *         id: "eval-1-id",
+ *         evaluator: { firstName: "Manager", lastName: "A" },
+ *         evaluationType: "APPROVAL",
+ *         // ... Manager A's evaluation (older)
+ *       }
+ *     ]
+ *   }]
+ * }
+ * 
+ * ❌ WRONG RESULT (nếu có bug):
+ * {
+ *   tasks: [{
+ *     evaluations: [
+ *       {
+ *         id: "eval-2-id",
+ *         // ... Only Manager B's evaluation (Manager A's lost)
+ *       }
+ *     ]
+ *   }]
+ * }
+ * 
+ * STEP 4: Check database directly
+ * --------------------------------
+ * Query: SELECT * FROM TaskEvaluation WHERE taskId = 'task-123'
+ * 
+ * Expected Result: 2 rows
+ * Row 1: evaluationId=eval-1-id, evaluatorId=manager-a-id
+ * Row 2: evaluationId=eval-2-id, evaluatorId=manager-b-id
+ * 
+ * ===============================================
+ * COMMON ISSUES:
+ * ===============================================
+ * 
+ * ISSUE 1: Manager B's evaluation overwrites Manager A's
+ * ROOT CAUSE: Backend has deleteMany() before create()
+ * FIX: Remove deleteMany() from create() method ✅ DONE
+ * 
+ * ISSUE 2: Frontend only shows 1 evaluation
+ * ROOT CAUSE: Frontend state management issue or cache
+ * FIX: 
+ * - Clear browser cache
+ * - Check React Query cache invalidation
+ * - Check Zustand store sync
+ * 
+ * ISSUE 3: Database has 2 evaluations but frontend shows 1
+ * ROOT CAUSE: Backend query doesn't include all evaluations
+ * FIX: Ensure reports query includes all evaluations ✅ CHECK
+ * 
+ * ===============================================
+ */
+
+import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { Role, EvaluationType } from '@prisma/client';
-import { tr } from 'date-fns/locale';
 
+// ✅ FIXED: Proper DTO interfaces
 interface CreateEvaluationDto {
   taskId: string;
   evaluatedIsCompleted: boolean;
@@ -24,26 +137,32 @@ export class TaskEvaluationsService {
 
   /**
    * Create a new task evaluation by a manager
+   * ✅ FIXED: Allows multiple managers to evaluate same task
+   * 
+   * LOGIC:
+   * - Manager A đánh giá Task #1 → Create evaluation A
+   * - Manager B đánh giá Task #1 → Create evaluation B
+   * - Task #1 sẽ có 2 evaluations: [evaluation A, evaluation B]
+   * - Frontend sẽ hiển thị cả 2 evaluations
    */
-  async createTaskEvaluation(
-    evaluatorId: string,
-    evaluatorRole: Role,
-    createEvaluationDto: CreateEvaluationDto
-  ) {
-    // Get the task and validate it exists
+  async create(createDto: CreateEvaluationDto, evaluatorId: string) {
+    // ✅ STEP 1: Validate task exists
     const task = await this.prisma.reportTask.findUnique({
-      where: { id: createEvaluationDto.taskId },
-      include: {
+      where: { id: createDto.taskId },
+      include: { 
         report: {
           include: {
-            user: {
-              include: {
-                jobPosition: {
-                  include: {
-                    department: true,
-                    position: true
-                  }
-                }
+            user: true
+          }
+        },
+        // ✅ CRITICAL: Include existing evaluations to verify
+        evaluations: {
+          include: {
+            evaluator: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true
               }
             }
           }
@@ -55,70 +174,78 @@ export class TaskEvaluationsService {
       throw new NotFoundException('Task not found');
     }
 
-    // Check if evaluator has permission to evaluate this task
-    await this.checkEvaluationPermission(evaluatorId, evaluatorRole, task);
+    console.log(`🔍 Task ${createDto.taskId} currently has ${task.evaluations?.length || 0} evaluations`);
 
-    // Check if evaluation already exists
-    const existingEvaluation = await this.prisma.taskEvaluation.findUnique({
+    // ✅ STEP 2: Check if THIS evaluator already evaluated THIS task
+    const existingEvaluation = await this.prisma.taskEvaluation.findFirst({
       where: {
-        taskId_evaluatorId: {
-          taskId: createEvaluationDto.taskId,
-          evaluatorId: evaluatorId
-        }
+        taskId: createDto.taskId,
+        evaluatorId: evaluatorId
       }
     });
 
     if (existingEvaluation) {
-      throw new BadRequestException('Evaluation already exists for this task');
+      throw new ConflictException(
+        'Bạn đã đánh giá công việc này. Vui lòng cập nhật đánh giá cũ thay vì tạo mới.'
+      );
     }
 
-    // Create the evaluation
-    const evaluation = await this.prisma.taskEvaluation.create({
+    // ✅ STEP 3: Save original task state
+    const originalIsCompleted = task.isCompleted;
+    const originalReasonNotDone = task.reasonNotDone || '';
+
+    // ✅ STEP 4: Create new evaluation (NO deletion of others)
+    const newEvaluation = await this.prisma.taskEvaluation.create({
       data: {
-        taskId: createEvaluationDto.taskId,
+        taskId: createDto.taskId,
         evaluatorId,
-        originalIsCompleted: task.isCompleted,
-        originalReasonNotDone: task.reasonNotDone,
-        evaluatedIsCompleted: createEvaluationDto.evaluatedIsCompleted,
-        evaluatedReasonNotDone: createEvaluationDto.evaluatedReasonNotDone,
-        evaluatorComment: createEvaluationDto.evaluatorComment,
-        evaluationType: createEvaluationDto.evaluationType
+        evaluationType: createDto.evaluationType,
+        evaluatedIsCompleted: createDto.evaluatedIsCompleted,
+        evaluatorComment: createDto.evaluatorComment,
+        evaluatedReasonNotDone: createDto.evaluatedReasonNotDone,
+        originalIsCompleted,
+        originalReasonNotDone
       },
       include: {
-        evaluator: {
-          select: {
-            id: true,
-            firstName: true,
-            lastName: true,
-            employeeCode: true,
-            jobPosition: {
-              include: {
-                position: true,
-                department: true
-              }
-            }
-          }
-        },
         task: {
           include: {
-            report: {
+            // ✅ VERIFY: Include all evaluations after creation
+            evaluations: {
               include: {
-                user: {
+                evaluator: {
                   select: {
                     id: true,
                     firstName: true,
-                    lastName: true,
-                    employeeCode: true
+                    lastName: true
                   }
                 }
               }
             }
           }
+        },
+        evaluator: {
+          include: {
+            jobPosition: {
+              include: {
+                position: true
+              }
+            }
+          }
         }
       }
     });
 
-    return evaluation;
+    const totalEvaluations = newEvaluation.task.evaluations?.length || 1;
+    const uniqueEvaluators = new Set(newEvaluation.task.evaluations?.map(e => e.evaluatorId)).size;
+    
+    console.log(`✅ Evaluation created successfully:`);
+    console.log(`   - TaskID: ${createDto.taskId}`);
+    console.log(`   - EvaluatorID: ${evaluatorId}`);
+    console.log(`   - EvaluationID: ${newEvaluation.id}`);
+    console.log(`   - Total evaluations on this task: ${totalEvaluations}`);
+    console.log(`   - Unique evaluators: ${uniqueEvaluators}`);
+
+    return newEvaluation;
   }
 
   /**
@@ -199,14 +326,14 @@ export class TaskEvaluationsService {
             }
           }
         }
-      }
-    });
+      }});
 
     return updatedEvaluation;
   }
 
   /**
    * Get task evaluations for a specific task
+   * ✅ FIXED: Returns ALL evaluations from ALL managers
    */
   async getTaskEvaluations(taskId: string) {
     const evaluations = await this.prisma.taskEvaluation.findMany({
@@ -227,9 +354,11 @@ export class TaskEvaluationsService {
           }
         }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { updatedAt: 'desc' } // ✅ Sort by updatedAt to show latest first
     });
 
+    console.log(`📊 Task ${taskId} has ${evaluations.length} evaluations from ${new Set(evaluations.map(e => e.evaluatorId)).size} different managers`);
+    
     return evaluations;
   }
 

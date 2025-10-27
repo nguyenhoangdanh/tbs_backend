@@ -154,7 +154,7 @@ export class ReportsService {
 
     // Use transaction for atomic updates
     return this.prisma.$transaction(async (prisma) => {
-      // Update tasks if new tasks are provided - PRESERVE EVALUATIONS
+      // Update tasks if new tasks are provided - PRESERVE ALL EVALUATIONS
       if (updateReportDto.tasks) {
         // Validate: require reasonNotDone if not completed
         for (const task of updateReportDto.tasks) {
@@ -168,19 +168,29 @@ export class ReportsService {
           }
         }
         
-        // Store existing evaluations before deleting tasks
+        // ✅ FIX: Store existing evaluations with TASK ID mapping (not task name)
+        // This ensures we preserve ALL evaluations from ALL managers
         const existingTasksWithEvaluations = await prisma.reportTask.findMany({
           where: { reportId },
           include: {
-            evaluations: true,
+            evaluations: {
+              orderBy: { createdAt: 'asc' } // Preserve order
+            },
           },
         });
 
-        // Create a map of task name -> evaluations for preservation
-        const evaluationsMap = new Map();
-        existingTasksWithEvaluations.forEach(task => {
+        // ✅ FIX: Create a map of OLD taskId -> NEW task index for matching
+        // Match by position in array (assumes same order during update)
+        const taskIdToIndexMap = new Map();
+        existingTasksWithEvaluations.forEach((task, index) => {
+          taskIdToIndexMap.set(task.id, index);
+        });
+
+        // Store evaluations grouped by original task index
+        const evaluationsByIndex = new Map();
+        existingTasksWithEvaluations.forEach((task, index) => {
           if (task.evaluations.length > 0) {
-            evaluationsMap.set(task.taskName, task.evaluations);
+            evaluationsByIndex.set(index, task.evaluations);
           }
         });
 
@@ -189,9 +199,11 @@ export class ReportsService {
           where: { reportId },
         });
 
-        // Create new tasks
+        // Create new tasks and restore ALL evaluations
         if (updateReportDto.tasks.length > 0) {
-          for (const taskDto of updateReportDto.tasks) {
+          for (let index = 0; index < updateReportDto.tasks.length; index++) {
+            const taskDto = updateReportDto.tasks[index];
+            
             // Create the new task
             const newTask = await prisma.reportTask.create({
               data: {
@@ -208,9 +220,11 @@ export class ReportsService {
               },
             });
 
-            // Restore evaluations if they existed for this task name
-            const savedEvaluations = evaluationsMap.get(taskDto.taskName);
+            // ✅ FIX: Restore ALL evaluations from ALL managers for this task position
+            const savedEvaluations = evaluationsByIndex.get(index);
             if (savedEvaluations && savedEvaluations.length > 0) {
+              console.log(`🔄 Restoring ${savedEvaluations.length} evaluations for task #${index + 1}: "${taskDto.taskName}"`);
+              
               for (const evaluation of savedEvaluations) {
                 await prisma.taskEvaluation.create({
                   data: {
@@ -223,6 +237,7 @@ export class ReportsService {
                     evaluatorComment: evaluation.evaluatorComment,
                     evaluationType: evaluation.evaluationType,
                     createdAt: evaluation.createdAt, // Preserve original creation time
+                    updatedAt: evaluation.updatedAt, // Preserve update time
                   },
                 });
               }

@@ -2,6 +2,20 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { group } from 'node:console';
 
+/*
+ * HEALTHCARE TERMINOLOGY CLARIFICATION:
+ * - Medical Record = Đơn thuốc (1 lần khám bệnh của bệnh nhân)
+ * - Medical Prescription = Loại thuốc cụ thể (1 loại thuốc trong 1 đơn thuốc)
+ * 
+ * VD: 1 đơn thuốc (medical record) có thể có nhiều loại thuốc (prescriptions)
+ * Bệnh nhân A khám 1 lần → 1 đơn thuốc (medical record)
+ * Được kê 3 loại thuốc → 3 medicine prescriptions
+ * 
+ * Dashboard Stats:
+ * - totalMedicalRecords = Tổng số đơn thuốc (số lần khám)
+ * - totalPrescriptions = Tổng số loại thuốc được kê (có thể > số đơn thuốc)
+ */
+
 @Injectable()
 export class HealthcareService {
   constructor(private prisma: PrismaService) {}
@@ -9,58 +23,56 @@ export class HealthcareService {
   // Dashboard statistics for healthcare
   async getDashboardStats() {
     const [
+      uniquePatients,
       totalMedicalRecords,
       totalMedicines,
       todayRecords,
       totalPrescriptions,
-      dispensedPrescriptions,
-      pendingPrescriptions,
-      uniquePatients,
+      dispensedPrescriptions
     ] = await Promise.all([
-      // Total medical records
+      // Unique patients who have medical records
+      this.prisma.medicalRecord.findMany({
+        select: { patientId: true },
+        distinct: ['patientId']
+      }).then(records => records.length),
+
+      // Total medical records (đây chính là "tổng số đơn thuốc")
       this.prisma.medicalRecord.count(),
-      
-      // Total medicines
-      this.prisma.medicine.count({ where: { isActive: true } }),
-      
-      // Today's medical records
+
+      // Total active medicines
+      this.prisma.medicine.count({
+        where: { isActive: true }
+      }),
+
+      // Today's medical records (đơn thuốc hôm nay)
       this.prisma.medicalRecord.count({
         where: {
-          visitDate: {
+          createdAt: {
             gte: new Date(new Date().setHours(0, 0, 0, 0)),
             lt: new Date(new Date().setHours(23, 59, 59, 999))
           }
         }
       }),
 
-      // Total prescriptions
+      // Total medicine prescriptions (tổng số loại thuốc được kê)
       this.prisma.medicalPrescription.count(),
 
-      // Dispensed prescriptions
+      // Dispensed medicine prescriptions (số loại thuốc đã cấp)
       this.prisma.medicalPrescription.count({
         where: { isDispensed: true }
-      }),
-
-      // Pending prescriptions
-      this.prisma.medicalPrescription.count({
-        where: { isDispensed: false }
-      }),
-
-      // Unique patients count
-      this.prisma.medicalRecord.groupBy({
-        by: ['patientId'],
-        _count: { patientId: true }
-      }).then(result => result.length)
+      })
     ]);
+
+    const pendingPrescriptions = totalPrescriptions - dispensedPrescriptions;
 
     return {
       uniquePatients,
-      totalMedicalRecords,
+      totalMedicalRecords, // Tổng số đơn thuốc (số lần khám)
       totalMedicines,
       todayRecords,
-      totalPrescriptions,
+      totalPrescriptions, // Tổng số loại thuốc được kê
       dispensedPrescriptions,
-      pendingPrescriptions,
+      pendingPrescriptions
     };
   }
 

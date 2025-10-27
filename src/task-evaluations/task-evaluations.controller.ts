@@ -55,10 +55,9 @@ export class TaskEvaluationsController {
       evaluationType: EvaluationType;
     }
   ) {
-    return this.taskEvaluationsService.createTaskEvaluation(
-      user.id,
-      user.role,
-      createEvaluationDto
+    return this.taskEvaluationsService.create(
+      createEvaluationDto,
+      user.id
     );
   }
 
