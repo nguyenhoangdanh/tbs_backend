@@ -1,13 +1,16 @@
 import { IsInt, IsPositive } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-export class UpdateWorkerTargetDto {
+/**
+ * DTO for updating worker's planned output per hour
+ */
+export class UpdateWorkerPlannedOutputDto {
   @ApiProperty({
-    example: 15,
-    description: 'New target output per hour for this worker',
+    example: 180,
+    description: 'SLKH - New sản lượng kế hoạch/giờ for this worker',
     minimum: 1,
   })
   @IsInt()
   @IsPositive()
-  targetOutputPerHour: number;
+  plannedOutput: number;
 }

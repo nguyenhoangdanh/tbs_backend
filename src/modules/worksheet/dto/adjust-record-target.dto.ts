@@ -1,12 +1,15 @@
 import { IsInt, Min } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
+/**
+ * DTO for adjusting planned output for a specific hour
+ */
 export class AdjustRecordTargetDto {
   @ApiProperty({
-    example: 150,
-    description: 'Expected output total for the group in this hour',
+    example: 180,
+    description: 'SLKH - Sản lượng kế hoạch mới cho giờ này',
   })
   @IsInt()
   @Min(0)
-  expectedOutputTotal: number;
+  plannedOutput: number;
 }

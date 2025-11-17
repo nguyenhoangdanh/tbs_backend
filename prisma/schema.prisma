@@ -110,9 +110,9 @@ model User {
   group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
   jobPosition        JobPosition                @relation(fields: [jobPositionId], references: [id])
   office             Office                     @relation(fields: [officeId], references: [id])
-  workerWorkSheets   WorkSheetItem[]            @relation("WorkerWorkSheets")
-  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater")
-  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator")
+  myWorkSheets       WorkSheet[]                @relation("WorkerWorkSheets") // Phiếu công của mình
+  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater") // Nhóm trưởng cập nhật
+  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator") // Quản trị line tạo
   pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
 
 
@@ -288,17 +288,17 @@ model Group {
 }
 
 model Product {
-  id             String                @id @default(uuid())
-  name           String
-  code           String                @unique
-  description    String?
-  imageUrl       String?
-  isActive       Boolean               @default(true)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  processes      ProductProcess[]
-  itemRecords    WorkSheetItemRecord[]
-  worksheetItems WorkSheetItem[]
+  id                  String                @id @default(uuid())
+  name                String
+  code                String                @unique
+  description         String?
+  imageUrl            String?
+  isActive            Boolean               @default(true)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  processes           ProductProcess[]
+  worksheets          WorkSheet[]
+  worksheetRecordItems WorkSheetRecordItem[]
 
   @@index([isActive])
   @@index([code])
@@ -306,16 +306,16 @@ model Product {
 }
 
 model Process {
-  id             String                @id @default(uuid())
-  name           String
-  code           String                @unique
-  description    String?
-  isActive       Boolean               @default(true)
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  products       ProductProcess[]
-  itemRecords    WorkSheetItemRecord[]
-  worksheetItems WorkSheetItem[]
+  id                   String                @id @default(uuid())
+  name                 String
+  code                 String                @unique
+  description          String?
+  isActive             Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  products             ProductProcess[]
+  worksheets           WorkSheet[]
+  worksheetRecordItems WorkSheetRecordItem[]
 
   @@index([isActive])
   @@index([code])
@@ -343,71 +343,58 @@ model ProductProcess {
 }
 
 model WorkSheet {
-  id                  String            @id @default(uuid())
-  date                DateTime          @db.Date
-  factoryId           String
-  groupId             String
-  shiftType           ShiftType
-  totalWorkers        Int
-  targetOutputPerHour Int
-  createdById         String
-  status              WorkSheetStatus   @default(ACTIVE)
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  attendanceEvents    AttendanceEvent[]
-  items               WorkSheetItem[]
-  records             WorkSheetRecord[]
-  createdBy           User              @relation("WorkSheetCreator", fields: [createdById], references: [id])
-  factory             Factory           @relation(fields: [factoryId], references: [id])
-  group               Group             @relation(fields: [groupId], references: [id])
+  id               String            @id @default(uuid())
+  date             DateTime          @db.Date
+  workerId         String            // Công nhân - mỗi phiếu chỉ cho 1 người
+  groupId          String            // Nhóm của công nhân
+  factoryId        String            // Nhà máy
+  productId        String            // Mã túi xách
+  processId        String            // Công đoạn (chặt, lạng, dán,...)
+  shiftType        ShiftType         // Ca làm việc
+  plannedOutput    Int               // SLKH - Sản lượng kế hoạch/giờ của công nhân này
+  createdById      String            // Người tạo (quản trị line)
+  status           WorkSheetStatus   @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  attendanceEvents AttendanceEvent[]
+  records          WorkSheetRecord[] // Records theo giờ
+  createdBy        User              @relation("WorkSheetCreator", fields: [createdById], references: [id])
+  factory          Factory           @relation(fields: [factoryId], references: [id])
+  group            Group             @relation(fields: [groupId], references: [id])
+  worker           User              @relation("WorkerWorkSheets", fields: [workerId], references: [id])
+  product          Product           @relation(fields: [productId], references: [id])
+  process          Process           @relation(fields: [processId], references: [id])
 
-  @@unique([date, groupId])
+  @@unique([date, workerId]) // Mỗi công nhân chỉ có 1 phiếu/ngày
   @@index([date])
-  @@index([factoryId])
+  @@index([workerId])
   @@index([groupId])
+  @@index([factoryId])
   @@index([createdById])
   @@index([status])
+  @@index([productId, processId])
   @@map("worksheets")
 }
 
-model WorkSheetItem {
-  id                  String                @id @default(uuid())
-  worksheetId         String
-  workerId            String
-  productId           String
-  processId           String
-  targetOutputPerHour Int?
-  isActive            Boolean               @default(true)
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  records             WorkSheetItemRecord[]
-  process             Process               @relation(fields: [processId], references: [id])
-  product             Product               @relation(fields: [productId], references: [id])
-  worker              User                  @relation("WorkerWorkSheets", fields: [workerId], references: [id])
-  worksheet           WorkSheet             @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
-
-  @@unique([worksheetId, workerId])
-  @@index([worksheetId])
-  @@index([workerId])
-  @@index([productId, processId])
-  @@map("worksheet_items")
-}
+// Xóa model WorkSheetItem vì không cần thiết nữa
+// Phiếu công đoạn đã là cá nhân rồi
 
 model WorkSheetRecord {
-  id                  String                 @id @default(uuid())
-  worksheetId         String
-  workHour            Int
-  startTime           DateTime               @db.Time(6)
-  endTime             DateTime               @db.Time(6)
-  expectedOutputTotal Int?
-  status              WorkRecordStatus       @default(PENDING)
-  updatedById         String?
-  createdAt           DateTime               @default(now())
-  updatedAt           DateTime               @updatedAt
-  itemRecords         WorkSheetItemRecord[]
-  causes              WorkSheetRecordCause[]
-  updatedBy           User?                  @relation("WorkRecordUpdater", fields: [updatedById], references: [id])
-  worksheet           WorkSheet              @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+  id             String                  @id @default(uuid())
+  worksheetId    String
+  workHour       Int                     // Giờ thứ mấy trong ca (1-8, 1-9.5, 1-11)
+  startTime      DateTime                @db.Time(6)
+  endTime        DateTime                @db.Time(6)
+  plannedOutput  Int?                    // SLKH tổng - Sản lượng kế hoạch của giờ này
+  actualOutput   Int?                    // SLTH tổng - Tổng sản lượng thực hiện (sum of items)
+  status         WorkRecordStatus        @default(PENDING)
+  updatedById    String?                 // Nhóm trưởng nhập liệu
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  items          WorkSheetRecordItem[]   // Chi tiết các mã túi làm trong giờ này
+  causes         WorkSheetRecordCause[]  // Nguyên nhân (VT, CN, CL, MM, khác)
+  updatedBy      User?                   @relation("WorkRecordUpdater", fields: [updatedById], references: [id])
+  worksheet      WorkSheet               @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
 
   @@unique([worksheetId, workHour])
   @@index([worksheetId])
@@ -416,30 +403,30 @@ model WorkSheetRecord {
   @@map("worksheet_records")
 }
 
-model WorkSheetItemRecord {
-  id           String          @id @default(uuid())
-  recordId     String
-  itemId       String
-  entryIndex   Int             @default(1)
-  productId    String?
-  processId    String?
-  targetOutput Int?
-  actualOutput Int             @default(0)
-  variance     Int?
-  note         String?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  item         WorkSheetItem   @relation(fields: [itemId], references: [id], onDelete: Cascade)
-  process      Process?        @relation(fields: [processId], references: [id])
-  product      Product?        @relation(fields: [productId], references: [id])
-  record       WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+model WorkSheetRecordItem {
+  id             String          @id @default(uuid())
+  recordId       String
+  entryIndex     Int             @default(1)           // Thứ tự entry (1, 2, 3,... nếu làm nhiều mã túi)
+  productId      String                                // Mã túi cho entry này
+  processId      String                                // Công đoạn cho entry này
+  plannedOutput  Int?                                  // SLKH - Sản lượng kế hoạch của entry này
+  actualOutput   Int             @default(0)           // SLTH - Sản lượng thực hiện của entry này
+  efficiencyRate Float?                                // % = (actualOutput / plannedOutput) * 100
+  note           String?                               // Ghi chú cho entry này
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  product        Product         @relation(fields: [productId], references: [id])
+  process        Process         @relation(fields: [processId], references: [id])
+  record         WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
 
-  @@unique([recordId, itemId, entryIndex])
+  @@unique([recordId, entryIndex])
   @@index([recordId])
-  @@index([itemId])
   @@index([productId, processId])
-  @@map("worksheet_item_records")
+  @@map("worksheet_record_items")
 }
+
+// Xóa model WorkSheetItemRecord - không cần thiết
+// Thông tin đã có trong WorkSheetRecord
 
 model WorkSheetRecordCause {
   id        String          @id @default(uuid())

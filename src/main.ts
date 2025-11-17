@@ -8,6 +8,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { PrismaService } from './common/prisma.service';
 import { webcrypto } from 'node:crypto';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { IoAdapter } from '@nestjs/platform-socket.io';
 
 // Polyfill for crypto in Node.js environment
 if (!globalThis.crypto) {
@@ -87,6 +88,10 @@ async function bootstrap() {
     // Essential: Enable shutdown hooks for proper cleanup
     app.enableShutdownHooks();
 
+    // ⭐ Enable WebSocket adapter for Socket.io
+    app.useWebSocketAdapter(new IoAdapter(app));
+    console.log('✅ WebSocket adapter enabled');
+
     // Essential middleware
     app.use(cookieParser());
     app.set('trust proxy', 1);
@@ -101,6 +106,7 @@ async function bootstrap() {
           'https://weeklyreport-orpin.vercel.app',
           'https://weeklyreportsystem-mu.vercel.app', 
           'http://localhost:3000',
+          'http://10.45.2.125:3000',
           'http://127.0.0.1:3000'
         ];
 

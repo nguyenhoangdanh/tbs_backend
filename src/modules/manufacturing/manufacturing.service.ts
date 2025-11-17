@@ -78,7 +78,8 @@ export class ManufacturingService {
         _count: {
           select: {
             processes: true,
-            worksheetItems: true,
+            worksheetRecordItems: true, // Fixed: worksheetItems -> worksheetRecordItems
+            worksheets: true,
           },
         },
       },
@@ -129,7 +130,8 @@ export class ManufacturingService {
         _count: {
           select: {
             processes: true,
-            worksheetItems: true,
+            worksheetRecordItems: true, // Fixed: worksheetItems -> worksheetRecordItems
+            worksheets: true,
           },
         },
       },
@@ -139,9 +141,9 @@ export class ManufacturingService {
       throw new NotFoundException('Product not found');
     }
 
-    if (product._count.processes > 0 || product._count.worksheetItems > 0) {
+    if (product._count.processes > 0 || product._count.worksheetRecordItems > 0 || product._count.worksheets > 0) {
       throw new ConflictException(
-        'Cannot delete product with existing processes or worksheet items'
+        'Cannot delete product with existing processes, worksheets, or worksheet items'
       );
     }
 
@@ -206,7 +208,8 @@ export class ManufacturingService {
         _count: {
           select: {
             products: true,
-            worksheetItems: true,
+            worksheetRecordItems: true, // Fixed: worksheetItems -> worksheetRecordItems
+            worksheets: true,
           },
         },
       },
@@ -257,7 +260,8 @@ export class ManufacturingService {
         _count: {
           select: {
             products: true,
-            worksheetItems: true,
+            worksheetRecordItems: true, // Fixed: worksheetItems -> worksheetRecordItems
+            worksheets: true,
           },
         },
       },
@@ -267,9 +271,9 @@ export class ManufacturingService {
       throw new NotFoundException('Process not found');
     }
 
-    if (process._count.products > 0 || process._count.worksheetItems > 0) {
+    if (process._count.products > 0 || process._count.worksheetRecordItems > 0 || process._count.worksheets > 0) {
       throw new ConflictException(
-        'Cannot delete process with existing products or worksheet items'
+        'Cannot delete process with existing products, worksheets, or worksheet items'
       );
     }
 

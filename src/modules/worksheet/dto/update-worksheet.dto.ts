@@ -1,10 +1,12 @@
-import { PartialType } from '@nestjs/swagger';
-import { IsEnum, IsOptional, IsInt, IsPositive } from 'class-validator';
+import { IsEnum, IsOptional, IsInt, IsPositive, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { CreateWorksheetDto } from './create-worksheet.dto';
 import { WorkSheetStatus } from '@prisma/client';
 
-export class UpdateWorksheetDto extends PartialType(CreateWorksheetDto) {
+/**
+ * DTO for updating worksheet
+ * Allows updating planned output, product, process, or status
+ */
+export class UpdateWorksheetDto {
   @ApiProperty({
     example: 'COMPLETED',
     description: 'Worksheet status',
@@ -16,12 +18,30 @@ export class UpdateWorksheetDto extends PartialType(CreateWorksheetDto) {
   status?: WorkSheetStatus;
 
   @ApiProperty({
-    example: 20,
-    description: 'Updated total workers count',
+    example: 180,
+    description: 'SLKH - Updated sản lượng kế hoạch/giờ',
     required: false,
   })
   @IsOptional()
   @IsInt()
   @IsPositive()
-  totalWorkers?: number;
+  plannedOutput?: number;
+
+  @ApiProperty({
+    example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    description: 'Updated Product UUID (mã túi)',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @ApiProperty({
+    example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
+    description: 'Updated Process UUID (công đoạn)',
+    required: false,
+  })
+  @IsOptional()
+  @IsUUID()
+  processId?: string;
 }

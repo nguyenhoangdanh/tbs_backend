@@ -17,22 +17,18 @@ import {
   ApiBearerAuth,
   ApiQuery,
 } from '@nestjs/swagger';
-import { WorksheetService } from './worksheet.service';
 import { CreateWorksheetDto } from './dto/create-worksheet.dto';
 import { UpdateWorksheetDto } from './dto/update-worksheet.dto';
 import { UpdateWorksheetRecordDto } from './dto/update-worksheet-record.dto';
-import { BatchUpdateRecordsDto } from './dto/batch-update-records.dto';
+import { BatchUpdateByHourDto } from './dto/batch-update-by-hour.dto';
 import { QuickUpdateRecordDto } from './dto/quick-update-record.dto';
-import { UpsertHourOutputsDto } from './dto/upsert-hour-outputs.dto';
 import { AdjustRecordTargetDto } from './dto/adjust-record-target.dto';
-import { UpsertRecordCausesDto } from './dto/upsert-record-causes.dto';
-import { CopyForwardProductProcessDto } from './dto/copy-forward-product-process.dto';
-import { UpdateWorkerTargetDto } from './dto/update-worker-target.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Role } from '@prisma/client';
+import { WorksheetService } from './worksheet.service';
 
 @ApiTags('worksheets')
 @ApiBearerAuth('JWT-auth')
@@ -207,22 +203,32 @@ export class WorksheetController {
     return this.worksheetService.quickUpdateRecord(
       worksheetId,
       recordId,
-      quickUpdateDto,
+      quickUpdateDto.actualOutput,
       user
     );
   }
 
-  @Patch(':id/batch-update')
+  // ⭐ CORE ENDPOINT - Batch update by hour for entire group
+  @Post('group/:groupId/hour/:workHour/batch-update')
   @UseGuards(RolesGuard)
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Batch update multiple records' })
-  @ApiResponse({ status: 200, description: 'Records updated successfully' })
-  batchUpdateRecords(
-    @Param('id') worksheetId: string,
-    @Body() batchUpdateDto: BatchUpdateRecordsDto,
+  @ApiOperation({ 
+    summary: 'Batch update outputs for all workers in a specific hour',
+    description: 'Group leader updates 30 workers at once. Supports multiple products per worker per hour.'
+  })
+  @ApiResponse({ status: 200, description: 'All workers updated successfully' })
+  batchUpdateByHour(
+    @Param('groupId') groupId: string,
+    @Param('workHour') workHour: string,
+    @Body() batchDto: BatchUpdateByHourDto,
     @GetUser() user: any
   ) {
-    return this.worksheetService.batchUpdateRecords(worksheetId, batchUpdateDto, user);
+    return this.worksheetService.batchUpdateByHour(
+      groupId,
+      parseInt(workHour),
+      batchDto,
+      user
+    );
   }
 
   @Post(':id/complete')
@@ -257,32 +263,25 @@ export class WorksheetController {
     return this.worksheetService.remove(id, user);
   }
 
-  // ============= NEW ENDPOINTS REQUIRED BY PROBLEM STATEMENT =============
+  // ============= GRID VIEW & ADVANCED FEATURES =============
 
-  @Get(':id/grid')
-  @ApiOperation({ summary: 'Get worksheet grid (matrix view: rows=workers, columns=hours)' })
+  @Get('group/:groupId/grid')
+  @ApiOperation({ summary: 'Get worksheet grid for a group (matrix view: workers × hours)' })
+  @ApiQuery({ name: 'date', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Worksheet grid retrieved successfully' })
-  getWorksheetGrid(@Param('id') worksheetId: string, @GetUser() user: any) {
-    return this.worksheetService.getWorksheetGrid(worksheetId, user);
-  }
-
-  @Post(':recordId/upsert-outputs')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Batch upsert hour outputs for single hour' })
-  @ApiResponse({ status: 200, description: 'Hour outputs updated successfully' })
-  upsertHourOutputs(
-    @Param('recordId') recordId: string,
-    @Body() upsertDto: UpsertHourOutputsDto,
-    @GetUser() user: any
+  getWorksheetGrid(
+    @Param('groupId') groupId: string,
+    @Query('date') date?: string,
+    @GetUser() user?: any
   ) {
-    return this.worksheetService.upsertHourOutputs(recordId, upsertDto.entries, user);
+    const dateFilter = date ? new Date(date) : new Date();
+    return this.worksheetService.getWorksheetGrid(groupId, dateFilter, user);
   }
 
   @Patch(':id/adjust-target/:workHour')
   @UseGuards(RolesGuard)
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Adjust group-level target by hour' })
+  @ApiOperation({ summary: 'Adjust planned output for a specific hour' })
   @ApiResponse({ status: 200, description: 'Record target adjusted successfully' })
   adjustRecordTarget(
     @Param('id') worksheetId: string,
@@ -293,36 +292,23 @@ export class WorksheetController {
     return this.worksheetService.adjustRecordTarget(
       worksheetId, 
       parseInt(workHour), 
-      adjustDto.expectedOutputTotal, 
+      adjustDto.plannedOutput, 
       user
     );
   }
 
-  @Post(':recordId/causes')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Upsert record causes (VT, CN, CL, MM)' })
-  @ApiResponse({ status: 200, description: 'Record causes updated successfully' })
-  upsertRecordCauses(
-    @Param('recordId') recordId: string,
-    @Body() causesDto: UpsertRecordCausesDto,
-    @GetUser() user: any
-  ) {
-    return this.worksheetService.upsertRecordCauses(recordId, causesDto.causes, user);
-  }
-
-  @Post(':id/copy-forward')
+    @Post(':id/copy-forward')
   @UseGuards(RolesGuard)
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
   @ApiOperation({ summary: 'Copy forward product/process for speed input' })
   @ApiResponse({ status: 200, description: 'Product/process copied successfully' })
-  copyForwardProductProcess(
-    @Param('id') worksheetId: string,
-    @Body() copyDto: CopyForwardProductProcessDto,
+  async copyForwardProductProcess(
+    @Param('id') id: string,
+    @Body() copyDto: any,
     @GetUser() user: any
   ) {
     return this.worksheetService.copyForwardProductProcess(
-      worksheetId,
+      id,
       copyDto.fromHour,
       copyDto.toHourStart,
       copyDto.toHourEnd,
@@ -330,47 +316,33 @@ export class WorksheetController {
     );
   }
 
-  // ============= WORKSHEET ITEM ENDPOINTS =============
-
-  @Patch('items/:itemId/target')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
-  @ApiOperation({ summary: 'Update individual worker target output per hour' })
-  @ApiResponse({ status: 200, description: 'Worker target updated successfully' })
-  updateWorkerTarget(
-    @Param('itemId') itemId: string,
-    @Body() updateDto: UpdateWorkerTargetDto,
-    @GetUser() user: any
-  ) {
-    return this.worksheetService.updateWorkerTarget(itemId, updateDto.targetOutputPerHour, user);
-  }
-
-  // ============= BACKUP ENDPOINTS =============
-
-  @Post('backup/manual/:year/:month')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Manually trigger monthly backup' })
-  @ApiResponse({ status: 200, description: 'Manual backup completed successfully' })
-  triggerManualBackup(
-    @Param('year') year: string,
-    @Param('month') month: string,
-    @Query('retentionDays') retentionDays?: string,
+  @Get('reports/by-organization')
+  @ApiOperation({ 
+    summary: 'Get worksheets for report export by organization structure',
+    description: 'Export data hierarchically: Factory → Line → Team → Group. Shows all workers (with/without worksheets).'
+  })
+  @ApiQuery({ name: 'date', required: true, type: String, description: 'Date (YYYY-MM-DD)' })
+  @ApiQuery({ name: 'factoryId', required: false, type: String, description: 'Filter by Factory' })
+  @ApiQuery({ name: 'lineId', required: false, type: String, description: 'Filter by Line' })
+  @ApiQuery({ name: 'teamId', required: false, type: String, description: 'Filter by Team' })
+  @ApiQuery({ name: 'groupId', required: false, type: String, description: 'Filter by Group' })
+  @ApiResponse({ status: 200, description: 'Report data retrieved successfully' })
+  async getWorksheetsForReport(
+    @Query('date') date: string,
+    @Query('factoryId') factoryId?: string,
+    @Query('lineId') lineId?: string,
+    @Query('teamId') teamId?: string,
+    @Query('groupId') groupId?: string,
     @GetUser() user?: any
   ) {
-    return this.worksheetService.triggerManualBackup(
-      parseInt(year),
-      parseInt(month),
-      retentionDays ? parseInt(retentionDays) : 30
-    );
-  }
-
-  @Get('backup/statistics')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Get backup statistics' })
-  @ApiResponse({ status: 200, description: 'Backup statistics retrieved successfully' })
-  getBackupStatistics(@GetUser() user?: any) {
-    return this.worksheetService.getBackupStatistics();
+    return this.worksheetService.getWorksheetsForReport({
+      date: new Date(date),
+      factoryId,
+      lineId,
+      teamId,
+      groupId,
+      userId: user?.id,
+      userRole: user?.role
+    });
   }
 }
