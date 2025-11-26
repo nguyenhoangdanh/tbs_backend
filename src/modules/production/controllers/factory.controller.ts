@@ -2,38 +2,36 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Delete,
   Body,
   Param,
-  Delete,
-  UseGuards,
   Query,
-  Put,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiQuery,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../../common/guards/roles.guard';
-import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { PermissionsGuard } from '../../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { FactoryService } from '../services/factory.service';
 import { CreateFactoryDto } from '../dto/factory/create-factory.dto';
 import { UpdateFactoryDto } from '../dto/factory/update-factory.dto';
 
 @ApiTags('production/factories')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard) // ⭐ Use PermissionsGuard
 @Controller('production/factories')
 export class FactoryController {
   constructor(private readonly factoryService: FactoryService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('factories:create') // ⭐ Require permission
   @ApiOperation({ summary: 'Create new factory' })
   @ApiResponse({ status: 201, description: 'Factory created successfully' })
   create(@Body() createFactoryDto: CreateFactoryDto) {
@@ -41,64 +39,60 @@ export class FactoryController {
   }
 
   @Get()
+  @RequirePermissions('factories:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get all factories' })
-  @ApiQuery({ name: 'includeLines', required: false, type: Boolean })
   @ApiResponse({ status: 200, description: 'Factories retrieved successfully' })
-  findAll(@Query('includeLines') includeLines?: boolean) {
-    return this.factoryService.findAll({ includeLines });
+  findAll(@Query('includeLines') includeLines?: string) {
+    return this.factoryService.findAll({
+      includeLines: includeLines === 'true',
+    });
   }
 
   @Get(':id')
+  @RequirePermissions('factories:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get factory by ID' })
   @ApiResponse({ status: 200, description: 'Factory retrieved successfully' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.factoryService.findOne(id);
   }
 
   @Get(':id/structure')
-  @ApiOperation({
-    summary: 'Get complete factory structure (lines, teams, groups)',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'Factory structure retrieved successfully',
-  })
-  getFactoryStructure(@Param('id') id: string) {
+  @RequirePermissions('factories:view') // ⭐ Require permission
+  @ApiOperation({ summary: 'Get complete factory structure' })
+  @ApiResponse({ status: 200, description: 'Structure retrieved successfully' })
+  getStructure(@Param('id', ParseUUIDPipe) id: string) {
     return this.factoryService.getFactoryStructure(id);
   }
 
   @Get(':id/lines')
+  @RequirePermissions('factories:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get lines of a factory' })
-  @ApiQuery({ name: 'includeTeams', required: false, type: Boolean })
-  @ApiResponse({
-    status: 200,
-    description: 'Factory lines retrieved successfully',
-  })
-  getFactoryLines(
-    @Param('id') id: string,
-    @Query('includeTeams') includeTeams?: boolean,
+  @ApiResponse({ status: 200, description: 'Lines retrieved successfully' })
+  getLines(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeTeams') includeTeams?: string,
   ) {
-    return this.factoryService.getFactoryLines(id, { includeTeams });
+    return this.factoryService.getFactoryLines(id, {
+      includeTeams: includeTeams === 'true',
+    });
   }
 
   @Put(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('factories:update') // ⭐ Require permission
   @ApiOperation({ summary: 'Update factory' })
   @ApiResponse({ status: 200, description: 'Factory updated successfully' })
   update(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() updateFactoryDto: UpdateFactoryDto,
   ) {
     return this.factoryService.update(id, updateFactoryDto);
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @RequirePermissions('factories:delete') // ⭐ Require permission
   @ApiOperation({ summary: 'Delete factory' })
   @ApiResponse({ status: 200, description: 'Factory deleted successfully' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.factoryService.remove(id);
   }
 }

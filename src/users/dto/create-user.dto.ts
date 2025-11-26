@@ -78,4 +78,10 @@ export class CreateUserDto {
   @IsUUID()
   @IsNotEmpty()
   officeId: string;
+
+  // ⭐ Password is optional - will be set to '123456' if not provided
+  @ApiProperty({ required: false, description: 'Password (default: 123456)' })
+  @IsString()
+  @IsOptional()
+  password?: string;
 }

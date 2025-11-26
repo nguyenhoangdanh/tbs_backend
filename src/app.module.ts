@@ -7,9 +7,8 @@ import { ReportsModule } from './reports/reports.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { HierarchyReportsModule } from './hierarchy-reports/hierarchy-reports.module';
 import { TaskEvaluationsModule } from './task-evaluations/task-evaluations.module';
-import { PrismaService } from './common/prisma.service';
 import { EnvironmentConfig } from './config/config.environment';
-import { ConfigModule } from './config/config.module';
+import { ConfigModule } from '@nestjs/config'; // ⭐ Ensure correct import
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -34,15 +33,16 @@ import { DepartmentsModule } from './departments/departments.module';
 import { PositionsModule } from './positions/positions.module';
 import { JobPositionsModule } from './job-positions/job-positions.module';
 import { OrganizationsModule } from './organizations/organizations.module';
-import { FactoryModule } from './modules/factory/factory.module';
-import { LineModule } from './modules/line/line.module';
-import { TeamModule } from './modules/team/team.module';
-import { GroupModule } from './modules/group/group.module';
+import { CommonModule } from './common/common.module'; // ⭐ ADD
 
 @Module({
   imports: [
-    // Global configuration module
-    ConfigModule,
+    // ⭐ FIX: ConfigModule setup
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: '.env',
+    }),
+    CommonModule, // ⭐ ADD
 
     // Enable cron jobs for scheduled tasks
     ScheduleModule.forRoot(),
@@ -53,8 +53,8 @@ import { GroupModule } from './modules/group/group.module';
       serveRoot: '/uploads',
       exclude: ['/api*'],
     }),
-    
-    // Serve public files only in development  
+
+    // Serve public files only in development
     ...(process.env.NODE_ENV !== 'production'
       ? [
           ServeStaticModule.forRoot({
@@ -89,22 +89,18 @@ import { GroupModule } from './modules/group/group.module';
     PositionsModule,
     JobPositionsModule,
     OrganizationsModule,
-    FactoryModule,
-    LineModule,
-    TeamModule,
-    GroupModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-    PrismaService,
-    EnvironmentConfig,
-    CloudflareR2Service, // Replace FirebaseService with CloudflareR2Service
+    // PrismaService,
+    // EnvironmentConfig,
+    // CloudflareR2Service, // Replace FirebaseService with CloudflareR2Service
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
     },
   ],
-  exports: [PrismaService, EnvironmentConfig],
+  exports: [],
 })
 export class AppModule {}

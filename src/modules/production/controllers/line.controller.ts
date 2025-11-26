@@ -2,38 +2,37 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Delete,
   Body,
   Param,
-  Delete,
-  UseGuards,
   Query,
-  Put,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiQuery,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../../common/guards/roles.guard';
-import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
+import { PermissionsGuard } from '../../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { LineService } from '../services/line.service';
 import { CreateLineDto } from '../dto/line/create-line.dto';
 import { UpdateLineDto } from '../dto/line/update-line.dto';
+import { TransferLineDto } from '../dto/line/transfer-line.dto';
 
 @ApiTags('production/lines')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard) // ⭐ Use PermissionsGuard
 @Controller('production/lines')
 export class LineController {
   constructor(private readonly lineService: LineService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('lines:create') // ⭐ Require permission
   @ApiOperation({ summary: 'Create new line' })
   @ApiResponse({ status: 201, description: 'Line created successfully' })
   create(@Body() createLineDto: CreateLineDto) {
@@ -41,53 +40,69 @@ export class LineController {
   }
 
   @Get()
+  @RequirePermissions('lines:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get all lines' })
-  @ApiQuery({ name: 'factoryId', required: false, type: String })
-  @ApiQuery({ name: 'includeTeams', required: false, type: Boolean })
   @ApiResponse({ status: 200, description: 'Lines retrieved successfully' })
   findAll(
     @Query('factoryId') factoryId?: string,
-    @Query('includeTeams') includeTeams?: boolean,
+    @Query('includeTeams') includeTeams?: string,
   ) {
-    return this.lineService.findAll({ factoryId, includeTeams });
+    return this.lineService.findAll({
+      factoryId,
+      includeTeams: includeTeams === 'true',
+    });
   }
 
   @Get(':id')
+  @RequirePermissions('lines:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get line by ID' })
   @ApiResponse({ status: 200, description: 'Line retrieved successfully' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.lineService.findOne(id);
   }
 
   @Get(':id/teams')
+  @RequirePermissions('lines:view') // ⭐ Require permission
   @ApiOperation({ summary: 'Get teams of a line' })
-  @ApiQuery({ name: 'includeGroups', required: false, type: Boolean })
-  @ApiResponse({
-    status: 200,
-    description: 'Line teams retrieved successfully',
-  })
-  getLineTeams(
-    @Param('id') id: string,
-    @Query('includeGroups') includeGroups?: boolean,
+  @ApiResponse({ status: 200, description: 'Teams retrieved successfully' })
+  getTeams(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('includeGroups') includeGroups?: string,
   ) {
-    return this.lineService.getLineTeams(id, { includeGroups });
+    return this.lineService.getLineTeams(id, {
+      includeGroups: includeGroups === 'true',
+    });
   }
 
   @Put(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('lines:update') // ⭐ Require permission
   @ApiOperation({ summary: 'Update line' })
   @ApiResponse({ status: 200, description: 'Line updated successfully' })
-  update(@Param('id') id: string, @Body() updateLineDto: UpdateLineDto) {
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateLineDto: UpdateLineDto,
+  ) {
     return this.lineService.update(id, updateLineDto);
   }
 
+  @Post(':id/transfer')
+  @RequirePermissions('lines:manage') // ⭐ Require manage permission
+  @ApiOperation({
+    summary: 'Transfer line to another factory',
+  })
+  @ApiResponse({ status: 200, description: 'Line transferred successfully' })
+  transfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() transferDto: TransferLineDto,
+  ) {
+    return this.lineService.transferLine(id, transferDto);
+  }
+
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @RequirePermissions('lines:delete') // ⭐ Require permission
   @ApiOperation({ summary: 'Delete line' })
   @ApiResponse({ status: 200, description: 'Line deleted successfully' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.lineService.remove(id);
   }
 }

@@ -2,120 +2,127 @@ import {
   Controller,
   Get,
   Post,
+  Put,
+  Delete,
   Body,
   Param,
-  Delete,
-  UseGuards,
   Query,
-  Put,
-  Patch,
+  UseGuards,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiQuery,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { RolesGuard } from '../../../common/guards/roles.guard';
-import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
-import { GroupService } from '../services/group.service';
-import { CreateGroupDto } from '../dto/group/create-group.dto';
-import { UpdateGroupDto } from '../dto/group/update-group.dto';
-import { AssignLeaderDto } from '../dto/group/assign-leader.dto';
-import { AddMemberDto } from '../dto/group/add-member.dto';
+import { PermissionsGuard } from '../../../common/guards/permissions.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
+import { GroupService } from '../services/group.service'; // ⭐ ADD
+import { CreateGroupDto } from '../dto/group/create-group.dto'; // ⭐ ADD
+import { UpdateGroupDto } from '../dto/group/update-group.dto'; // ⭐ ADD
+import { AssignLeaderDto } from '../dto/group/assign-leader.dto'; // ⭐ ADD
+import { AddMemberDto } from '../dto/group/add-member.dto'; // ⭐ ADD
+import { TransferGroupDto } from '../dto/group/transfer-group.dto'; // ⭐ ADD
 
 @ApiTags('production/groups')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, PermissionsGuard) // ⭐ Use PermissionsGuard
 @Controller('production/groups')
 export class GroupController {
   constructor(private readonly groupService: GroupService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Create new group' })
+  @RequirePermissions('groups:create')
+  @ApiOperation({ summary: 'Create new group (SUPERADMIN/ADMIN only)' })
   @ApiResponse({ status: 201, description: 'Group created successfully' })
   create(@Body() createGroupDto: CreateGroupDto) {
     return this.groupService.create(createGroupDto);
   }
 
   @Get()
+  @RequirePermissions('groups:view')
   @ApiOperation({ summary: 'Get all groups' })
-  @ApiQuery({ name: 'teamId', required: false, type: String })
-  @ApiQuery({ name: 'includeMembers', required: false, type: Boolean })
   @ApiResponse({ status: 200, description: 'Groups retrieved successfully' })
   findAll(
     @Query('teamId') teamId?: string,
-    @Query('includeMembers') includeMembers?: boolean,
+    @Query('includeMembers') includeMembers?: string,
   ) {
-    return this.groupService.findAll({ teamId, includeMembers });
+    return this.groupService.findAll({
+      teamId,
+      includeMembers: includeMembers === 'true',
+    });
   }
 
   @Get(':id')
+  @RequirePermissions('groups:view')
   @ApiOperation({ summary: 'Get group by ID' })
   @ApiResponse({ status: 200, description: 'Group retrieved successfully' })
-  findOne(@Param('id') id: string) {
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.groupService.findOne(id);
   }
 
   @Put(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Update group' })
+  @RequirePermissions('groups:update')
+  @ApiOperation({ summary: 'Update group (SUPERADMIN/ADMIN only)' })
   @ApiResponse({ status: 200, description: 'Group updated successfully' })
-  update(@Param('id') id: string, @Body() updateGroupDto: UpdateGroupDto) {
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateGroupDto: UpdateGroupDto,
+  ) {
     return this.groupService.update(id, updateGroupDto);
   }
 
-  @Patch(':id/assign-leader')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Assign group leader' })
-  @ApiResponse({
-    status: 200,
-    description: 'Group leader assigned successfully',
-  })
+  @Post(':id/assign-leader')
+  @RequirePermissions('groups:assign')
+  @ApiOperation({ summary: 'Assign leader to group (SUPERADMIN/ADMIN only)' })
+  @ApiResponse({ status: 200, description: 'Leader assigned successfully' })
   assignLeader(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
     @Body() assignLeaderDto: AssignLeaderDto,
   ) {
     return this.groupService.assignLeader(id, assignLeaderDto.leaderId);
   }
 
   @Post(':id/members')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Add member to group (auto-creates worksheets)' })
-  @ApiResponse({
-    status: 200,
-    description: 'Member added to group successfully',
-  })
-  addMember(@Param('id') id: string, @Body() addMemberDto: AddMemberDto) {
+  @RequirePermissions('groups:assign')
+  @ApiOperation({ summary: 'Add member to group (SUPERADMIN/ADMIN only)' })
+  @ApiResponse({ status: 201, description: 'Member added successfully' })
+  addMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() addMemberDto: AddMemberDto,
+  ) {
     return this.groupService.addMember(id, addMemberDto.userId);
   }
 
   @Delete(':id/members/:userId')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Remove member from group' })
-  @ApiResponse({
-    status: 200,
-    description: 'Member removed from group successfully',
-  })
-  removeMember(@Param('id') id: string, @Param('userId') userId: string) {
+  @RequirePermissions('groups:assign')
+  @ApiOperation({ summary: 'Remove member from group (SUPERADMIN/ADMIN only)' })
+  @ApiResponse({ status: 200, description: 'Member removed successfully' })
+  removeMember(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('userId', ParseUUIDPipe) userId: string,
+  ) {
     return this.groupService.removeMember(id, userId);
   }
 
+  @Post(':id/transfer')
+  @RequirePermissions('groups:manage')
+  @ApiOperation({ summary: 'Transfer group to another team (SUPERADMIN only)' })
+  @ApiResponse({ status: 200, description: 'Group transferred successfully' })
+  transfer(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() transferDto: TransferGroupDto,
+  ) {
+    return this.groupService.transferGroup(id, transferDto);
+  }
+
   @Delete(':id')
-  @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Delete group' })
+  @RequirePermissions('groups:delete')
+  @ApiOperation({ summary: 'Delete group (SUPERADMIN only)' })
   @ApiResponse({ status: 200, description: 'Group deleted successfully' })
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.groupService.remove(id);
   }
 }

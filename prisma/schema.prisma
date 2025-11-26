@@ -90,10 +90,11 @@ model User {
   lastName           String
   phone              String?
   avatar             String?
-  dateOfBirth        DateTime? @db.Date
+  dateOfBirth        DateTime?                  @db.Date
   address            String?
   sex                Sex?
   role               Role                       @default(USER)
+  customPermissions  UserPermission[]           @relation("UserCustomPermissions")
   jobPositionId      String
   isActive           Boolean                    @default(false)
   officeId           String
@@ -115,10 +116,9 @@ model User {
   createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator") // Quản trị line tạo
   pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
 
-
-  medicalRecordsAsPatient MedicalRecord[]          @relation("PatientMedicalRecords")
-  medicalRecordsAsDoctor MedicalRecord[]          @relation("DoctorMedicalRecords")
-  prescriptionsDispensed MedicalPrescription[]   @relation("MedicineDispenser")
+  medicalRecordsAsPatient MedicalRecord[]       @relation("PatientMedicalRecords")
+  medicalRecordsAsDoctor  MedicalRecord[]       @relation("DoctorMedicalRecords")
+  prescriptionsDispensed  MedicalPrescription[] @relation("MedicineDispenser")
 
   @@index([jobPositionId])
   @@index([officeId])
@@ -288,16 +288,16 @@ model Group {
 }
 
 model Product {
-  id                  String                @id @default(uuid())
-  name                String
-  code                String                @unique
-  description         String?
-  imageUrl            String?
-  isActive            Boolean               @default(true)
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  processes           ProductProcess[]
-  worksheets          WorkSheet[]
+  id                   String                @id @default(uuid())
+  name                 String
+  code                 String                @unique
+  description          String?
+  imageUrl             String?
+  isActive             Boolean               @default(true)
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  processes            ProductProcess[]
+  worksheets           WorkSheet[]
   worksheetRecordItems WorkSheetRecordItem[]
 
   @@index([isActive])
@@ -345,14 +345,14 @@ model ProductProcess {
 model WorkSheet {
   id               String            @id @default(uuid())
   date             DateTime          @db.Date
-  workerId         String            // Công nhân - mỗi phiếu chỉ cho 1 người
-  groupId          String            // Nhóm của công nhân
-  factoryId        String            // Nhà máy
-  productId        String            // Mã túi xách
-  processId        String            // Công đoạn (chặt, lạng, dán,...)
-  shiftType        ShiftType         // Ca làm việc
-  plannedOutput    Int               // SLKH - Sản lượng kế hoạch/giờ của công nhân này
-  createdById      String            // Người tạo (quản trị line)
+  workerId         String // Công nhân - mỗi phiếu chỉ cho 1 người
+  groupId          String // Nhóm của công nhân
+  factoryId        String // Nhà máy
+  productId        String // Mã túi xách
+  processId        String // Công đoạn (chặt, lạng, dán,...)
+  shiftType        ShiftType // Ca làm việc
+  plannedOutput    Int // SLKH - Sản lượng kế hoạch/giờ của công nhân này
+  createdById      String // Người tạo (quản trị line)
   status           WorkSheetStatus   @default(ACTIVE)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -380,21 +380,21 @@ model WorkSheet {
 // Phiếu công đoạn đã là cá nhân rồi
 
 model WorkSheetRecord {
-  id             String                  @id @default(uuid())
-  worksheetId    String
-  workHour       Int                     // Giờ thứ mấy trong ca (1-8, 1-9.5, 1-11)
-  startTime      DateTime                @db.Time(6)
-  endTime        DateTime                @db.Time(6)
-  plannedOutput  Int?                    // SLKH tổng - Sản lượng kế hoạch của giờ này
-  actualOutput   Int?                    // SLTH tổng - Tổng sản lượng thực hiện (sum of items)
-  status         WorkRecordStatus        @default(PENDING)
-  updatedById    String?                 // Nhóm trưởng nhập liệu
-  createdAt      DateTime                @default(now())
-  updatedAt      DateTime                @updatedAt
-  items          WorkSheetRecordItem[]   // Chi tiết các mã túi làm trong giờ này
-  causes         WorkSheetRecordCause[]  // Nguyên nhân (VT, CN, CL, MM, khác)
-  updatedBy      User?                   @relation("WorkRecordUpdater", fields: [updatedById], references: [id])
-  worksheet      WorkSheet               @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
+  id            String                 @id @default(uuid())
+  worksheetId   String
+  workHour      Int // Giờ thứ mấy trong ca (1-8, 1-9.5, 1-11)
+  startTime     DateTime               @db.Time(6)
+  endTime       DateTime               @db.Time(6)
+  plannedOutput Int? // SLKH tổng - Sản lượng kế hoạch của giờ này
+  actualOutput  Int? // SLTH tổng - Tổng sản lượng thực hiện (sum of items)
+  status        WorkRecordStatus       @default(PENDING)
+  updatedById   String? // Nhóm trưởng nhập liệu
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  items         WorkSheetRecordItem[] // Chi tiết các mã túi làm trong giờ này
+  causes        WorkSheetRecordCause[] // Nguyên nhân (VT, CN, CL, MM, khác)
+  updatedBy     User?                  @relation("WorkRecordUpdater", fields: [updatedById], references: [id])
+  worksheet     WorkSheet              @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
 
   @@unique([worksheetId, workHour])
   @@index([worksheetId])
@@ -406,13 +406,13 @@ model WorkSheetRecord {
 model WorkSheetRecordItem {
   id             String          @id @default(uuid())
   recordId       String
-  entryIndex     Int             @default(1)           // Thứ tự entry (1, 2, 3,... nếu làm nhiều mã túi)
-  productId      String                                // Mã túi cho entry này
-  processId      String                                // Công đoạn cho entry này
-  plannedOutput  Int?                                  // SLKH - Sản lượng kế hoạch của entry này
-  actualOutput   Int             @default(0)           // SLTH - Sản lượng thực hiện của entry này
-  efficiencyRate Float?                                // % = (actualOutput / plannedOutput) * 100
-  note           String?                               // Ghi chú cho entry này
+  entryIndex     Int             @default(1) // Thứ tự entry (1, 2, 3,... nếu làm nhiều mã túi)
+  productId      String // Mã túi cho entry này
+  processId      String // Công đoạn cho entry này
+  plannedOutput  Int? // SLKH - Sản lượng kế hoạch của entry này
+  actualOutput   Int             @default(0) // SLTH - Sản lượng thực hiện của entry này
+  efficiencyRate Float? // % = (actualOutput / plannedOutput) * 100
+  note           String? // Ghi chú cho entry này
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
   product        Product         @relation(fields: [productId], references: [id])
@@ -522,17 +522,17 @@ model GatePassApproval {
 // -------------------------------------Medical Management-------------------------------------
 // 1. Quản lý thuốc cơ bản
 model Medicine {
-  id                String                 @id @default(uuid())
-  name              String                 @unique
-  strength          String?                // Hàm lượng
-  dosage            String?                // Liều dùng: ví dụ "2 viên", "1 thìa"
-  frequency         String?                 // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
-  instructions      String?                // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
-  units             String?                 // Đơn vị: "viên", "chai", "lọ"
-  isActive          Boolean                @default(true)
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  prescriptions     MedicalPrescription[]
+  id            String                @id @default(uuid())
+  name          String                @unique
+  strength      String? // Hàm lượng
+  dosage        String? // Liều dùng: ví dụ "2 viên", "1 thìa"
+  frequency     String? // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
+  instructions  String? // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
+  units         String? // Đơn vị: "viên", "chai", "lọ"
+  isActive      Boolean               @default(true)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+  prescriptions MedicalPrescription[]
 
   @@index([isActive])
   @@index([name])
@@ -541,19 +541,19 @@ model Medicine {
 
 // 2. Lịch sử khám bệnh (đơn giản hóa)
 model MedicalRecord {
-  id                String                 @id @default(uuid())
-  patientId         String                 // ID nhân viên khám
-  doctorId          String                 // ID nhân viên y tế
-  visitDate         DateTime               @default(now())
-  symptoms          String?                // Triệu chứng
-  diagnosis         String?                // Chẩn đoán
-  notes             String?                // Ghi chú
-  createdAt         DateTime               @default(now())
-  updatedAt         DateTime               @updatedAt
-  
-  patient           User                   @relation("PatientMedicalRecords", fields: [patientId], references: [id])
-  doctor            User                   @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
-  prescriptions     MedicalPrescription[]
+  id        String   @id @default(uuid())
+  patientId String // ID nhân viên khám
+  doctorId  String // ID nhân viên y tế
+  visitDate DateTime @default(now())
+  symptoms  String? // Triệu chứng
+  diagnosis String? // Chẩn đoán
+  notes     String? // Ghi chú
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+
+  patient       User                  @relation("PatientMedicalRecords", fields: [patientId], references: [id])
+  doctor        User                  @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
+  prescriptions MedicalPrescription[]
 
   @@index([patientId])
   @@index([doctorId])
@@ -563,25 +563,25 @@ model MedicalRecord {
 
 // 3. Đơn thuốc
 model MedicalPrescription {
-  id              String        @id @default(uuid())
+  id              String    @id @default(uuid())
   medicalRecordId String
   medicineId      String
-  quantity        Int           // Số lượng cấp
-  dosage          String?       // Liều dùng: "2 viên/lần", "1 thìa"
-  frequency       String?       // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
-  strength        String?       // Hàm lượng: 500mg
-  duration        String?       // Thời gian dùng: 2 ngày
-  instructions    String?       // Hướng dẫn sử dụng
-  notes           String?       // Ghi chú
-  isDispensed     Boolean       @default(false) // Đã cấp thuốc chưa
-  dispensedAt     DateTime?     // Thời gian cấp thuốc
-  dispensedBy     String?       // Người cấp thuốc
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  
-  medicalRecord   MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
-  medicine        Medicine      @relation(fields: [medicineId], references: [id])
-  dispenser       User?         @relation("MedicineDispenser", fields: [dispensedBy], references: [id])
+  quantity        Int // Số lượng cấp
+  dosage          String? // Liều dùng: "2 viên/lần", "1 thìa"
+  frequency       String? // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
+  strength        String? // Hàm lượng: 500mg
+  duration        String? // Thời gian dùng: 2 ngày
+  instructions    String? // Hướng dẫn sử dụng
+  notes           String? // Ghi chú
+  isDispensed     Boolean   @default(false) // Đã cấp thuốc chưa
+  dispensedAt     DateTime? // Thời gian cấp thuốc
+  dispensedBy     String? // Người cấp thuốc
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  medicalRecord MedicalRecord @relation(fields: [medicalRecordId], references: [id], onDelete: Cascade)
+  medicine      Medicine      @relation(fields: [medicineId], references: [id])
+  dispenser     User?         @relation("MedicineDispenser", fields: [dispensedBy], references: [id])
 
   @@index([medicalRecordId])
   @@index([medicineId])
@@ -673,16 +673,68 @@ enum GatePassApprovalStatus {
 }
 
 model PushSubscription {
-  id         String   @id @default(uuid())
-  userId     String
-  endpoint   String
-  p256dhKey  String
-  authKey    String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-  user       User     @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  userId    String
+  endpoint  String
+  p256dhKey String
+  authKey   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation("UserPushSubscriptions", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, endpoint])
   @@index([userId])
   @@map("push_subscriptions")
+}
+
+// ========== RBAC SYSTEM ==========
+
+model Permission {
+  id          String   @id @default(uuid())
+  resource    String // users, reports, factories, lines, teams, groups, worksheets, products, processes, medicines, medical-records
+  action      String // view, create, update, delete, approve, manage, assign
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  rolePermissions RolePermission[]
+  userPermissions UserPermission[]
+
+  @@unique([resource, action])
+  @@index([resource])
+  @@index([action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String   @id @default(uuid())
+  role         Role
+  permissionId String
+  isGranted    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([role, permissionId])
+  @@index([role])
+  @@index([permissionId])
+  @@map("role_permissions")
+}
+
+model UserPermission {
+  id           String   @id @default(uuid())
+  userId       String
+  permissionId String
+  isGranted    Boolean  @default(true) // true = grant, false = revoke
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User       @relation("UserCustomPermissions", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, permissionId])
+  @@index([userId])
+  @@index([permissionId])
+  @@map("user_permissions")
 }

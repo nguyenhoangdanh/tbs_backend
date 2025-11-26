@@ -19,16 +19,19 @@ export * from './dto/factory/update-factory.dto';
 // DTOs - Line
 export * from './dto/line/create-line.dto';
 export * from './dto/line/update-line.dto';
+export * from './dto/line/transfer-line.dto';
 
 // DTOs - Team
 export * from './dto/team/create-team.dto';
 export * from './dto/team/update-team.dto';
+export * from './dto/team/transfer-team.dto';
 
 // DTOs - Group
 export * from './dto/group/create-group.dto';
 export * from './dto/group/update-group.dto';
 export * from './dto/group/assign-leader.dto';
 export * from './dto/group/add-member.dto';
+export * from './dto/group/transfer-group.dto';
 
 // Module
 export * from './production.module';

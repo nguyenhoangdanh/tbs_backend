@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma.service';
 import { EnvironmentConfig } from '../../config/config.environment';
+import { CommonModule } from '../../common/common.module';
 
 // Services
 import { FactoryService } from './services/factory.service';
@@ -16,6 +17,7 @@ import { GroupController } from './controllers/group.controller';
 import { ProductionController } from './production.controller';
 
 @Module({
+  imports: [CommonModule],
   controllers: [
     ProductionController,
     FactoryController,

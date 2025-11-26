@@ -1,234 +1,260 @@
 import {
   Controller,
   Get,
-  Patch,
+  Post,
+  Put,
+  Delete,
   Body,
-  UseGuards,
-  HttpCode,
-  HttpStatus,
   Param,
   Query,
-  Post,
-  Delete,
-  UploadedFile,
+  UseGuards,
+  ParseUUIDPipe,
   UseInterceptors,
+  UploadedFile,
   BadRequestException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
-import { UsersService } from './users.service';
-import { UpdateProfileDto } from './dto/update-profile.dto';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiQuery,
+  ApiBody,
+} from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import type { Express } from 'express'; // ⭐ ADD: Import Express namespace
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { GetUser } from '../common/decorators/get-user.decorator';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
 import { Role } from '@prisma/client';
-import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { getCurrentWorkWeek } from '../common/utils/week-utils';
-interface UploadedFile {
-  fieldname: string;
-  originalname: string;
-  encoding: string;
-  mimetype: string;
-  size: number;
-  buffer: Buffer;
-}
+import { UsersService } from './users.service';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+
 @ApiTags('users')
-@Controller('users')
-@UseGuards(JwtAuthGuard)
 @ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@Controller('users')
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
+
+  // ========== PROFILE ROUTES (MUST BE BEFORE :id ROUTE) ==========
 
   @Get('profile')
   @ApiOperation({ summary: 'Get current user profile' })
   @ApiResponse({ status: 200, description: 'Profile retrieved successfully' })
   async getProfile(@GetUser() user: any) {
-    return this.usersService.getProfile(user.id);
+    return this.usersService.getUserById(user.id);
   }
 
-  @Patch('profile')
+  @Put('profile')
   @ApiOperation({ summary: 'Update current user profile' })
   @ApiResponse({ status: 200, description: 'Profile updated successfully' })
   async updateProfile(
     @GetUser() user: any,
     @Body() updateProfileDto: UpdateProfileDto,
   ) {
-    return this.usersService.updateProfile(
-      user.id,
-      updateProfileDto,
-      user.role,
-    );
+    // User can only update their own basic info
+    // Cannot change role, office, jobPosition without admin permission
+    const allowedFields: UpdateProfileDto = {
+      firstName: updateProfileDto.firstName,
+      lastName: updateProfileDto.lastName,
+      phone: updateProfileDto.phone,
+      email: updateProfileDto.email,
+      dateOfBirth: updateProfileDto.dateOfBirth,
+      address: updateProfileDto.address,
+      sex: updateProfileDto.sex,
+    };
+
+    return this.usersService.updateUser(user.id, allowedFields, user);
   }
 
-  @Patch(':userId')
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Update user by admin (partial update)' })
-  @ApiResponse({ status: 200, description: 'User updated successfully' })
-  async updateUserByAdmin(
-    @GetUser() adminUser: any,
-    @Param('userId') userId: string,
-    @Body() updateProfileDto: UpdateProfileDto,
+  @Put('profile/password')
+  @ApiOperation({ summary: 'Change current user password' })
+  @ApiResponse({ status: 200, description: 'Password changed successfully' })
+  async changePassword(
+    @GetUser() user: any,
+    @Body() dto: { currentPassword: string; newPassword: string },
   ) {
-    return this.usersService.updateUserByAdmin(
-      adminUser.id,
-      userId,
-      updateProfileDto,
-      adminUser.role,
-    );
+    return this.usersService.changePassword(user.id, dto);
   }
 
-  @Get('by-office')
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @UseGuards(RolesGuard)
-  @ApiOperation({ summary: 'Get users by current user office' })
-  async getUsersByOffice(@GetUser() user: any) {
-    return this.usersService.getUsersByOffice(user.officeId);
+  // ========== LOOKUP ROUTES (BEFORE :id) ==========
+
+  @Get('offices')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get all offices' })
+  async getOffices() {
+    return this.usersService.getOffices();
   }
 
-  @Get('by-department/:departmentId')
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @UseGuards(RolesGuard)
-  @ApiOperation({ summary: 'Get users by department' })
-  async getUsersByDepartment(@Param('departmentId') departmentId: string) {
-    return this.usersService.getUsersByDepartment(departmentId);
+  @Get('departments')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get all departments' })
+  async getDepartments(@Query('officeId') officeId?: string) {
+    return this.usersService.getDepartments(officeId);
   }
 
-  @Get('all')
-  @UseGuards(RolesGuard)
+  @Get('positions')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get all positions' })
+  async getPositions() {
+    return this.usersService.getPositions();
+  }
+
+  @Get('job-positions')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get all job positions' })
+  async getJobPositions(
+    @Query('officeId') officeId?: string,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.usersService.getJobPositions({ officeId, departmentId });
+  }
+
+  // ========== USER CRUD ==========
+
+  @Get()
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get all users with pagination and filters' })
+  @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'officeId', required: false, type: String })
+  @ApiQuery({ name: 'departmentId', required: false, type: String })
+  @ApiQuery({ name: 'role', required: false, enum: Role })
+  @ApiQuery({ name: 'isActive', required: false, type: String })
+  async getAllUsers(
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('officeId') officeId?: string,
+    @Query('departmentId') departmentId?: string,
+    @Query('role') role?: Role,
+    @Query('isActive') isActive?: string,
+  ) {
+    return this.usersService.getAllUsers({
+      page: page ? parseInt(page) : 1,
+      limit: limit ? parseInt(limit) : 10,
+      search,
+      officeId,
+      departmentId,
+      role,
+      isActive:
+        isActive === 'true' ? true : isActive === 'false' ? false : undefined,
+    });
+  }
+
+  // ⭐ IMPORTANT: :id route MUST BE LAST among GET routes
+  @Get(':id')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get user by ID' })
+  async getUserById(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.getUserById(id);
+  }
+
+  @Post()
   @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Get all users (superadmin only)' })
-  async getAllUsers() {
-    return this.usersService.getAllUsers();
+  @RequirePermissions('users:create')
+  @ApiOperation({ summary: 'Create new user (SUPERADMIN/ADMIN)' })
+  @ApiResponse({ status: 201, description: 'User created successfully' })
+  async createUser(@Body() createUserDto: CreateUserDto) {
+    return this.usersService.createUser(createUserDto);
   }
 
-  @Get('with-ranking')
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Get users with ranking data' })
-  @ApiQuery({
-    name: 'weekNumber',
-    required: false,
-    description: 'Filter by week number',
-  })
-  @ApiQuery({ name: 'year', required: false, description: 'Filter by year' })
-  @ApiQuery({
-    name: 'periodWeeks',
-    required: false,
-    description: 'Number of weeks for analysis',
-  })
-  async getUsersWithRankingData(
-    @Query('weekNumber') weekNumber?: string,
-    @Query('year') year?: string,
-    @Query('periodWeeks') periodWeeks?: string,
+  @Put(':id')
+  @RequirePermissions('users:update')
+  @ApiOperation({ summary: 'Update user' })
+  @ApiResponse({ status: 200, description: 'User updated successfully' })
+  async updateUser(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateProfileDto: UpdateProfileDto,
+    @GetUser() currentUser: any,
   ) {
-    const filters: any = {};
+    // Check if user can update this profile
+    const isSelfUpdate = currentUser.id === id;
+    const canUpdateOthers = ['SUPERADMIN', 'ADMIN'].includes(currentUser.role);
 
-    if (weekNumber || year || periodWeeks) {
-      const { weekNumber: currentWeek, year: currentYear } = getCurrentWorkWeek();
-      const targetWeek = parseInt(weekNumber) || currentWeek;
-      const targetYear = parseInt(year) || currentYear;
-      const weeks = parseInt(periodWeeks) || 4;
-
-      // Generate week ranges for report filtering
-      const weekRanges = [];
-      for (let i = 0; i < weeks; i++) {
-        let week = targetWeek - i;
-        let reportYear = targetYear;
-
-        if (week <= 0) {
-          week = 52 + week;
-          reportYear = targetYear - 1;
-        }
-
-        weekRanges.push({ weekNumber: week, year: reportYear });
-      }
-
-      filters.reportFilters = {
-        OR: weekRanges.map(({ weekNumber, year }) => ({ weekNumber, year })),
-      };
+    if (!isSelfUpdate && !canUpdateOthers) {
+      throw new BadRequestException('You can only update your own profile');
     }
 
-    return this.usersService.getUsersWithRankingData(filters);
+    return this.usersService.updateUser(id, updateProfileDto, currentUser);
   }
 
-  @Post('avatar')
-  @ApiOperation({ summary: 'Upload user avatar' })
+  @Delete(':id')
+  @Roles(Role.SUPERADMIN)
+  @RequirePermissions('users:delete')
+  @ApiOperation({ summary: 'Delete user (SUPERADMIN only)' })
+  @ApiResponse({ status: 200, description: 'User deleted successfully' })
+  async deleteUser(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.deleteUser(id);
+  }
+
+  @Put(':id/toggle-active')
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('users:update')
+  @ApiOperation({ summary: 'Toggle user active status (SUPERADMIN/ADMIN)' })
+  async toggleUserActive(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.toggleUserActive(id);
+  }
+
+  @Put(':id/reset-password')
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('users:update')
+  @ApiOperation({
+    summary: 'Reset user password to default (SUPERADMIN/ADMIN)',
+  })
+  async resetPassword(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.resetPassword(id);
+  }
+
+  // ========== BULK IMPORT FROM EXCEL ==========
+
+  @Post('bulk-create')
+  @Roles(Role.SUPERADMIN)
+  @RequirePermissions('users:create')
+  @ApiOperation({ summary: 'Bulk create users (SUPERADMIN only)' })
+  @ApiResponse({ status: 201, description: 'Users created successfully' })
+  async bulkCreateUsers(@Body() dto: { users: CreateUserDto[] }) {
+    return this.usersService.bulkCreateUsers(dto.users);
+  }
+
+  @Post('import/excel')
+  @Roles(Role.SUPERADMIN)
+  @RequirePermissions('users:create')
+  @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Bulk import users from Excel (SUPERADMIN only)' })
+  @ApiResponse({ status: 201, description: 'Users imported successfully' })
   @ApiBody({
-    description: 'Avatar image file',
-    type: 'multipart/form-data',
     schema: {
       type: 'object',
       properties: {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'Image file (JPEG, PNG, WEBP, max 5MB)',
         },
       },
     },
   })
-  @ApiResponse({ status: 200, description: 'Avatar uploaded successfully' })
-  @ApiResponse({ status: 400, description: 'Invalid file or file too large' })
-  @UseInterceptors(FileInterceptor('file', {
-    limits: {
-      fileSize: 5 * 1024 * 1024, // 5MB limit
-    },
-    fileFilter: (req, file, callback) => {
-      const allowedMimeTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
-      if (allowedMimeTypes.includes(file.mimetype)) {
-        callback(null, true);
-      } else {
-        callback(new BadRequestException('Only JPEG, PNG, and WEBP images are allowed'), false);
-      }
-    },
-  }))
-  async uploadAvatar(
-    @GetUser() user: any,
-    @UploadedFile() file: UploadedFile,
-  ) {
+  async importUsersFromExcel(@UploadedFile() file: any) {
+    // ⭐ FIX: Change to `any`
     if (!file) {
-      throw new BadRequestException('No file provided');
+      throw new BadRequestException('No file uploaded');
     }
 
-    return this.usersService.uploadAvatar(user.id, file);
-  }
+    if (!file.originalname.match(/\.(xlsx|xls)$/)) {
+      throw new BadRequestException('Only Excel files are allowed');
+    }
 
-  @Delete('avatar')
-  @ApiOperation({ summary: 'Delete user avatar' })
-  @ApiResponse({ status: 200, description: 'Avatar deleted successfully' })
-  @ApiResponse({ status: 404, description: 'User not found or no avatar to delete' })
-  async deleteAvatar(@GetUser() user: any) {
-    return this.usersService.deleteAvatar(user.id);
-  }
-
-  @Get('search-by-employee-code/:employeeCode')
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Search user by employee code for adding to group' })
-  @ApiResponse({ status: 200, description: 'User found successfully' })
-  @ApiResponse({ status: 404, description: 'User not found' })
-  async searchByEmployeeCode(@Param('employeeCode') employeeCode: string) {
-    return this.usersService.searchByEmployeeCode(employeeCode);
-  }
-
-  @Get('group-members/:groupId')
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Get current members of a group' })
-  @ApiResponse({ status: 200, description: 'Group members retrieved successfully' })
-  async getGroupMembers(@Param('groupId') groupId: string) {
-    return this.usersService.getGroupMembers(groupId);
-  }
-
-  @Get('available-leaders/:groupId')
-  @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
-  @ApiOperation({ summary: 'Get available users who can be group leaders' })
-  @ApiResponse({ status: 200, description: 'Available leaders retrieved successfully' })
-  async getAvailableLeaders(@Param('groupId') groupId: string) {
-    return this.usersService.getAvailableLeaders(groupId);
+    return this.usersService.importUsersFromExcel(file);
   }
 }

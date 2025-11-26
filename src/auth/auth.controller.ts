@@ -10,6 +10,7 @@ import {
   Logger,
   UnauthorizedException,
   BadRequestException,
+  Get,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -31,6 +32,7 @@ import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthResponseDto } from './dto/auth-response.dto';
+import { PermissionsService } from '../common/permissions.service';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -41,6 +43,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
+    private readonly permissionsService: PermissionsService, // ⭐ ADD
   ) {}
 
   @Post('register')
@@ -54,7 +57,11 @@ export class AuthController {
   @Post('login')
   @Public()
   @ApiOperation({ summary: 'Login user with dual auth support' })
-  @ApiQuery({ name: 'mode', required: false, description: 'Auth mode: token for iOS/Mac, cookie for others' })
+  @ApiQuery({
+    name: 'mode',
+    required: false,
+    description: 'Auth mode: token for iOS/Mac, cookie for others',
+  })
   async login(
     @Body() loginDto: LoginDto,
     @Res({ passthrough: true }) response: Response,
@@ -63,43 +70,46 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     try {
       // Detect auth mode
-      const authMode = mode || request.headers['x-auth-mode']
-      const isTokenMode = authMode === 'token'
-      
+      const authMode = mode || request.headers['x-auth-mode'];
+      const isTokenMode = authMode === 'token';
+
       // Enhanced device detection
-      const userAgent = request?.headers['user-agent'] || ''
-      const isIOSOrMac = /iPad|iPhone|iPod|Macintosh/i.test(userAgent)
-      
+      const userAgent = request?.headers['user-agent'] || '';
+      const isIOSOrMac = /iPad|iPhone|iPod|Macintosh/i.test(userAgent);
+
       this.logger.log('Login request:', {
         authMode: isTokenMode ? 'token' : 'cookie',
         isIOSOrMac,
-        userAgent: userAgent.substring(0, 50)
-      })
+        userAgent: userAgent.substring(0, 50),
+      });
 
       const result = await this.authService.login(
-        loginDto, 
+        loginDto,
         isTokenMode ? null : response, // Don't pass response for token mode
-        loginDto.rememberMe || false, 
-        request
-      )
+        loginDto.rememberMe || false,
+        request,
+      );
 
       // Token mode: Return tokens in response body and headers
       if (isTokenMode) {
-        response.setHeader('X-Access-Token', result.access_token)
-        response.setHeader('X-Refresh-Token', result.refresh_token || result.access_token)
-        
+        response.setHeader('X-Access-Token', result.access_token);
+        response.setHeader(
+          'X-Refresh-Token',
+          result.refresh_token || result.access_token,
+        );
+
         return {
           ...result,
           accessToken: result.access_token,
           refreshToken: result.refresh_token || result.access_token,
-        }
+        };
       }
 
       // Cookie mode: Tokens are set in cookies by service
-      return result
+      return result;
     } catch (error) {
-      console.error('Login controller error:', error)
-      throw error
+      console.error('Login controller error:', error);
+      throw error;
     }
   }
 
@@ -108,15 +118,19 @@ export class AuthController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Logout user' })
   @ApiResponse({ status: 200, description: 'User logged out successfully' })
-  async logout(@Res({ passthrough: true }) response: Response, @Req() request: any) {
+  async logout(
+    @Res({ passthrough: true }) response: Response,
+    @Req() request: any,
+  ) {
     // ✅ Pass request to get device info for proper cookie clearing
     const userAgent = request?.headers['user-agent'] || '';
     const deviceInfo = {
-      isIOSSafari: /iPad|iPhone|iPod|Mac.*OS.*X/i.test(userAgent) && 
-                   /Safari/i.test(userAgent) && 
-                   !/Chrome|CriOS|EdgiOS/i.test(userAgent)
+      isIOSSafari:
+        /iPad|iPhone|iPod|Mac.*OS.*X/i.test(userAgent) &&
+        /Safari/i.test(userAgent) &&
+        !/Chrome|CriOS|EdgiOS/i.test(userAgent),
     };
-    
+
     return this.authService.logout(response, deviceInfo);
   }
 
@@ -140,17 +154,17 @@ export class AuthController {
     @Body() body: { refreshToken?: string } = {}, // ✅ Provide default value
   ): Promise<AuthResponseDto> {
     try {
-      const authMode = request.headers['x-auth-mode']
-      const isTokenMode = authMode === 'token'
-      
+      const authMode = request.headers['x-auth-mode'];
+      const isTokenMode = authMode === 'token';
+
       if (isTokenMode) {
         // Token mode: Get refresh token from body
         if (!body.refreshToken) {
-          throw new BadRequestException('Refresh token required')
+          throw new BadRequestException('Refresh token required');
         }
-        
+
         // Validate refresh token and get user
-        const payload = this.jwtService.verify(body.refreshToken)
+        const payload = this.jwtService.verify(body.refreshToken);
         const user = await this.prisma.user.findUnique({
           where: { id: payload.sub },
           include: {
@@ -162,37 +176,48 @@ export class AuthController {
               },
             },
           },
-        })
+        });
 
         if (!user || !user.isActive) {
-          throw new UnauthorizedException('Invalid refresh token')
+          throw new UnauthorizedException('Invalid refresh token');
         }
 
         // Generate new tokens
-        const newPayload = { sub: user.id, employeeCode: user.employeeCode, role: user.role }
-        const accessToken = this.jwtService.sign(newPayload, { expiresIn: '7d' })
-        const refreshToken = this.jwtService.sign({ ...newPayload, type: 'refresh' }, { expiresIn: '30d' })
+        const newPayload = {
+          sub: user.id,
+          employeeCode: user.employeeCode,
+          role: user.role,
+        };
+        const accessToken = this.jwtService.sign(newPayload, {
+          expiresIn: '7d',
+        });
+        const refreshToken = this.jwtService.sign(
+          { ...newPayload, type: 'refresh' },
+          { expiresIn: '30d' },
+        );
 
         // Set headers for token mode
-        response.setHeader('X-Access-Token', accessToken)
-        response.setHeader('X-Refresh-Token', refreshToken)
+        response.setHeader('X-Access-Token', accessToken);
+        response.setHeader('X-Refresh-Token', refreshToken);
 
-        const { password: _, ...userWithoutPassword } = user
+        const { password: _, ...userWithoutPassword } = user;
         return {
           access_token: accessToken,
           refresh_token: refreshToken, // ✅ Include refresh_token
           accessToken, // For iOS/Mac compatibility
           refreshToken,
           user: userWithoutPassword,
-          message: 'Token refreshed successfully'
-        }
+          message: 'Token refreshed successfully',
+        };
       } else {
         // Cookie mode: Use existing refresh logic with JWT guard
-        throw new UnauthorizedException('Cookie-based refresh should use authenticated endpoint')
+        throw new UnauthorizedException(
+          'Cookie-based refresh should use authenticated endpoint',
+        );
       }
     } catch (error) {
-      console.error('Refresh token error:', error)
-      throw error
+      console.error('Refresh token error:', error);
+      throw error;
     }
   }
 
@@ -211,7 +236,7 @@ export class AuthController {
       response,
       rememberMe,
       request,
-    )
+    );
   }
 
   @Post('forgot-password')
@@ -235,34 +260,36 @@ export class AuthController {
   // Enhanced iOS debugging endpoint
   @Post('check-cookie')
   @Public()
-  @ApiOperation({ summary: 'Check cookie compatibility and test cookie operations' })
+  @ApiOperation({
+    summary: 'Check cookie compatibility and test cookie operations',
+  })
   checkCookie(@Req() req: any, @Res({ passthrough: true }) response: Response) {
     const userAgent = req.headers['user-agent'] || '';
-    
+
     // Enhanced device detection
     const iosPattern = /iPad|iPhone|iPod/i;
     const macPattern = /Mac.*OS.*X/i;
     const safariPattern = /Safari/i;
     const chromePattern = /Chrome|CriOS|EdgiOS/i;
-    
+
     const isIOS = iosPattern.test(userAgent);
     const isMac = macPattern.test(userAgent);
     const isSafari = safariPattern.test(userAgent);
     const isChrome = chromePattern.test(userAgent);
     const isSimulator = userAgent.includes('Simulator');
-    
+
     const isIOSDevice = isIOS || isMac;
     const isIOSSafari = isIOSDevice && isSafari && !isChrome;
     const isRealDevice = isIOS && !isSimulator;
-    
+
     // Check current cookies
     const allCookies = req.cookies || {};
     const cookieHeader = req.headers.cookie;
-    
+
     // ✅ Set test cookie with same settings as auth cookie
     const testToken = `test-${Date.now()}`;
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Set test cookie
     response.cookie('test_access_token', testToken, {
       httpOnly: true,
@@ -275,7 +302,8 @@ export class AuthController {
     return {
       success: true,
       deviceDetection: {
-        userAgent: userAgent.substring(0, 150) + (userAgent.length > 150 ? '...' : ''),
+        userAgent:
+          userAgent.substring(0, 150) + (userAgent.length > 150 ? '...' : ''),
         isIOS,
         isMac,
         isSafari,
@@ -284,17 +312,21 @@ export class AuthController {
         isIOSSafari,
         isRealDevice,
         isSimulator,
-        platform: req.headers['sec-ch-ua-platform'] || 'unknown'
+        platform: req.headers['sec-ch-ua-platform'] || 'unknown',
       },
       cookies: {
         hasCookieHeader: !!cookieHeader,
         cookieHeaderLength: cookieHeader ? cookieHeader.length : 0,
-        cookieHeaderRaw: cookieHeader ? cookieHeader.substring(0, 200) + '...' : 'undefined',
-        
+        cookieHeaderRaw: cookieHeader
+          ? cookieHeader.substring(0, 200) + '...'
+          : 'undefined',
+
         // ✅ Only check access_token
         hasAccessToken: !!allCookies['access_token'],
-        accessTokenPreview: allCookies['access_token'] ? allCookies['access_token'].substring(0, 10) + '...' : null,
-        
+        accessTokenPreview: allCookies['access_token']
+          ? allCookies['access_token'].substring(0, 10) + '...'
+          : null,
+
         allCookieKeys: Object.keys(allCookies),
         cookieCount: Object.keys(allCookies).length,
       },
@@ -305,7 +337,7 @@ export class AuthController {
         'sec-fetch-site': req.headers['sec-fetch-site'],
         'sec-fetch-mode': req.headers['sec-fetch-mode'],
         'sec-ch-ua': req.headers['sec-ch-ua'],
-        'sec-ch-ua-platform': req.headers['sec-ch-ua-platform']
+        'sec-ch-ua-platform': req.headers['sec-ch-ua-platform'],
       },
       testCookie: {
         name: 'test_access_token',
@@ -315,16 +347,16 @@ export class AuthController {
           secure: isProduction,
           sameSite: 'lax',
           maxAge: 300000,
-          path: '/'
-        }
+          path: '/',
+        },
       },
       recommendations: {
         cookieStrategy: 'single-access-token-lax',
         requiresSpecialHandling: isIOSSafari,
         isRealDeviceTest: isRealDevice,
-        testAdvice: isRealDevice 
+        testAdvice: isRealDevice
           ? 'Real device test - results are reliable'
-          : 'Simulation detected - test on real device for accurate results'
+          : 'Simulation detected - test on real device for accurate results',
       },
       timestamp: new Date().toISOString(),
     };
@@ -334,10 +366,13 @@ export class AuthController {
   @Post('test-cookie-clear')
   @Public()
   @ApiOperation({ summary: 'Test cookie clearing functionality' })
-  testCookieClear(@Req() req: any, @Res({ passthrough: true }) response: Response) {
+  testCookieClear(
+    @Req() req: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // First set a test cookie
     const testToken = `test-${Date.now()}`;
     response.cookie('access_token', testToken, {
@@ -347,7 +382,7 @@ export class AuthController {
       maxAge: 60000, // 1 minute
       path: '/',
     });
-    
+
     // Then immediately clear it using the same method as logout
     response.clearCookie('access_token', {
       httpOnly: true,
@@ -355,13 +390,13 @@ export class AuthController {
       sameSite: 'lax' as const,
       path: '/',
     });
-    
+
     // Additional clearing attempts
     response.clearCookie('access_token');
     response.clearCookie('access_token', { path: '/' });
     response.clearCookie('access_token', {
       secure: isProduction,
-      path: '/'
+      path: '/',
     });
 
     return {
@@ -372,9 +407,10 @@ export class AuthController {
         value: testToken,
         wasSet: true,
         wasCleared: true,
-        clearingMethods: 4
+        clearingMethods: 4,
       },
-      instructions: 'Check browser dev tools to verify cookie was properly cleared',
+      instructions:
+        'Check browser dev tools to verify cookie was properly cleared',
       timestamp: new Date().toISOString(),
     };
   }
@@ -383,14 +419,17 @@ export class AuthController {
   @Post('production-cookie-test')
   @Public()
   @ApiOperation({ summary: 'Test production cookie functionality' })
-  productionCookieTest(@Req() req: any, @Res({ passthrough: true }) response: Response) {
+  productionCookieTest(
+    @Req() req: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const origin = req.headers.origin || '';
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Set test cookie with production settings
     const testToken = `prod-test-${Date.now()}`;
-    
+
     // ✅ Use exact same settings as login
     response.cookie('test_production_cookie', testToken, {
       httpOnly: true,
@@ -399,7 +438,7 @@ export class AuthController {
       maxAge: 300000, // 5 minutes
       path: '/',
     });
-    
+
     // Always set fallback header in production
     response.setHeader('X-Access-Token', testToken);
     response.setHeader('X-Cookie-Fallback', 'true');
@@ -417,24 +456,26 @@ export class AuthController {
           secure: false,
           sameSite: 'lax',
           maxAge: 300000,
-          path: '/'
-        }
+          path: '/',
+        },
       },
       fallback: {
         headerName: 'X-Access-Token',
         headerValue: testToken,
-        fallbackEnabled: true
+        fallbackEnabled: true,
       },
       instructions: [
         '1. Check browser cookies for test_production_cookie',
         '2. Check localStorage for fallback token',
         '3. Verify CORS headers allow credentials',
-        '4. Test from exact production domain'
+        '4. Test from exact production domain',
       ],
       corsHeaders: {
         origin: req.headers.origin,
         credentials: 'include',
-        allowedOrigin: origin.endsWith('.vercel.app') ? 'allowed' : 'check-config'
+        allowedOrigin: origin.endsWith('.vercel.app')
+          ? 'allowed'
+          : 'check-config',
       },
       timestamp: new Date().toISOString(),
     };
@@ -444,32 +485,35 @@ export class AuthController {
   @Post('debug-cookie-production')
   @Public()
   @ApiOperation({ summary: 'Debug production cookie issues' })
-  debugCookieProduction(@Req() req: any, @Res({ passthrough: true }) response: Response) {
+  debugCookieProduction(
+    @Req() req: any,
+    @Res({ passthrough: true }) response: Response,
+  ) {
     const userAgent = req.headers['user-agent'] || '';
     const origin = req.headers.origin || '';
     const isProduction = process.env.NODE_ENV === 'production';
-    
+
     // Set test cookie with EXACT production settings
     const testToken = `debug-${Date.now()}`;
-    
+
     const cookieOptions = {
       httpOnly: true,
       secure: isProduction, // true in production
-      sameSite: isProduction ? 'none' as const : 'lax' as const, // none in production
+      sameSite: isProduction ? ('none' as const) : ('lax' as const), // none in production
       maxAge: 300000, // 5 minutes
       path: '/',
     };
-    
+
     this.logger.log('🔍 Setting debug cookie with production settings:', {
       isProduction,
       cookieOptions,
       origin,
-      userAgent: userAgent.substring(0, 50)
+      userAgent: userAgent.substring(0, 50),
     });
-    
+
     // Set test cookie
     response.cookie('debug_production_cookie', testToken, cookieOptions);
-    
+
     // Set fallback headers
     response.setHeader('X-Access-Token', testToken);
     response.setHeader('X-Cookie-Fallback', 'true');
@@ -485,27 +529,38 @@ export class AuthController {
         testCookie: {
           name: 'debug_production_cookie',
           value: testToken,
-          options: cookieOptions
+          options: cookieOptions,
         },
         fallbackHeaders: {
           'X-Access-Token': testToken,
           'X-Cookie-Fallback': 'true',
-          'X-Cookie-Settings': JSON.stringify(cookieOptions)
+          'X-Cookie-Settings': JSON.stringify(cookieOptions),
         },
         currentCookies: {
           hasCookieHeader: !!req.headers.cookie,
           cookieHeader: req.headers.cookie || 'none',
           parsedCookies: req.cookies || {},
-          cookieCount: req.cookies ? Object.keys(req.cookies).length : 0
+          cookieCount: req.cookies ? Object.keys(req.cookies).length : 0,
         },
         instructions: [
           '1. Check browser dev tools → Application → Cookies',
           '2. Look for debug_production_cookie',
           '3. Check if SameSite=None and Secure=true in production',
           '4. Verify HTTPS is used for cookie to work',
-          '5. Check localStorage for fallback token'
-        ]
-      }
+          '5. Check localStorage for fallback token',
+        ],
+      },
     };
+  }
+
+  @Get('permissions')
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Get current user permissions' })
+  @ApiResponse({
+    status: 200,
+    description: 'Permissions retrieved successfully',
+  })
+  async getPermissions(@GetUser() user: any) {
+    return this.permissionsService.getUserPermissions(user.id);
   }
 }

@@ -7,6 +7,7 @@ import {
 import { PrismaService } from '../../../common/prisma.service';
 import { CreateGroupDto } from '../dto/group/create-group.dto';
 import { UpdateGroupDto } from '../dto/group/update-group.dto';
+import { TransferGroupDto } from '../dto/group/transfer-group.dto';
 
 @Injectable()
 export class GroupService {
@@ -18,17 +19,19 @@ export class GroupService {
     // Check if group code already exists in this team
     const existingGroup = await this.prisma.group.findUnique({
       where: {
-        code_teamId: { code, teamId }
-      }
+        code_teamId: { code, teamId },
+      },
     });
 
     if (existingGroup) {
-      throw new ConflictException('Group with this code already exists in team');
+      throw new ConflictException(
+        'Group with this code already exists in team',
+      );
     }
 
     // Validate team exists
     const team = await this.prisma.team.findUnique({
-      where: { id: teamId }
+      where: { id: teamId },
     });
 
     if (!team) {
@@ -46,10 +49,10 @@ export class GroupService {
               select: {
                 name: true,
                 code: true,
-                factory: { select: { name: true, code: true } }
-              }
-            }
-          }
+                factory: { select: { name: true, code: true } },
+              },
+            },
+          },
         },
         leader: {
           select: {
@@ -57,18 +60,18 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true
-          }
+            role: true,
+          },
         },
         _count: {
-          select: { members: true }
-        }
-      }
+          select: { members: true },
+        },
+      },
     });
   }
 
   async findAll(options: { teamId?: string; includeMembers?: boolean } = {}) {
-    const where: any = { };
+    const where: any = {};
 
     if (options.teamId) {
       where.teamId = options.teamId;
@@ -91,12 +94,12 @@ export class GroupService {
                   select: {
                     id: true,
                     name: true,
-                    code: true
-                  }
-                }
-              }
-            }
-          }
+                    code: true,
+                  },
+                },
+              },
+            },
+          },
         },
         leader: {
           select: {
@@ -104,30 +107,32 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true
-          }
-        },
-        members: options.includeMembers ? {
-          where: { isActive: true },
-          select: {
-            id: true,
-            employeeCode: true,
-            firstName: true,
-            lastName: true,
-            role: true
+            role: true,
           },
-          orderBy: { employeeCode: 'asc' }
-        } : false,
+        },
+        members: options.includeMembers
+          ? {
+              where: { isActive: true },
+              select: {
+                id: true,
+                employeeCode: true,
+                firstName: true,
+                lastName: true,
+                role: true,
+              },
+              orderBy: { employeeCode: 'asc' },
+            }
+          : false,
         _count: {
-          select: { members: true }
-        }
+          select: { members: true },
+        },
       },
       orderBy: [
         { team: { line: { factory: { code: 'asc' } } } },
         { team: { line: { code: 'asc' } } },
         { team: { code: 'asc' } },
-        { code: 'asc' }
-      ]
+        { code: 'asc' },
+      ],
     });
   }
 
@@ -138,9 +143,9 @@ export class GroupService {
         team: {
           include: {
             line: {
-              include: { factory: true }
-            }
-          }
+              include: { factory: true },
+            },
+          },
         },
         leader: {
           select: {
@@ -150,8 +155,8 @@ export class GroupService {
             lastName: true,
             role: true,
             phone: true,
-            email: true
-          }
+            email: true,
+          },
         },
         members: {
           where: { isActive: true },
@@ -162,17 +167,17 @@ export class GroupService {
             lastName: true,
             role: true,
             phone: true,
-            email: true
+            email: true,
           },
-          orderBy: { employeeCode: 'asc' }
+          orderBy: { employeeCode: 'asc' },
         },
         _count: {
           select: {
             members: true,
-            worksheets: true
-          }
-        }
-      }
+            worksheets: true,
+          },
+        },
+      },
     });
 
     if (!group) {
@@ -184,7 +189,7 @@ export class GroupService {
 
   async update(id: string, updateGroupDto: UpdateGroupDto) {
     const group = await this.prisma.group.findUnique({
-      where: { id }
+      where: { id },
     });
 
     if (!group) {
@@ -197,13 +202,15 @@ export class GroupService {
         where: {
           code_teamId: {
             code: updateGroupDto.code,
-            teamId: group.teamId
-          }
-        }
+            teamId: group.teamId,
+          },
+        },
       });
 
       if (existingGroup) {
-        throw new ConflictException('Group with this code already exists in team');
+        throw new ConflictException(
+          'Group with this code already exists in team',
+        );
       }
     }
 
@@ -219,10 +226,10 @@ export class GroupService {
               select: {
                 name: true,
                 code: true,
-                factory: { select: { name: true, code: true } }
-              }
-            }
-          }
+                factory: { select: { name: true, code: true } },
+              },
+            },
+          },
         },
         leader: {
           select: {
@@ -230,19 +237,19 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true
-          }
+            role: true,
+          },
         },
         _count: {
-          select: { members: true }
-        }
-      }
+          select: { members: true },
+        },
+      },
     });
   }
 
   async assignLeader(groupId: string, leaderId: string) {
     const group = await this.prisma.group.findUnique({
-      where: { id: groupId }
+      where: { id: groupId },
     });
 
     if (!group) {
@@ -251,7 +258,7 @@ export class GroupService {
 
     // Validate leader exists and has appropriate role
     const leader = await this.prisma.user.findUnique({
-      where: { id: leaderId }
+      where: { id: leaderId },
     });
 
     if (!leader) {
@@ -267,8 +274,8 @@ export class GroupService {
       where: {
         leaderId: leaderId,
         isActive: true,
-        id: { not: groupId }
-      }
+        id: { not: groupId },
+      },
     });
 
     if (existingLeadership) {
@@ -285,13 +292,13 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true
-          }
+            role: true,
+          },
         },
         _count: {
-          select: { members: true }
-        }
-      }
+          select: { members: true },
+        },
+      },
     });
   }
 
@@ -302,11 +309,11 @@ export class GroupService {
         team: {
           include: {
             line: {
-              include: { factory: true }
-            }
-          }
-        }
-      }
+              include: { factory: true },
+            },
+          },
+        },
+      },
     });
 
     if (!group) {
@@ -314,7 +321,7 @@ export class GroupService {
     }
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -327,21 +334,23 @@ export class GroupService {
 
     // Check if user is already in a group
     if (user.groupId) {
-      throw new ConflictException('Người dùng đã là thành viên của một nhóm khác');
+      throw new ConflictException(
+        'Người dùng đã là thành viên của một nhóm khác',
+      );
     }
 
     // ⭐ ADD: Auto-create worksheets for recent dates (last 7 days)
     const today = new Date();
     const sevenDaysAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
-    
+
     // Find existing worksheets in this group from the last 7 days
     const recentWorksheets = await this.prisma.workSheet.findMany({
       where: {
         groupId,
         date: {
           gte: sevenDaysAgo,
-          lte: today
-        }
+          lte: today,
+        },
       },
       distinct: ['date', 'shiftType', 'productId', 'processId'],
       select: {
@@ -350,14 +359,14 @@ export class GroupService {
         productId: true,
         processId: true,
         plannedOutput: true,
-        factoryId: true
+        factoryId: true,
       },
-      orderBy: { date: 'desc' }
+      orderBy: { date: 'desc' },
     });
 
     // Group worksheets by date
-    const worksheetsByDate = new Map<string, typeof recentWorksheets[0]>();
-    recentWorksheets.forEach(ws => {
+    const worksheetsByDate = new Map<string, (typeof recentWorksheets)[0]>();
+    recentWorksheets.forEach((ws) => {
       const dateKey = ws.date.toISOString().split('T')[0];
       if (!worksheetsByDate.has(dateKey)) {
         worksheetsByDate.set(dateKey, ws);
@@ -375,20 +384,20 @@ export class GroupService {
           employeeCode: true,
           firstName: true,
           lastName: true,
-          role: true
-        }
+          role: true,
+        },
       });
 
       // ⭐ Create missing worksheets for this user
       const createdWorksheets = [];
-      
+
       for (const [dateStr, templateWorksheet] of worksheetsByDate) {
         // Check if worksheet already exists for this user on this date
         const existingWorksheet = await tx.workSheet.findFirst({
           where: {
             workerId: userId,
-            date: templateWorksheet.date
-          }
+            date: templateWorksheet.date,
+          },
         });
 
         if (!existingWorksheet) {
@@ -404,39 +413,51 @@ export class GroupService {
               shiftType: templateWorksheet.shiftType,
               plannedOutput: templateWorksheet.plannedOutput,
               createdById: userId, // Use the new user as creator
-              status: 'ACTIVE'
-            }
+              status: 'ACTIVE',
+            },
           });
 
           // Create records for each work hour
-          const workHours = this.getWorkHoursForShift(templateWorksheet.shiftType);
-          
+          const workHours = this.getWorkHoursForShift(
+            templateWorksheet.shiftType,
+          );
+
           for (const { hour, startTime, endTime } of workHours) {
             await tx.workSheetRecord.create({
               data: {
                 worksheetId: newWorksheet.id,
                 workHour: hour,
-                startTime: this.createDateTimeFromTimeString(templateWorksheet.date, startTime),
-                endTime: this.createDateTimeFromTimeString(templateWorksheet.date, endTime),
+                startTime: this.createDateTimeFromTimeString(
+                  templateWorksheet.date,
+                  startTime,
+                ),
+                endTime: this.createDateTimeFromTimeString(
+                  templateWorksheet.date,
+                  endTime,
+                ),
                 plannedOutput: templateWorksheet.plannedOutput,
-                status: 'PENDING'
-              }
+                status: 'PENDING',
+              },
             });
           }
 
           createdWorksheets.push({
             date: dateStr,
-            shiftType: templateWorksheet.shiftType
+            shiftType: templateWorksheet.shiftType,
           });
         }
       }
 
-      console.log(`✅ Added member ${updatedUser.employeeCode} to group ${groupId}`);
-      console.log(`📝 Auto-created ${createdWorksheets.length} worksheets for recent dates`);
+      console.log(
+        `✅ Added member ${updatedUser.employeeCode} to group ${groupId}`,
+      );
+      console.log(
+        `📝 Auto-created ${createdWorksheets.length} worksheets for recent dates`,
+      );
 
       return {
         user: updatedUser,
-        autoCreatedWorksheets: createdWorksheets
+        autoCreatedWorksheets: createdWorksheets,
       };
     });
   }
@@ -451,21 +472,21 @@ export class GroupService {
       { hour: 5, startTime: '12:30', endTime: '13:30' },
       { hour: 6, startTime: '13:30', endTime: '14:30' },
       { hour: 7, startTime: '14:30', endTime: '15:30' },
-      { hour: 8, startTime: '15:30', endTime: '16:30' }
+      { hour: 8, startTime: '15:30', endTime: '16:30' },
     ];
 
     switch (shiftType) {
       case 'EXTENDED_9_5H':
         return [
           ...baseHours,
-          { hour: 9, startTime: '16:30', endTime: '18:00' }
+          { hour: 9, startTime: '16:30', endTime: '18:00' },
         ];
       case 'OVERTIME_11H':
         return [
           ...baseHours,
           { hour: 9, startTime: '17:00', endTime: '18:00' },
           { hour: 10, startTime: '18:00', endTime: '19:00' },
-          { hour: 11, startTime: '19:00', endTime: '20:00' }
+          { hour: 11, startTime: '19:00', endTime: '20:00' },
         ];
       default:
         return baseHours;
@@ -474,21 +495,21 @@ export class GroupService {
 
   private createDateTimeFromTimeString(date: Date, timeString: string): Date {
     const [hours, minutes] = timeString.split(':').map(Number);
-    
+
     if (isNaN(hours) || isNaN(minutes)) {
       throw new BadRequestException(`Invalid time string: ${timeString}`);
     }
-    
+
     const year = date.getFullYear();
     const month = date.getMonth();
     const day = date.getDate();
-    
+
     return new Date(Date.UTC(year, month, day, hours, minutes, 0, 0));
   }
 
   async removeMember(groupId: string, userId: string) {
     const group = await this.prisma.group.findUnique({
-      where: { id: groupId }
+      where: { id: groupId },
     });
 
     if (!group) {
@@ -496,7 +517,7 @@ export class GroupService {
     }
 
     const user = await this.prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -509,7 +530,9 @@ export class GroupService {
 
     // Don't allow removing group leader
     if (group.leaderId === userId) {
-      throw new BadRequestException('Cannot remove group leader. Assign new leader first');
+      throw new BadRequestException(
+        'Cannot remove group leader. Assign new leader first',
+      );
     }
 
     return this.prisma.user.update({
@@ -520,8 +543,8 @@ export class GroupService {
         employeeCode: true,
         firstName: true,
         lastName: true,
-        role: true
-      }
+        role: true,
+      },
     });
   }
 
@@ -530,9 +553,9 @@ export class GroupService {
       where: { id },
       include: {
         _count: {
-          select: { members: true }
-        }
-      }
+          select: { members: true },
+        },
+      },
     });
 
     if (!group) {
@@ -544,7 +567,145 @@ export class GroupService {
     }
 
     return this.prisma.group.delete({
-      where: { id }
+      where: { id },
     });
+  }
+
+  /**
+   * Transfer group to another team
+   */
+  async transferGroup(groupId: string, transferDto: TransferGroupDto) {
+    const { targetTeamId, newCode } = transferDto;
+
+    // Validate group exists
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      include: {
+        team: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            line: {
+              select: {
+                name: true,
+                code: true,
+                factory: { select: { name: true, code: true } },
+              },
+            },
+          },
+        },
+        _count: { select: { members: true } },
+      },
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    // Validate target team exists
+    const targetTeam = await this.prisma.team.findUnique({
+      where: { id: targetTeamId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        line: {
+          select: {
+            name: true,
+            code: true,
+            factory: { select: { name: true, code: true } },
+          },
+        },
+      },
+    });
+
+    if (!targetTeam) {
+      throw new NotFoundException('Target team not found');
+    }
+
+    // Check if already in target team
+    if (group.teamId === targetTeamId && !newCode) {
+      throw new ConflictException('Group is already in target team');
+    }
+
+    // Determine final code
+    const finalCode = newCode || group.code;
+
+    // Check code conflict in target team
+    const existingGroup = await this.prisma.group.findUnique({
+      where: {
+        code_teamId: { code: finalCode, teamId: targetTeamId },
+      },
+    });
+
+    if (existingGroup && existingGroup.id !== groupId) {
+      throw new ConflictException(
+        `Group with code '${finalCode}' already exists in target team`,
+      );
+    }
+
+    // Perform transfer
+    const transferredGroup = await this.prisma.group.update({
+      where: { id: groupId },
+      data: {
+        teamId: targetTeamId,
+        code: finalCode,
+      },
+      include: {
+        team: {
+          select: {
+            name: true,
+            code: true,
+            line: {
+              select: {
+                name: true,
+                code: true,
+                factory: { select: { name: true, code: true } },
+              },
+            },
+          },
+        },
+        leader: {
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+            role: true,
+          },
+        },
+        members: {
+          where: { isActive: true },
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+          },
+          orderBy: { employeeCode: 'asc' },
+        },
+        _count: { select: { members: true } },
+      },
+    });
+
+    return {
+      group: transferredGroup,
+      transfer: {
+        from: {
+          teamId: group.teamId,
+          teamName: group.team.name,
+          lineName: group.team.line.name,
+          factoryName: group.team.line.factory.name,
+        },
+        to: {
+          teamId: targetTeam.id,
+          teamName: targetTeam.name,
+          lineName: targetTeam.line.name,
+          factoryName: targetTeam.line.factory.name,
+        },
+        membersAffected: group._count.members,
+      },
+    };
   }
 }

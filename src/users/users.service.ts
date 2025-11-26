@@ -1,24 +1,29 @@
 import {
   Injectable,
   NotFoundException,
-  ForbiddenException,
+  ConflictException,
   BadRequestException,
-  Logger,
+  ForbiddenException,
   InternalServerErrorException,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CloudflareR2Service } from '../common/r2.service';
-import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+import * as XLSX from 'xlsx';
+import { CreateUserDto } from './dto/create-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import type { Express } from 'express'; // ⭐ ADD: Import Express namespace
 
-// Define interface for uploaded file
-interface UploadedFile {
-  fieldname: string;
-  originalname: string;
-  encoding: string;
-  mimetype: string;
-  size: number;
-  buffer: Buffer;
+interface GetAllUsersParams {
+  page: number;
+  limit: number;
+  search?: string;
+  officeId?: string;
+  departmentId?: string;
+  role?: Role;
+  isActive?: boolean;
 }
 
 @Injectable()
@@ -27,684 +32,510 @@ export class UsersService {
 
   constructor(
     private prisma: PrismaService,
-    private r2Service: CloudflareR2Service, // Replace FirebaseService
+    private r2Service: CloudflareR2Service,
   ) {}
 
-  async getProfile(userId: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: {
-              include: {
-                office: true,
-              },
+  // ========== USER CRUD ==========
+
+  async getAllUsers(params: GetAllUsersParams) {
+    const { page, limit, search, officeId, departmentId, role, isActive } =
+      params;
+
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+
+    if (search) {
+      where.OR = [
+        { employeeCode: { contains: search, mode: 'insensitive' } },
+        { firstName: { contains: search, mode: 'insensitive' } },
+        { lastName: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    if (officeId) where.officeId = officeId;
+    if (role) where.role = role;
+    if (typeof isActive === 'boolean') where.isActive = isActive;
+
+    if (departmentId) {
+      where.jobPosition = {
+        departmentId: departmentId,
+      };
+    }
+
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          office: {
+            select: { id: true, name: true, type: true },
+          },
+          jobPosition: {
+            include: {
+              position: { select: { name: true, level: true } },
+              department: { select: { id: true, name: true } },
             },
           },
+          group: {
+            select: { id: true, name: true, code: true },
+          },
         },
+        orderBy: [{ isActive: 'desc' }, { firstName: 'asc' }],
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+
+    return {
+      data: users.map(({ password, ...user }) => user),
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
       },
-    });
-
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
-
-    const { password, ...userWithoutPassword } = user;
-    const isManager = user.jobPosition.position.name === "NV" && user.jobPosition.position.level === 7 ? false : true;
-    return { ...userWithoutPassword, isManager };
-  }
-
-  async updateProfile(
-    userId: string,
-    updateProfileDto: UpdateProfileDto,
-    currentUserRole?: Role,
-  ) {
-    const {
-      employeeCode,
-      jobPositionId,
-      officeId,
-      phone,
-      email,
-      role,
-      ...otherData
-    } = updateProfileDto;
-
-    // Get current user to check permissions
-    const currentUser = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { jobPosition: { include: { department: true } } },
-    });
-
-    if (!currentUser) {
-      throw new NotFoundException('User not found');
-    }
-
-    const isSuperAdmin = currentUserRole === Role.SUPERADMIN;
-
-    // User can change their own info, but some fields require admin privileges
-    if (employeeCode && employeeCode !== currentUser.employeeCode) {
-      // Check if new employee code is already taken
-      const existingUser = await this.prisma.user.findUnique({
-        where: { employeeCode },
-      });
-      if (existingUser && existingUser.id !== userId) {
-        throw new BadRequestException('Employee code is already in use');
-      }
-    }
-
-    // Role change authorization - only superadmin can change roles
-    if (role && role !== currentUser.role) {
-      if (!isSuperAdmin) {
-        throw new ForbiddenException('Only superadmin can change user roles');
-      }
-    }
-
-    // Office change validation - users can change their office
-    if (officeId && officeId !== currentUser.officeId) {
-      const office = await this.prisma.office.findUnique({
-        where: { id: officeId },
-      });
-      if (!office) {
-        throw new BadRequestException('Office not found');
-      }
-    }
-
-
-    // Validate job position if provided
-    if (jobPositionId && jobPositionId !== currentUser.jobPositionId) {
-      const jobPosition = await this.prisma.jobPosition.findUnique({
-        where: { id: jobPositionId },
-        include: { department: true },
-      });
-      if (!jobPosition) {
-        throw new BadRequestException('Job position not found');
-      }
-
-      // For regular users, ensure job position belongs to their selected office
-      const targetOfficeId = officeId || currentUser.officeId;
-      if (jobPosition.department.officeId !== targetOfficeId) {
-        throw new BadRequestException(
-          'Job position must belong to the selected office',
-        );
-      }
-    }
-
-    // Check if email is already used by another user
-    if (email && email !== currentUser.email) {
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email },
-      });
-      if (existingUser && existingUser.id !== userId) {
-        throw new BadRequestException('Email is already in use');
-      }
-    }
-
-    // Check if phone is already used by another user
-    // if (phone && phone !== currentUser.phone) {
-    //   const existingUser = await this.prisma.user.findUnique({
-    //     where: { phone },
-    //   });
-    //   if (existingUser && existingUser.id !== userId) {
-    //     throw new BadRequestException('Phone number is already in use');
-    //   }
-    // }
-
-    // Build update data - users can update all their fields
-    const updateData: any = {
-      ...otherData,
     };
-
-    // Add conditional fields
-    if (employeeCode !== undefined) updateData.employeeCode = employeeCode;
-    if (email !== undefined) updateData.email = email;
-    if (phone !== undefined) updateData.phone = phone;
-    if (jobPositionId !== undefined) updateData.jobPositionId = jobPositionId;
-    if (officeId !== undefined) updateData.officeId = officeId;
-    if (role !== undefined) updateData.role = role;
-
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: updateData,
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: {
-              include: {
-                office: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
   }
 
-  // Admin methods for managing other users
-  async updateUserByAdmin(
-    adminUserId: string,
-    targetUserId: string,
-    updateProfileDto: UpdateProfileDto,
-    adminRole: Role,
-  ) {
-    // Get admin user info
-    const adminUser = await this.prisma.user.findUnique({
-      where: { id: adminUserId },
-      include: { office: true },
-    });
-
-    if (!adminUser) {
-      throw new NotFoundException('Admin user not found');
-    }
-
-    // Get target user
-    const targetUser = await this.prisma.user.findUnique({
-      where: { id: targetUserId },
-      include: { office: true },
-    });
-
-    if (!targetUser) {
-      throw new NotFoundException('Target user not found');
-    }
-
-    // Superadmin can modify anyone
-    if (adminRole !== Role.SUPERADMIN && adminRole !== Role.ADMIN) {
-      throw new ForbiddenException('Insufficient permissions');
-    }
-
-    // Authorization: Admin can only modify users in their office
-    if (
-      adminRole === Role.ADMIN &&
-      targetUser.officeId !== adminUser.officeId
-    ) {
-      throw new ForbiddenException(
-        'Admin can only modify users in their office',
-      );
-    }
-
-    // Use the same update logic with admin permissions
-    return this.updateProfile(targetUserId, updateProfileDto, adminRole);
-  }
-
-  // Add new method for superadmin to get all users for management
-  async getAllUsersForManagement() {
-    return this.prisma.user.findMany({
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: true,
-          },
-        },
-      },
-      orderBy: [
-        { office: { name: 'asc' } },
-        { jobPosition: { department: { name: 'asc' } } },
-        { lastName: 'asc' },
-        { firstName: 'asc' },
-      ],
-    });
-  }
-
-  async getUsersByOffice(officeId: string) {
-    return this.prisma.user.findMany({
-      where: {
-        officeId,
-        isActive: true,
-      },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: true,
-          },
-        },
-      },
-      orderBy: [
-        { jobPosition: { department: { name: 'asc' } } },
-        { lastName: 'asc' },
-        { firstName: 'asc' },
-      ],
-    });
-  }
-
-  async getUsersByDepartment(departmentId: string) {
-    return this.prisma.user.findMany({
-      where: {
-        jobPosition: {
-          departmentId,
-        },
-        isActive: true,
-      },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: true,
-          },
-        },
-      },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-    });
-  }
-
-  async getAllUsers() {
-    return this.prisma.user.findMany({
-      where: { isActive: true },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: true,
-          },
-        },
-      },
-      orderBy: [
-        { office: { name: 'asc' } },
-        { jobPosition: { department: { name: 'asc' } } },
-        { lastName: 'asc' },
-        { firstName: 'asc' },
-      ],
-    });
-  }
-
-  async getUsersWithRankingData(filters: any) {
-    const users = await this.prisma.user.findMany({
-      where: { isActive: true },
-      include: {
-        office: true,
-        jobPosition: {
-          include: {
-            position: true,
-            department: {
-              include: {
-                office: true,
-              },
-            },
-          },
-        },
-        reports: {
-          where: filters.reportFilters || {},
-          include: {
-            tasks: {
-              select: {
-                isCompleted: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: [
-        { office: { name: 'asc' } },
-        { jobPosition: { department: { name: 'asc' } } },
-        { lastName: 'asc' },
-        { firstName: 'asc' },
-      ],
-    });
-
-    // Calculate ranking for each user
-    return users.map(user => {
-      const totalTasks = user.reports.reduce((sum, report) => sum + report.tasks.length, 0);
-      const completedTasks = user.reports.reduce(
-        (sum, report) => sum + report.tasks.filter(task => task.isCompleted).length, 
-        0
-      );
-      
-      const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
-      const ranking = this.calculateEmployeeRanking(completionRate);
-      
-      const { reports, ...userWithoutReports } = user;
-      
-      return {
-        ...userWithoutReports,
-        performance: {
-          totalReports: user.reports.length,
-          totalTasks,
-          completedTasks,
-          completionRate,
-          ranking,
-          rankingLabel: this.getRankingLabel(ranking),
-        },
-      };
-    });
-  }
-
-  // Helper methods for ranking calculations - Updated thresholds
-  private calculateEmployeeRanking(completionRate: number): string {
-    // if (completionRate >= 100) return 'EXCELLENT';
-    // if (completionRate >= 95) return 'GOOD';
-    // if (completionRate >= 90) return 'AVERAGE';
-    // if (completionRate >= 85) return 'POOR';
-    // return 'FAIL';
-    if (completionRate > 90) return 'EXCELLENT';
-    if (completionRate >= 80) return 'GOOD';
-    if (completionRate >= 70) return 'AVERAGE';
-    return 'POOR';
-  }
-
-  private getRankingLabel(ranking: string): string {
-    const labels = {
-      'EXCELLENT': 'Xuất sắc',
-      'GOOD': 'Tốt',
-      'AVERAGE': 'Trung bình',
-      'POOR': 'Yếu',
-      // 'FAIL': 'Kém'
-    };
-    return labels[ranking] || 'Chưa xếp loại';
-  }
-
-  async uploadAvatar(userId: string, file: UploadedFile) {
-    try {
-      // Validate file
-      if (!this.r2Service.isValidImageFile(file)) {
-        throw new BadRequestException('Invalid image file. Only JPEG, PNG, WEBP files under 5MB are allowed.');
-      }
-
-      // Get current user
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { 
-          id: true, 
-          employeeCode: true, 
-          avatar: true, 
-          firstName: true, 
-          lastName: true 
-        },
-      });
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      // Delete old avatar if exists
-      if (user.avatar) {
-        await this.r2Service.deleteAvatar(user.avatar);
-      }
-
-      // Upload new avatar to R2
-      const avatarUrl = await this.r2Service.uploadAvatar(
-        file,
-        user.id,
-        user.employeeCode
-      );
-
-      // Update user record
-      const updatedUser = await this.prisma.user.update({
-        where: { id: userId },
-        data: { avatar: avatarUrl },
-        select: {
-          id: true,
-          employeeCode: true,
-          firstName: true,
-          lastName: true,
-          avatar: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-
-      this.logger.log(`Avatar uploaded successfully for user ${userId}`);
-
-      return {
-        message: 'Avatar uploaded successfully',
-        user: {
-          ...updatedUser,
-          createdAt: updatedUser.createdAt.toISOString(),
-          updatedAt: updatedUser.updatedAt.toISOString(),
-        },
-        avatarUrl,
-      };
-    } catch (error) {
-      this.logger.error(`Avatar upload failed for user ${userId}:`, error);
-      
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to upload avatar');
-    }
-  }
-
-  async deleteAvatar(userId: string) {
-    try {
-      // Get current user
-      const user = await this.prisma.user.findUnique({
-        where: { id: userId },
-        select: { id: true, avatar: true, firstName: true, lastName: true },
-      });
-
-      if (!user) {
-        throw new NotFoundException('User not found');
-      }
-
-      if (!user.avatar) {
-        throw new BadRequestException('User has no avatar to delete');
-      }
-
-      // Delete from R2
-      await this.r2Service.deleteAvatar(user.avatar);
-
-      // Update user record
-      const updatedUser = await this.prisma.user.update({
-        where: { id: userId },
-        data: { avatar: null },
-        select: {
-          id: true,
-          employeeCode: true,
-          firstName: true,
-          lastName: true,
-          avatar: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-
-      this.logger.log(`Avatar deleted successfully for user ${userId}`);
-
-      return {
-        message: 'Avatar deleted successfully',
-        user: {
-          ...updatedUser,
-          createdAt: updatedUser.createdAt.toISOString(),
-          updatedAt: updatedUser.updatedAt.toISOString(),
-        },
-      };
-    } catch (error) {
-      this.logger.error(`Avatar deletion failed for user ${userId}:`, error);
-      
-      if (error instanceof BadRequestException || error instanceof NotFoundException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to delete avatar');
-    }
-  }
-
-  async searchByEmployeeCode(employeeCode: string) {
+  async getUserById(id: string) {
     const user = await this.prisma.user.findUnique({
-      where: { 
-        employeeCode,
-        isActive: true,
-        // role: Role.USER  || Role.WORKER
-      },
+      where: { id },
       include: {
         office: true,
         jobPosition: {
           include: {
             position: true,
-            department: {
-              include: {
-                office: true,
-              },
-            },
+            department: true,
           },
         },
-        // ✅ FIX: Use correct relation name from schema
         group: {
           include: {
             team: {
               include: {
                 line: {
                   include: {
-                    factory: true
-                  }
-                }
-              }
-            }
-          }
+                    factory: true,
+                  },
+                },
+              },
+            },
+          },
         },
-        // ✅ FIX: Use correct relation name from schema  
-        ledGroups: {
+        managedDepartments: {
           include: {
-            team: {
-              include: {
-                line: {
-                  include: {
-                    factory: true
-                  }
-                }
-              }
-            }
-          }
-        }
+            department: true,
+          },
+        },
       },
     });
 
     if (!user) {
-      throw new NotFoundException(`User with employee code ${employeeCode} not found or not eligible`);
+      throw new NotFoundException('User not found');
     }
 
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
   }
 
-  async getGroupMembers(groupId: string) {
-    const group = await this.prisma.group.findUnique({
-      where: { id: groupId },
+  async createUser(createUserDto: CreateUserDto) {
+    // Check if employee code already exists
+    const existingUser = await this.prisma.user.findUnique({
+      where: { employeeCode: createUserDto.employeeCode },
+    });
+
+    if (existingUser) {
+      throw new ConflictException('Employee code already exists');
+    }
+
+    // Check if email exists (if provided)
+    if (createUserDto.email) {
+      const existingEmail = await this.prisma.user.findUnique({
+        where: { email: createUserDto.email },
+      });
+
+      if (existingEmail) {
+        throw new ConflictException('Email already exists');
+      }
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(
+      createUserDto.password || '123456',
+      10,
+    );
+
+    const user = await this.prisma.user.create({
+      data: {
+        ...createUserDto,
+        password: hashedPassword,
+      },
       include: {
-        leader: {
+        office: true,
+        jobPosition: {
           include: {
-            office: true,
-            jobPosition: {
-              include: {
-                position: true,
-                department: true,
-              },
-            },
+            position: true,
+            department: true,
           },
         },
-        members: {
+      },
+    });
+
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
+
+  async updateUser(
+    id: string,
+    updateProfileDto: UpdateProfileDto,
+    currentUser: any,
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Check role permission - only SUPERADMIN can change role
+    if (updateProfileDto.role && currentUser.role !== Role.SUPERADMIN) {
+      throw new ForbiddenException('Only SUPERADMIN can change user roles');
+    }
+
+    // Check email uniqueness if changed
+    if (updateProfileDto.email && updateProfileDto.email !== user.email) {
+      const existingEmail = await this.prisma.user.findUnique({
+        where: { email: updateProfileDto.email },
+      });
+
+      if (existingEmail) {
+        throw new ConflictException('Email already exists');
+      }
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id },
+      data: updateProfileDto,
+      include: {
+        office: true,
+        jobPosition: {
           include: {
-            office: true,
-            jobPosition: {
-              include: {
-                position: true,
-                department: true,
+            position: true,
+            department: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async deleteUser(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    await this.prisma.user.delete({ where: { id } });
+
+    return { message: 'User deleted successfully' };
+  }
+
+  async toggleUserActive(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const updatedUser = await this.prisma.user.update({
+      where: { id },
+      data: { isActive: !user.isActive },
+      include: {
+        office: true,
+        jobPosition: {
+          include: {
+            position: true,
+            department: true,
+          },
+        },
+      },
+    });
+
+    const { password, ...userWithoutPassword } = updatedUser;
+    return userWithoutPassword;
+  }
+
+  async resetPassword(id: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const hashedPassword = await bcrypt.hash('123456', 10);
+
+    await this.prisma.user.update({
+      where: { id },
+      data: { password: hashedPassword },
+    });
+
+    return { message: 'Password reset to default: 123456' };
+  }
+
+  /**
+   * Change password for current user
+   */
+  async changePassword(
+    userId: string,
+    dto: { currentPassword: string; newPassword: string },
+  ) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.password,
+    );
+    if (!isPasswordValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { message: 'Password changed successfully' };
+  }
+
+  // ========== LOOKUPS ==========
+
+  async getOffices() {
+    return this.prisma.office.findMany({
+      select: {
+        id: true,
+        name: true,
+        type: true,
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getDepartments(officeId?: string) {
+    return this.prisma.department.findMany({
+      where: officeId ? { officeId } : undefined,
+      select: {
+        id: true,
+        name: true,
+        officeId: true,
+        office: {
+          select: { name: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async getPositions() {
+    return this.prisma.position.findMany({
+      select: {
+        id: true,
+        name: true,
+        level: true,
+        isManagement: true,
+      },
+      orderBy: { level: 'asc' },
+    });
+  }
+
+  async getJobPositions(params: { officeId?: string; departmentId?: string }) {
+    return this.prisma.jobPosition.findMany({
+      where: {
+        ...(params.officeId && { officeId: params.officeId }),
+        ...(params.departmentId && { departmentId: params.departmentId }),
+      },
+      include: {
+        position: { select: { name: true } },
+        department: { select: { name: true, officeId: true } },
+        office: { select: { name: true } },
+      },
+      orderBy: { jobName: 'asc' },
+    });
+  }
+
+  // ========== BULK IMPORT FROM EXCEL ==========
+
+  async importUsersFromExcel(file: any) {
+    try {
+      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+
+      const results = {
+        total: rows.length,
+        success: 0,
+        failed: 0,
+        errors: [] as any[],
+      };
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+
+        try {
+          // Map Excel columns to DTO
+          const createUserDto: CreateUserDto = {
+            employeeCode: String(row['Mã NV'] || row['employeeCode']).trim(),
+            firstName: String(row['Họ'] || row['firstName']).trim(),
+            lastName: String(row['Tên'] || row['lastName']).trim(),
+            email: row['Email'] || row['email'] || undefined,
+            phone: row['Số ĐT'] || row['phone'] || undefined,
+            jobPositionId: String(
+              row['Job Position ID'] || row['jobPositionId'],
+            ).trim(),
+            officeId: String(row['Office ID'] || row['officeId']).trim(),
+            role: (row['Role'] || row['role'] || 'USER') as Role,
+            password: row['Mật khẩu'] || row['password'] || '123456',
+          };
+
+          await this.createUser(createUserDto);
+          results.success++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            row: i + 2, // Excel row number (1-indexed + header)
+            employeeCode: row['Mã NV'] || row['employeeCode'],
+            error: error.message,
+          });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      throw new BadRequestException(
+        `Failed to process Excel file: ${error.message}`,
+      );
+    }
+  }
+
+  async getImportTemplate() {
+    // Create Excel template
+    const template = [
+      {
+        'Mã NV': 'NV001',
+        Họ: 'Nguyễn',
+        Tên: 'Văn A',
+        Email: 'nguyenvana@tbsgroup.vn',
+        'Số ĐT': '0123456789',
+        'Job Position ID': 'uuid-here',
+        'Office ID': 'uuid-here',
+        Role: 'USER',
+        'Mật khẩu': '123456',
+      },
+    ];
+
+    const worksheet = XLSX.utils.json_to_sheet(template);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Users Template');
+
+    const buffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+
+    return {
+      buffer,
+      filename: 'users_import_template.xlsx',
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    };
+  }
+
+  // ========== BULK OPERATIONS ==========
+
+  async bulkCreateUsers(users: CreateUserDto[]) {
+    const results = {
+      total: users.length,
+      success: 0,
+      failed: 0,
+      errors: [] as any[],
+      createdUsers: [] as any[],
+    };
+
+    // Use transaction for atomic operation
+    await this.prisma.$transaction(async (tx) => {
+      for (let i = 0; i < users.length; i++) {
+        const userData = users[i];
+
+        try {
+          // Validate employee code uniqueness
+          const existingUser = await tx.user.findUnique({
+            where: { employeeCode: userData.employeeCode },
+          });
+
+          if (existingUser) {
+            throw new Error(
+              `Employee code ${userData.employeeCode} already exists`,
+            );
+          }
+
+          // Validate email uniqueness (if provided)
+          if (userData.email) {
+            const existingEmail = await tx.user.findUnique({
+              where: { email: userData.email },
+            });
+
+            if (existingEmail) {
+              throw new Error(`Email ${userData.email} already exists`);
+            }
+          }
+
+          // Hash password
+          const hashedPassword = await bcrypt.hash(
+            userData.password || '123456',
+            10,
+          );
+
+          // Create user
+          const newUser = await tx.user.create({
+            data: {
+              ...userData,
+              password: hashedPassword,
+            },
+            include: {
+              office: {
+                select: { id: true, name: true },
+              },
+              jobPosition: {
+                select: {
+                  id: true,
+                  jobName: true,
+                  position: { select: { name: true } },
+                  department: { select: { name: true } },
+                },
               },
             },
-          },
-          orderBy: [
-            { lastName: 'asc' },
-            { firstName: 'asc' }
-          ]
+          });
+
+          // Remove password from response
+          const { password, ...userWithoutPassword } = newUser;
+          results.createdUsers.push(userWithoutPassword);
+          results.success++;
+        } catch (error) {
+          results.failed++;
+          results.errors.push({
+            rowIndex: i + 1,
+            employeeCode: userData.employeeCode,
+            error: error.message,
+          });
         }
       }
     });
 
-    if (!group) {
-      throw new NotFoundException('Group not found');
-    }
-
-    // Filter out password from all members
-    const membersWithoutPassword = group.members.map(member => {
-      const { password, ...memberWithoutPassword } = member;
-      return memberWithoutPassword;
-    });
-
-    let leaderWithoutPassword = null;
-    if (group.leader) {
-      const { password, ...leader } = group.leader;
-      leaderWithoutPassword = leader;
-    }
-
-    return {
-      group: {
-        id: group.id,
-        name: group.name,
-        code: group.code,
-      },
-      leader: leaderWithoutPassword,
-      members: membersWithoutPassword,
-      totalMembers: group.members.length
-    };
+    return results;
   }
 
-  async getAvailableLeaders(groupId: string) {
-    // Get current group members (they are eligible to be leaders)
-    const group = await this.prisma.group.findUnique({
-      where: { id: groupId },
-      include: {
-        members: {
-          where: {
-            role: Role.USER || Role.MEDICAL_STAFF,
-            isActive: true
-          },
-          include: {
-            office: true,
-            jobPosition: {
-              include: {
-                position: true,
-                department: true,
-              },
-            },
-          },
-          orderBy: [
-            { lastName: 'asc' },
-            { firstName: 'asc' }
-          ]
-        },
-        leader: true
-      }
-    });
-
-    if (!group) {
-      throw new NotFoundException('Group not found');
-    }
-
-    // Filter out password from all members and add current leader status
-    const availableLeaders = group.members.map(member => {
-      const { password, ...memberWithoutPassword } = member;
-      return {
-        ...memberWithoutPassword,
-        isCurrentLeader: group.leaderId === member.id
-      };
-    });
-
-    return {
-      group: {
-        id: group.id,
-        name: group.name,
-        code: group.code,
-      },
-      currentLeader: group.leader ? {
-        id: group.leader.id,
-        employeeCode: group.leader.employeeCode,
-        firstName: group.leader.firstName,
-        lastName: group.leader.lastName,
-      } : null,
-      availableLeaders,
-      totalAvailable: availableLeaders.length
-    };
-  }
+  // ...existing code for other methods (getProfile, updateProfile, changePassword, etc.)
 }

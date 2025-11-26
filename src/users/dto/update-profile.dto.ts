@@ -5,9 +5,10 @@ import {
   Length,
   IsEmail,
   IsEnum,
+  IsDateString,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
+import { Role, Sex } from '@prisma/client';
 
 export class UpdateProfileDto {
   @ApiProperty({ description: 'Employee code', required: false })
@@ -44,6 +45,21 @@ export class UpdateProfileDto {
   @Length(10, 12, { message: 'Phone number must be between 10 and 12 digits' })
   phone?: string;
 
+  @ApiProperty({ description: 'Date of birth', required: false })
+  @IsOptional()
+  @IsDateString()
+  dateOfBirth?: string;
+
+  @ApiProperty({ description: 'Address', required: false })
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @ApiProperty({ description: 'Sex', required: false, enum: Sex })
+  @IsOptional()
+  @IsEnum(Sex)
+  sex?: Sex;
+
   @ApiProperty({ description: 'Job position ID', required: false })
   @IsOptional()
   @IsUUID()
@@ -72,4 +88,9 @@ export class UpdateProfileDto {
   @IsOptional()
   @IsEnum(Role)
   role?: Role;
+
+  @ApiProperty({ description: 'Avatar', required: false })
+  @IsOptional()
+  @IsString()
+  avatar?: string;
 }
