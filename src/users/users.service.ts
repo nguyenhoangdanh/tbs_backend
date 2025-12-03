@@ -537,5 +537,62 @@ export class UsersService {
     return results;
   }
 
-  // ...existing code for other methods (getProfile, updateProfile, changePassword, etc.)
+  // ========== SEARCH ==========
+
+  /**
+   * Search user by employee code
+   */
+  async searchByEmployeeCode(employeeCode: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { employeeCode },
+      include: {
+        office: {
+          select: { id: true, name: true, type: true },
+        },
+        jobPosition: {
+          include: {
+            position: { select: { name: true, level: true } },
+            department: { select: { id: true, name: true } },
+          },
+        },
+        group: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            team: {
+              select: {
+                id: true,
+                name: true,
+                code: true,
+                line: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                    factory: {
+                      select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException(
+        `User with employee code "${employeeCode}" not found`,
+      );
+    }
+
+    const { password, ...userWithoutPassword } = user;
+    return userWithoutPassword;
+  }
 }

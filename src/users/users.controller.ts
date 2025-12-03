@@ -118,6 +118,16 @@ export class UsersController {
     return this.usersService.getJobPositions({ officeId, departmentId });
   }
 
+  // ⭐ NEW: Search by employee code
+  @Get('search-by-employee-code/:code')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Search user by employee code' })
+  @ApiResponse({ status: 200, description: 'User found successfully' })
+  @ApiResponse({ status: 404, description: 'User not found' })
+  async searchByEmployeeCode(@Param('code') code: string) {
+    return this.usersService.searchByEmployeeCode(code);
+  }
+
   // ========== USER CRUD ==========
 
   @Get()
