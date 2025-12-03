@@ -401,4 +401,181 @@ export class PermissionsService {
     };
     return descriptions[role];
   }
+
+  // ========== SEED PERMISSIONS ==========
+
+  /**
+   * Seed all permissions and role assignments
+   * ⚠️ WARNING: Only for SUPERADMIN - Will reset all role permissions
+   */
+  async seedPermissions(): Promise<{
+    totalPermissions: number;
+    roleAssignments: Record<Role, number>;
+    message: string;
+  }> {
+    const resources = [
+      'users',
+      'reports',
+      'gate-passes',
+      'factories',
+      'lines',
+      'teams',
+      'groups',
+      'worksheets',
+      'products',
+      'processes',
+      'medicines',
+      'medical-records',
+    ];
+
+    const actions = [
+      'view',
+      'create',
+      'update',
+      'delete',
+      'approve',
+      'manage',
+      'assign',
+    ];
+
+    // Role permissions map
+    const rolePermissionsMap = {
+      [Role.SUPERADMIN]: {
+        all: [
+          'view',
+          'create',
+          'update',
+          'delete',
+          'approve',
+          'manage',
+          'assign',
+        ],
+      },
+      [Role.ADMIN]: {
+        factories: ['view', 'create', 'update', 'delete', 'manage'],
+        lines: ['view', 'create', 'update', 'delete', 'manage'],
+        teams: ['view', 'create', 'update', 'delete', 'manage'],
+        groups: ['view', 'create', 'update', 'delete', 'manage', 'assign'],
+        users: ['view', 'create', 'update', 'manage'],
+        worksheets: ['view', 'create', 'update', 'delete', 'manage'],
+        products: ['view', 'create', 'update', 'delete'],
+        processes: ['view', 'create', 'update', 'delete'],
+        reports: ['view', 'approve', 'manage'],
+        'gate-passes': ['view', 'approve', 'manage'],
+        medicines: ['view'],
+        'medical-records': ['view'],
+      },
+      [Role.USER]: {
+        users: ['view', 'update'],
+        reports: ['view', 'create', 'update', 'approve'],
+        'gate-passes': ['view', 'create', 'approve'],
+        factories: ['view'],
+        lines: ['view'],
+        teams: ['view'],
+        groups: ['view'],
+        worksheets: ['view'],
+        products: ['view'],
+        processes: ['view'],
+        medicines: ['view'],
+        'medical-records': ['view'],
+      },
+      [Role.WORKER]: {
+        users: ['view'],
+        worksheets: ['view', 'update'],
+        products: ['view'],
+        processes: ['view'],
+        groups: ['view'],
+        'gate-passes': ['view', 'create'],
+        medicines: ['view'],
+        'medical-records': ['view'],
+      },
+      [Role.MEDICAL_STAFF]: {
+        medicines: ['view', 'create', 'update', 'delete', 'manage'],
+        'medical-records': ['view', 'create', 'update', 'delete', 'manage'],
+        users: ['view'],
+        reports: ['view'],
+        'gate-passes': ['view'],
+      },
+    };
+
+    // 1. Create all permissions
+    const permissions = [];
+    for (const resource of resources) {
+      for (const action of actions) {
+        const permission = await this.prisma.permission.upsert({
+          where: {
+            resource_action: { resource, action },
+          },
+          update: {
+            description: `${action.charAt(0).toUpperCase() + action.slice(1)} ${resource}`,
+          },
+          create: {
+            resource,
+            action,
+            description: `${action.charAt(0).toUpperCase() + action.slice(1)} ${resource}`,
+          },
+        });
+        permissions.push(permission);
+      }
+    }
+
+    // 2. Assign permissions to roles
+    const roleAssignments: Record<Role, number> = {
+      [Role.SUPERADMIN]: 0,
+      [Role.ADMIN]: 0,
+      [Role.USER]: 0,
+      [Role.WORKER]: 0,
+      [Role.MEDICAL_STAFF]: 0,
+    };
+
+    for (const [role, resourcePerms] of Object.entries(rolePermissionsMap)) {
+      const roleEnum = role as Role;
+
+      // Delete existing role permissions
+      await this.prisma.rolePermission.deleteMany({
+        where: { role: roleEnum },
+      });
+
+      // SUPERADMIN gets all permissions
+      if (roleEnum === Role.SUPERADMIN) {
+        for (const permission of permissions) {
+          await this.prisma.rolePermission.create({
+            data: {
+              role: roleEnum,
+              permissionId: permission.id,
+              isGranted: true,
+            },
+          });
+          roleAssignments[roleEnum]++;
+        }
+        continue;
+      }
+
+      // Other roles get specific permissions
+      for (const [resource, allowedActions] of Object.entries(resourcePerms)) {
+        for (const action of allowedActions) {
+          const permission = permissions.find(
+            (p) => p.resource === resource && p.action === action,
+          );
+
+          if (permission) {
+            await this.prisma.rolePermission.create({
+              data: {
+                role: roleEnum,
+                permissionId: permission.id,
+                isGranted: true,
+              },
+            });
+            roleAssignments[roleEnum]++;
+          }
+        }
+      }
+    }
+
+    return {
+      totalPermissions: permissions.length,
+      roleAssignments,
+      message: 'Permissions seeded successfully',
+    };
+  }
 }

@@ -205,4 +205,30 @@ export class PermissionsController {
       permissionId,
     );
   }
+
+  // ========== SEED PERMISSIONS ==========
+
+  @Post('seed')
+  @Roles(Role.SUPERADMIN)
+  @ApiOperation({ summary: '🔐 Seed all permissions (SUPERADMIN only)' })
+  @ApiResponse({
+    status: 201,
+    description: 'Permissions seeded successfully',
+    schema: {
+      example: {
+        totalPermissions: 84,
+        roleAssignments: {
+          SUPERADMIN: 84,
+          ADMIN: 45,
+          USER: 20,
+          WORKER: 12,
+          MEDICAL_STAFF: 10,
+        },
+        message: 'Permissions seeded successfully',
+      },
+    },
+  })
+  async seedPermissions() {
+    return this.permissionsService.seedPermissions();
+  }
 }
