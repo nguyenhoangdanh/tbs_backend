@@ -64,11 +64,6 @@ export class PermissionsService {
       throw new NotFoundException('User not found');
     }
 
-    console.log('🔍 [PermissionsService] getUserPermissions:', {
-      userId,
-      userRole: user.role,
-    });
-
     // Get role-based permissions
     const rolePermissions = await this.prisma.rolePermission.findMany({
       where: {
@@ -78,18 +73,6 @@ export class PermissionsService {
       include: { permission: true },
     });
 
-    console.log(
-      '🔍 [PermissionsService] rolePermissions count:',
-      rolePermissions.length,
-    );
-    console.log(
-      '🔍 [PermissionsService] rolePermissions sample:',
-      rolePermissions.slice(0, 5).map((rp) => ({
-        resource: rp.permission.resource,
-        action: rp.permission.action,
-        isGranted: rp.isGranted,
-      })),
-    );
 
     // Combine role permissions with custom user permissions
     const permissionsMap = new Map<string, boolean>();
@@ -111,13 +94,6 @@ export class PermissionsService {
       .filter(([_, granted]) => granted)
       .map(([key, _]) => key);
 
-    console.log('🔍 [PermissionsService] Final permissions:', {
-      totalPermissions: permissions.length,
-      hasFactoriesUpdate: permissions.includes('factories:update'),
-      factoriesPermissions: permissions.filter((p) =>
-        p.startsWith('factories:'),
-      ),
-    });
 
     // Build resources object for easy frontend access
     const resources: any = {};

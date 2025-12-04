@@ -392,8 +392,8 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { name: true, code: true } },
-        process: { select: { name: true, code: true } },
+        product: { select: { id: true, name: true, code: true } },
+        process: { select: { id: true, name: true, code: true } },
         records: {
           include: {
             items: {
@@ -537,10 +537,23 @@ export class WorksheetService {
     }
 
     if (filters.date) {
-      const dateObj = new Date(filters.date);
+      // Parse date string correctly (assume input is already in UTC)
+      const dateObj = typeof filters.date === 'string' 
+        ? new Date(filters.date) 
+        : filters.date;
+      
+      // Extract year, month, day in UTC
+      const year = dateObj.getUTCFullYear();
+      const month = dateObj.getUTCMonth();
+      const day = dateObj.getUTCDate();
+      
+      // Create UTC dates for the full day
+      const startDate = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
+      const endDate = new Date(Date.UTC(year, month, day + 1, 0, 0, 0, 0));
+      
       where.date = {
-        gte: new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()),
-        lt: new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate() + 1),
+        gte: startDate,
+        lt: endDate,
       };
     }
 
@@ -570,6 +583,7 @@ export class WorksheetService {
         factory: { select: { name: true, code: true } },
         group: {
           select: {
+            id: true,
             name: true,
             code: true,
             team: {
@@ -591,6 +605,15 @@ export class WorksheetService {
         product: { select: { name: true, code: true } },
         process: { select: { name: true, code: true } },
         createdBy: { select: { firstName: true, lastName: true, employeeCode: true } },
+        records: {
+          include: {
+            items: {
+              select: {
+                actualOutput: true
+              }
+            }
+          }
+        },
         _count: {
           select: {
             records: {
@@ -605,22 +628,35 @@ export class WorksheetService {
       ]
     });
 
-    return worksheets.map(ws => ({
-      id: ws.id,
-      date: ws.date.toISOString().split('T')[0],
-      worker: ws.worker,
-      group: ws.group,
-      factory: ws.factory,
-      product: ws.product,
-      process: ws.process,
-      shiftType: ws.shiftType,
-      plannedOutput: ws.plannedOutput,
-      status: ws.status,
-      completedRecords: ws._count.records,
-      createdBy: ws.createdBy,
-      createdAt: ws.createdAt,
-      updatedAt: ws.updatedAt
-    }));
+    return worksheets.map(ws => {
+      // Calculate summary from records
+      const totalPlanned = ws.records.reduce((sum, r) => sum + (r.plannedOutput || 0), 0)
+      const totalActual = ws.records.reduce((sum, r) => 
+        sum + r.items.reduce((itemSum, item) => itemSum + (item.actualOutput || 0), 0), 0
+      )
+      
+      return {
+        id: ws.id,
+        date: ws.date.toISOString().split('T')[0],
+        worker: ws.worker,
+        group: ws.group,
+        factory: ws.factory,
+        product: ws.product,
+        process: ws.process,
+        shiftType: ws.shiftType,
+        plannedOutput: ws.plannedOutput,
+        status: ws.status,
+        completedRecords: ws._count.records,
+        summary: {
+          totalPlanned,
+          totalActual,
+          efficiency: totalPlanned > 0 ? Math.round((totalActual / totalPlanned) * 100) : 0
+        },
+        createdBy: ws.createdBy,
+        createdAt: ws.createdAt,
+        updatedAt: ws.updatedAt
+      }
+    });
   }
 
   /**
