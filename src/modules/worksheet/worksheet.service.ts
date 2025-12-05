@@ -477,6 +477,7 @@ export class WorksheetService {
       { hour: 2, startTime: '08:30', endTime: '09:30' },
       { hour: 3, startTime: '09:30', endTime: '10:30' },
       { hour: 4, startTime: '10:30', endTime: '11:30' },
+      // ⭐ SKIP: 11:30-12:30 (Lunch break - not included in any shift)
       { hour: 5, startTime: '12:30', endTime: '13:30' },
       { hour: 6, startTime: '13:30', endTime: '14:30' },
       { hour: 7, startTime: '14:30', endTime: '15:30' },
@@ -491,14 +492,17 @@ export class WorksheetService {
           { hour: 9, startTime: '16:30', endTime: '18:00' }
         ];
       case ShiftType.OVERTIME_11H:
-        // Ca 11h: 8 giờ + nghỉ (16:30-17:00) + 3 giờ tăng ca (17:00-20:00)
+        // Ca 11h: 8 giờ + nghỉ chiều (16:30-17:00) + 3 giờ tăng ca (17:00-20:00)
+        // ⭐ SKIP: 16:30-17:00 (Afternoon break - not included)
         return [
           ...baseHours,
           { hour: 9, startTime: '17:00', endTime: '18:00' },
           { hour: 10, startTime: '18:00', endTime: '19:00' },
           { hour: 11, startTime: '19:00', endTime: '20:00' }
         ];
+      case ShiftType.NORMAL_8H:
       default:
+        // Ca 8h: Chỉ có 8 giờ cơ bản
         return baseHours;
     }
   }
@@ -2172,6 +2176,15 @@ export class WorksheetService {
             name: true,
             code: true,
             teamId: true,
+            leaderId: true,
+            leader: {
+              select: {
+                id: true,
+                employeeCode: true,
+                firstName: true,
+                lastName: true
+              }
+            },
             team: {
               select: {
                 id: true,
@@ -2233,6 +2246,15 @@ export class WorksheetService {
             id: true,
             name: true,
             code: true,
+            leaderId: true,
+            leader: {
+              select: {
+                id: true,
+                employeeCode: true,
+                firstName: true,
+                lastName: true
+              }
+            },
             team: {
               select: {
                 id: true,
@@ -2349,7 +2371,9 @@ export class WorksheetService {
           group: {
             id: group.id,
             name: group.name,
-            code: group.code
+            code: group.code,
+            leaderId: group.leaderId,
+            leaderName: group.leader ? `${group.leader.firstName} ${group.leader.lastName}` : 'N/A'
           },
           workers: []
         });
