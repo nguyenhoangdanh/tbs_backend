@@ -49,8 +49,6 @@ export class WorksheetGateway implements OnGatewayConnection, OnGatewayDisconnec
     workHour?: number;
     affectedWorkers: number;
   }) {
-    this.logger.log(`Emitting worksheet update: ${JSON.stringify(data)}`);
-    
     this.server.emit('worksheet:updated', {
       timestamp: new Date().toISOString(),
       ...data,

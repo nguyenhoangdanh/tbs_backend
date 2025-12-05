@@ -23,6 +23,7 @@ import { UpdateWorksheetRecordDto } from './dto/update-worksheet-record.dto';
 import { BatchUpdateByHourDto } from './dto/batch-update-by-hour.dto';
 import { QuickUpdateRecordDto } from './dto/quick-update-record.dto';
 import { AdjustRecordTargetDto } from './dto/adjust-record-target.dto';
+import { BulkUpdateGroupWorksheetsDto } from './dto/bulk-update-group-worksheets.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -173,6 +174,22 @@ export class WorksheetController {
     @GetUser() user: any
   ) {
     return this.worksheetService.update(id, updateWorksheetDto, user);
+  }
+
+  @Put('group/:groupId/bulk-update')
+  @UseGuards(RolesGuard)
+  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @ApiOperation({ 
+    summary: 'Bulk update all worksheets in a group',
+    description: 'Update shift type, product, process, and planned output for all workers in group at once'
+  })
+  @ApiResponse({ status: 200, description: 'All worksheets updated successfully' })
+  bulkUpdateGroupWorksheets(
+    @Param('groupId') groupId: string,
+    @Body() bulkUpdateDto: BulkUpdateGroupWorksheetsDto,
+    @GetUser() user: any
+  ) {
+    return this.worksheetService.bulkUpdateGroupWorksheets(groupId, bulkUpdateDto, user);
   }
 
   @Patch(':id/records/:recordId')

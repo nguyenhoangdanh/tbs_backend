@@ -551,15 +551,7 @@ export class AuthService {
       path: '/',
       // ✅ NEVER set domain - let browser handle it
     };
-
-    this.logger.log('Setting auth cookie (production-fixed):', {
-      tokenLength: token.length,
-      maxAge,
-      rememberMe,
-      isProduction,
-      cookieOptions,
-      userAgent: deviceInfo?.userAgent?.substring(0, 50) || 'unknown'
-    });
+   
 
     // ✅ Set cookie with proper production settings
     response.cookie('access_token', token, cookieOptions);
@@ -591,12 +583,6 @@ export class AuthService {
     };
 
     response.cookie('refresh_token', refreshToken, cookieOptions);
-    
-    // this.logger.log('Setting refresh cookie:', {
-    //   tokenLength: refreshToken.length,
-    //   maxAge,
-    //   isProduction,
-    // });
   }
 
   private clearAuthCookie(response: Response, deviceInfo?: any) {

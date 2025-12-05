@@ -1,10 +1,10 @@
 import { IsEnum, IsOptional, IsInt, IsPositive, IsUUID } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { WorkSheetStatus } from '@prisma/client';
+import { WorkSheetStatus, ShiftType } from '@prisma/client';
 
 /**
  * DTO for updating worksheet
- * Allows updating planned output, product, process, or status
+ * Allows updating planned output, product, process, shift type, or status
  */
 export class UpdateWorksheetDto {
   @ApiProperty({
@@ -16,6 +16,16 @@ export class UpdateWorksheetDto {
   @IsOptional()
   @IsEnum(WorkSheetStatus)
   status?: WorkSheetStatus;
+
+  @ApiProperty({
+    example: 'OVERTIME_11H',
+    description: 'Ca làm việc',
+    enum: ShiftType,
+    required: false,
+  })
+  @IsOptional()
+  @IsEnum(ShiftType)
+  shiftType?: ShiftType;
 
   @ApiProperty({
     example: 180,

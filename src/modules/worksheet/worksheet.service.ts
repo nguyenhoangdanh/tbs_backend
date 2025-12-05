@@ -485,16 +485,18 @@ export class WorksheetService {
 
     switch (shiftType) {
       case ShiftType.EXTENDED_9_5H:
+        // Ca 9.5h: 8 giờ + 1.5 giờ (16:30-18:00)
         return [
           ...baseHours,
-          { hour: 9, startTime: '16:30', endTime: '17:00' }
+          { hour: 9, startTime: '16:30', endTime: '18:00' }
         ];
       case ShiftType.OVERTIME_11H:
+        // Ca 11h: 8 giờ + nghỉ (16:30-17:00) + 3 giờ tăng ca (17:00-20:00)
         return [
           ...baseHours,
-          { hour: 9, startTime: '16:30', endTime: '17:30' },
-          { hour: 10, startTime: '17:30', endTime: '18:30' },
-          { hour: 11, startTime: '18:30', endTime: '19:30' }
+          { hour: 9, startTime: '17:00', endTime: '18:00' },
+          { hour: 10, startTime: '18:00', endTime: '19:00' },
+          { hour: 11, startTime: '19:00', endTime: '20:00' }
         ];
       default:
         return baseHours;
@@ -602,8 +604,8 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { name: true, code: true } },
-        process: { select: { name: true, code: true } },
+        product: { select: { id: true, name: true, code: true } },
+        process: { select: { id: true, name: true, code: true } },
         createdBy: { select: { firstName: true, lastName: true, employeeCode: true } },
         records: {
           include: {
@@ -629,11 +631,27 @@ export class WorksheetService {
     });
 
     return worksheets.map(ws => {
-      // Calculate summary from records
-      const totalPlanned = ws.records.reduce((sum, r) => sum + (r.plannedOutput || 0), 0)
+      // ⭐ FIX: Calculate totalPlanned correctly using exact shift hours
+      const getShiftHours = (shiftType: string) => {
+        switch (shiftType) {
+          case 'NORMAL_8H': return 8;
+          case 'EXTENDED_9_5H': return 9.5;
+          case 'OVERTIME_11H': return 11;
+          default: return ws.records.length; // Fallback to record count
+        }
+      };
+      
+      const exactHours = getShiftHours(ws.shiftType);
+      const totalPlanned = (ws.plannedOutput || 0) * exactHours; // ⭐ CORRECT: SLKH/giờ × số giờ
+      
       const totalActual = ws.records.reduce((sum, r) => 
         sum + r.items.reduce((itemSum, item) => itemSum + (item.actualOutput || 0), 0), 0
       )
+      
+      // Get unique completed hour slots (workHour values for COMPLETED records)
+      const completedHourSlots = ws.records
+        .filter(r => r.status === WorkRecordStatus.COMPLETED)
+        .map(r => r.workHour)
       
       return {
         id: ws.id,
@@ -641,12 +659,15 @@ export class WorksheetService {
         worker: ws.worker,
         group: ws.group,
         factory: ws.factory,
+        productId: ws.productId,
+        processId: ws.processId,
         product: ws.product,
         process: ws.process,
         shiftType: ws.shiftType,
         plannedOutput: ws.plannedOutput,
         status: ws.status,
         completedRecords: ws._count.records,
+        completedHourSlots, // Array of completed hour numbers [1, 2, 3, etc.]
         summary: {
           totalPlanned,
           totalActual,
@@ -752,11 +773,16 @@ export class WorksheetService {
 
   /**
    * Update worksheet
+   * Supports updating: shiftType, plannedOutput, productId, processId, status
+   * When shiftType changes, recreates records with new shift duration
    */
   async update(id: string, updateDto: UpdateWorksheetDto, user: any) {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id },
-      include: { group: { select: { leaderId: true } } }
+      include: { 
+        group: { select: { leaderId: true } },
+        records: { select: { id: true, workHour: true, actualOutput: true, status: true } }
+      }
     });
 
     if (!worksheet) {
@@ -767,22 +793,250 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.createdById === user.id;
+      worksheet.createdById === user.id ||
+      worksheet.group.leaderId === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to update this worksheet');
     }
 
-    return this.prisma.workSheet.update({
-      where: { id },
-      data: updateDto,
-      include: {
-        factory: { select: { name: true, code: true } },
-        group: { select: { name: true } },
-        worker: { select: { firstName: true, lastName: true } },
-        product: { select: { name: true, code: true } },
-        process: { select: { name: true, code: true } }
+    return this.prisma.$transaction(async (tx) => {
+      // If shiftType changed, need to recreate records
+      if (updateDto.shiftType && updateDto.shiftType !== worksheet.shiftType) {
+        const oldShiftHours = this.getShiftHours(worksheet.shiftType);
+        const newShiftHours = this.getShiftHours(updateDto.shiftType);
+
+        // Delete records beyond new shift duration
+        if (newShiftHours < oldShiftHours) {
+          const recordsToDelete = worksheet.records.filter(r => r.workHour > newShiftHours);
+          await tx.workSheetRecord.deleteMany({
+            where: { id: { in: recordsToDelete.map(r => r.id) } }
+          });
+        }
+
+        // Create new records if shift extended
+        if (newShiftHours > oldShiftHours) {
+          const existingHours = worksheet.records.map(r => r.workHour);
+          const workHourSchedule = this.getWorkHoursForShift(updateDto.shiftType);
+          const newRecords = [];
+          
+          for (let hour = oldShiftHours + 1; hour <= newShiftHours; hour++) {
+            if (!existingHours.includes(hour)) {
+              const schedule = workHourSchedule.find(s => s.hour === hour);
+              if (schedule) {
+                newRecords.push({
+                  worksheetId: id,
+                  workHour: hour,
+                  startTime: this.createDateTimeFromTimeString(worksheet.date, schedule.startTime),
+                  endTime: this.createDateTimeFromTimeString(worksheet.date, schedule.endTime),
+                  plannedOutput: updateDto.plannedOutput || worksheet.plannedOutput,
+                  actualOutput: 0,
+                  status: WorkRecordStatus.PENDING
+                });
+              }
+            }
+          }
+
+          if (newRecords.length > 0) {
+            await tx.workSheetRecord.createMany({
+              data: newRecords
+            });
+          }
+        }
       }
+
+      // Update worksheet
+      const updated = await tx.workSheet.update({
+        where: { id },
+        data: {
+          shiftType: updateDto.shiftType,
+          plannedOutput: updateDto.plannedOutput,
+          productId: updateDto.productId,
+          processId: updateDto.processId,
+          status: updateDto.status
+        },
+        include: {
+          factory: { select: { name: true, code: true } },
+          group: { select: { name: true, id: true } },
+          worker: { select: { firstName: true, lastName: true, employeeCode: true } },
+          product: { select: { name: true, code: true } },
+          process: { select: { name: true, code: true } },
+          records: {
+            include: {
+              items: {
+                include: {
+                  product: { select: { name: true, code: true } },
+                  process: { select: { name: true, code: true } }
+                }
+              }
+            },
+            orderBy: { workHour: 'asc' }
+          }
+        }
+      });
+
+      // Emit WebSocket update to refresh group view
+      if (updated.group) {
+        this.worksheetGateway.emitWorksheetUpdate({
+          groupId: updated.group.id,
+          date: worksheet.date.toISOString().split('T')[0],
+          affectedWorkers: 1
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  /**
+   * Get shift duration in hours
+   */
+  private getShiftHours(shiftType: ShiftType): number {
+    switch (shiftType) {
+      case ShiftType.NORMAL_8H:
+        return 8;
+      case ShiftType.EXTENDED_9_5H:
+        return 9; // 9.5 rounded down
+      case ShiftType.OVERTIME_11H:
+        return 11;
+      default:
+        return 8;
+    }
+  }
+
+  /**
+   * Bulk update all worksheets in a group
+   * Updates shift type, product, process, and planned output for entire group
+   */
+  async bulkUpdateGroupWorksheets(
+    groupId: string, 
+    bulkUpdateDto: any, 
+    user: any
+  ) {
+    const { date, shiftType, plannedOutput, productId, processId } = bulkUpdateDto;
+
+    // Verify group exists and user has permission
+    const group = await this.prisma.group.findUnique({
+      where: { id: groupId },
+      select: { 
+        id: true, 
+        name: true, 
+        leaderId: true,
+        members: { where: { isActive: true }, select: { id: true } }
+      }
+    });
+
+    if (!group) {
+      throw new NotFoundException('Group not found');
+    }
+
+    // Check permissions
+    const canUpdate = 
+      user.role === Role.SUPERADMIN ||
+      user.role === Role.ADMIN ||
+      group.leaderId === user.id;
+
+    if (!canUpdate) {
+      throw new ForbiddenException('Only group leader or admin can bulk update worksheets');
+    }
+
+    // Find all worksheets for this group on the specified date
+    const worksheets = await this.prisma.workSheet.findMany({
+      where: {
+        groupId,
+        date: new Date(date)
+      },
+      include: {
+        records: { select: { id: true, workHour: true, status: true } }
+      }
+    });
+
+    if (worksheets.length === 0) {
+      throw new NotFoundException('No worksheets found for this group and date');
+    }
+
+    // Perform bulk update in transaction
+    return this.prisma.$transaction(async (tx) => {
+      const updatedWorksheets = [];
+
+      for (const worksheet of worksheets) {
+        // Handle shift type change
+        if (shiftType && shiftType !== worksheet.shiftType) {
+          const oldShiftHours = this.getShiftHours(worksheet.shiftType);
+          const newShiftHours = this.getShiftHours(shiftType);
+
+          // Delete records beyond new shift duration
+          if (newShiftHours < oldShiftHours) {
+            const recordsToDelete = worksheet.records.filter(r => r.workHour > newShiftHours);
+            await tx.workSheetRecord.deleteMany({
+              where: { id: { in: recordsToDelete.map(r => r.id) } }
+            });
+          }
+
+          // Create new records if shift extended
+          if (newShiftHours > oldShiftHours) {
+            const existingHours = worksheet.records.map(r => r.workHour);
+            const workHourSchedule = this.getWorkHoursForShift(shiftType);
+            const newRecords = [];
+            
+            for (let hour = oldShiftHours + 1; hour <= newShiftHours; hour++) {
+              if (!existingHours.includes(hour)) {
+                const schedule = workHourSchedule.find(s => s.hour === hour);
+                if (schedule) {
+                  newRecords.push({
+                    worksheetId: worksheet.id,
+                    workHour: hour,
+                    startTime: this.createDateTimeFromTimeString(worksheet.date, schedule.startTime),
+                    endTime: this.createDateTimeFromTimeString(worksheet.date, schedule.endTime),
+                    plannedOutput: plannedOutput || worksheet.plannedOutput,
+                    actualOutput: 0,
+                    status: WorkRecordStatus.PENDING
+                  });
+                }
+              }
+            }
+
+            if (newRecords.length > 0) {
+              await tx.workSheetRecord.createMany({
+                data: newRecords
+              });
+            }
+          }
+        }
+
+        // Update worksheet
+        const updated = await tx.workSheet.update({
+          where: { id: worksheet.id },
+          data: {
+            shiftType,
+            plannedOutput,
+            productId,
+            processId
+          }
+        });
+
+        updatedWorksheets.push(updated);
+      }
+
+      // Emit WebSocket update
+      this.worksheetGateway.emitWorksheetUpdate({
+        groupId,
+        date,
+        affectedWorkers: updatedWorksheets.length
+      });
+
+      return {
+        success: true,
+        updatedCount: updatedWorksheets.length,
+        groupId,
+        date,
+        changes: {
+          shiftType: shiftType || null,
+          plannedOutput: plannedOutput || null,
+          productId: productId || null,
+          processId: processId || null
+        }
+      };
     });
   }
 
@@ -1120,14 +1374,14 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { name: true, code: true } },
-        process: { select: { name: true, code: true } },
+        product: { select: { id: true, name: true, code: true } },
+        process: { select: { id: true, name: true, code: true } },
         records: {
           include: {
             items: {
               include: {
-                product: { select: { name: true, code: true } },
-                process: { select: { name: true, code: true } }
+                product: { select: { id: true, name: true, code: true } },
+                process: { select: { id: true, name: true, code: true } }
               },
               orderBy: { entryIndex: 'asc' }
             }
@@ -1156,6 +1410,8 @@ export class WorksheetService {
       return {
         id: ws.id,
         worker: ws.worker,
+        productId: ws.productId,
+        processId: ws.processId,
         product: ws.product,
         process: ws.process,
         shiftType: ws.shiftType,
