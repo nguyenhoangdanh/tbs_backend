@@ -14,6 +14,7 @@ import {
   BadRequestException,
   HttpCode,
   HttpStatus,
+  Res,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -26,6 +27,7 @@ import {
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import type { Express } from 'express'; // ⭐ ADD: Import Express namespace
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
@@ -228,6 +230,30 @@ export class UsersController {
 
   // ========== BULK IMPORT FROM EXCEL ==========
 
+  @Get('import-template')
+  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Download Excel import template (12-column format)' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Template downloaded successfully',
+    content: {
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': {
+        schema: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async getImportTemplate(@Res() res: Response) {
+    const { buffer, filename, contentType } = await this.usersService.getImportTemplate();
+    
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(buffer);
+  }
+
   @Post('bulk-create')
   @Roles(Role.SUPERADMIN)
   @RequirePermissions('users:create')
@@ -237,12 +263,12 @@ export class UsersController {
     return this.usersService.bulkCreateUsers(dto.users);
   }
 
-  @Post('import/excel')
+  @Post('import-excel')
   @Roles(Role.SUPERADMIN)
   @RequirePermissions('users:create')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')
-  @ApiOperation({ summary: 'Bulk import users from Excel (SUPERADMIN only)' })
+  @ApiOperation({ summary: 'Import users from Excel file (12-column format, SUPERADMIN only)' })
   @ApiResponse({ status: 201, description: 'Users imported successfully' })
   @ApiBody({
     schema: {

@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CloudflareR2Service } from '../common/r2.service';
-import { Role } from '@prisma/client';
+import { Role, Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as XLSX from 'xlsx';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -372,10 +372,27 @@ export class UsersService {
 
   async importUsersFromExcel(file: any) {
     try {
-      const workbook = XLSX.read(file.buffer, { type: 'buffer' });
+      // Read Excel file with proper options to handle styled headers
+      const workbook = XLSX.read(file.buffer, { 
+        type: 'buffer',
+        cellStyles: true, // Read cell styles
+        cellDates: true, // Parse dates
+      });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet);
+      
+      // Parse rows with defval to handle empty cells
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, {
+        defval: '', // Default value for empty cells
+        raw: false, // Format cell values
+      });
+
+      // Debug: Log first row to check headers
+      this.logger.debug(`Total rows from Excel: ${rows.length}`);
+      if (rows.length > 0) {
+        this.logger.debug(`First row keys: ${Object.keys(rows[0]).join(', ')}`);
+        this.logger.debug(`First row data: ${JSON.stringify(rows[0])}`);
+      }
 
       const results = {
         total: rows.length,
@@ -384,32 +401,151 @@ export class UsersService {
         errors: [] as any[],
       };
 
+      // Pre-load all offices, departments, positions, jobPositions for lookup
+      const [offices, departments, positions, jobPositions] = await Promise.all([
+        this.prisma.office.findMany(),
+        this.prisma.department.findMany(),
+        this.prisma.position.findMany(),
+        this.prisma.jobPosition.findMany({
+          include: {
+            position: true,
+            department: true,
+            office: true,
+          },
+        }),
+      ]);
+
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
+        const rowNumber = i + 2; // Excel row number (1-based + header)
 
         try {
-          // Map Excel columns to DTO
+          // Debug: Log raw row data
+          this.logger.debug(`Processing row ${rowNumber}: ${JSON.stringify(row)}`);
+          
+          // Parse 12 columns from Excel (A -> L)
+          // Try multiple possible header names in case of encoding issues
+          const msnv = String(row['MSNV'] || row['msnv'] || '').trim();
+          const hoTen = String(row['HỌ VÀ TÊN'] || row['hoTen'] || '').trim();
+          const cd = String(row['CD'] || row['cd'] || '').trim(); // Position
+          const vtcv = String(row['VTCV'] || row['vtcv'] || '').trim(); // Job Position
+          const phongBan = String(row['Phòng ban'] || row['phongBan'] || '').trim();
+          const trucThuoc = String(row['Trực thuộc'] || row['trucThuoc'] || '').trim(); // Office
+          const sdt = row['SĐT'] || row['sdt'] ? String(row['SĐT'] || row['sdt']).trim() : undefined;
+          const ngaySinh = row['Ngày tháng năm sinh'] || row['ngaySinh'] ? String(row['Ngày tháng năm sinh'] || row['ngaySinh']).trim() : undefined;
+          const gioiTinh = row['Giới tính'] || row['gioiTinh'] ? String(row['Giới tính'] || row['gioiTinh']).trim() : undefined;
+
+          this.logger.debug(`Parsed values - MSNV: ${msnv}, Họ tên: ${hoTen}, CD: ${cd}, VTCV: ${vtcv}, Phòng ban: ${phongBan}, Trực thuộc: ${trucThuoc}`);
+
+          // Validate required fields
+          if (!msnv || !hoTen || !cd || !vtcv || !phongBan || !trucThuoc) {
+            throw new Error('Thiếu thông tin bắt buộc: MSNV, Họ tên, CD, VTCV, Phòng ban, Trực thuộc');
+          }
+
+          // Split full name into firstName and lastName
+          const nameParts = hoTen.split(' ');
+          const lastName = nameParts[nameParts.length - 1];
+          const firstName = nameParts.slice(0, -1).join(' ') || lastName;
+
+          // ⭐ Determine role based on Position (CD)
+          // CN (Công nhân) = WORKER, others = USER
+          const role = cd.toUpperCase() === 'CN' ? Role.WORKER : Role.USER;
+
+          // Lookup Office by name (Trực thuộc)
+          const office = offices.find(
+            (o) => o.name.toLowerCase() === trucThuoc.toLowerCase()
+          );
+          if (!office) {
+            throw new Error(`Không tìm thấy văn phòng: ${trucThuoc}`);
+          }
+
+          // Lookup Department by name and office
+          const department = departments.find(
+            (d) =>
+              d.name.toLowerCase() === phongBan.toLowerCase() &&
+              d.officeId === office.id
+          );
+          if (!department) {
+            throw new Error(`Không tìm thấy phòng ban: ${phongBan} thuộc ${trucThuoc}`);
+          }
+
+          // Lookup Position by name (CD)
+          const position = positions.find(
+            (p) => p.name.toLowerCase() === cd.toLowerCase()
+          );
+          if (!position) {
+            throw new Error(`Không tìm thấy chức danh: ${cd}`);
+          }
+
+          // Lookup JobPosition by position, jobName, and department
+          const jobPosition = jobPositions.find(
+            (jp) =>
+              jp.positionId === position.id &&
+              jp.jobName.toLowerCase() === vtcv.toLowerCase() &&
+              jp.departmentId === department.id
+          );
+          if (!jobPosition) {
+            throw new Error(
+              `Không tìm thấy vị trí công việc: ${vtcv} (${cd}) trong phòng ban ${phongBan}`
+            );
+          }
+
+          // Parse date of birth (dd/mm/yyyy)
+          let dateOfBirth: string | undefined;
+          if (ngaySinh) {
+            const parts = ngaySinh.split('/');
+            if (parts.length === 3) {
+              const [day, month, year] = parts;
+              dateOfBirth = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+            }
+          }
+
+          // Parse sex
+          let sex: Sex | undefined;
+          if (gioiTinh) {
+            const gioiTinhLower = gioiTinh.toLowerCase();
+            if (gioiTinhLower === 'nam') {
+              sex = Sex.MALE;
+            } else if (gioiTinhLower === 'nữ' || gioiTinhLower === 'nu') {
+              sex = Sex.FEMALE;
+            }
+          }
+
+          // Email will be null for workers (they don't need email)
+          // Only generate if explicitly provided in Excel
+          const email = undefined; // Let email be null/empty
+
+          // Map to CreateUserDto
           const createUserDto: CreateUserDto = {
-            employeeCode: String(row['Mã NV'] || row['employeeCode']).trim(),
-            firstName: String(row['Họ'] || row['firstName']).trim(),
-            lastName: String(row['Tên'] || row['lastName']).trim(),
-            email: row['Email'] || row['email'] || undefined,
-            phone: row['Số ĐT'] || row['phone'] || undefined,
-            jobPositionId: String(
-              row['Job Position ID'] || row['jobPositionId'],
-            ).trim(),
-            officeId: String(row['Office ID'] || row['officeId']).trim(),
-            role: (row['Role'] || row['role'] || 'USER') as Role,
-            password: row['Mật khẩu'] || row['password'] || '123456',
+            employeeCode: msnv,
+            firstName,
+            lastName,
+            email, // Will be undefined -> null in database
+            phone: sdt,
+            role,
+            jobPositionId: jobPosition.id,
+            officeId: office.id,
+            password: '123456',
           };
 
-          await this.createUser(createUserDto);
+          // Create user with additional fields
+          const hashedPassword = await bcrypt.hash('123456', 10);
+          await this.prisma.user.create({
+            data: {
+              ...createUserDto,
+              password: hashedPassword,
+              dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+              sex,
+              isActive: true,
+            },
+          });
+
           results.success++;
         } catch (error) {
           results.failed++;
           results.errors.push({
-            row: i + 2, // Excel row number (1-indexed + header)
-            employeeCode: row['Mã NV'] || row['employeeCode'],
+            row: rowNumber,
+            employeeCode: row['MSNV'] || row['msnv'] || '',
             error: error.message,
           });
         }
@@ -424,18 +560,35 @@ export class UsersService {
   }
 
   async getImportTemplate() {
-    // Create Excel template
+    // Create Excel template với đúng 12 cột từ A -> L
     const template = [
       {
-        'Mã NV': 'NV001',
-        Họ: 'Nguyễn',
-        Tên: 'Văn A',
-        Email: 'nguyenvana@tbsgroup.vn',
-        'Số ĐT': '0123456789',
-        'Job Position ID': 'uuid-here',
-        'Office ID': 'uuid-here',
-        Role: 'USER',
-        'Mật khẩu': '123456',
+        'MSNV': 'NV001',
+        'HỌ VÀ TÊN': 'Nguyễn Văn A',
+        'CD': 'NV',
+        'VTCV': 'Nhân viên',
+        'Phòng ban': 'Phòng Kinh doanh',
+        'Trực thuộc': 'VPĐH TH',
+        'SĐT': '0123456789',
+        'Cán bộ quản lý trực tiếp Cấp 1': 'NV002',
+        'Cán bộ quản lý trực tiếp Cấp 2': 'NV003',
+        'Cán bộ quản lý trực tiếp Cấp 3': '',
+        'Ngày tháng năm sinh': '01/01/1990',
+        'Giới tính': 'Nam',
+      },
+      {
+        'MSNV': 'CN001',
+        'HỌ VÀ TÊN': 'Trần Thị B',
+        'CD': 'CN',
+        'VTCV': 'Công nhân',
+        'Phòng ban': 'Phòng Sản xuất',
+        'Trực thuộc': 'NM TS1',
+        'SĐT': '0987654321',
+        'Cán bộ quản lý trực tiếp Cấp 1': 'TT001',
+        'Cán bộ quản lý trực tiếp Cấp 2': '',
+        'Cán bộ quản lý trực tiếp Cấp 3': '',
+        'Ngày tháng năm sinh': '15/05/1995',
+        'Giới tính': 'Nữ',
       },
     ];
 

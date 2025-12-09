@@ -106,7 +106,7 @@ export class NotificationCleanupService {
         }
       }
 
-      this.logger.log(`📊 Notification System Health: ${JSON.stringify(stats, null, 2)}`);
+      // this.logger.log(`📊 Notification System Health: ${JSON.stringify(stats, null, 2)}`);
     } catch (error) {
       this.logger.error('Failed to log system health:', error);
     }
