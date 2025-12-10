@@ -435,6 +435,7 @@ export class TaskEvaluationsService {
 
   /**
    * Get tasks that can be evaluated by a manager
+   * ✅ FIXED: Based on LEVEL, not role
    */
   async getEvaluableTasksForManager(
     managerId: string,
@@ -463,6 +464,13 @@ export class TaskEvaluationsService {
       throw new NotFoundException('Manager not found');
     }
 
+    const managerPosition = manager.jobPosition?.position;
+
+    // ✅ CHECK: Manager must have management permissions
+    if (!managerPosition?.canViewHierarchy && !managerPosition?.isManagement) {
+      return []; // No tasks can be evaluated
+    }
+
     // Build where clause for tasks
     const whereClause: any = {};
 
@@ -487,39 +495,21 @@ export class TaskEvaluationsService {
       whereClause.isCompleted = filters.isCompleted;
     }
 
-    // Add permission-based filters
-    if (managerRole === Role.SUPERADMIN) {
-      // SUPERADMIN can evaluate all tasks
-    } else if (managerRole === Role.ADMIN) {
-      // ADMIN can evaluate tasks from their office
-      whereClause.report = {
-        ...whereClause.report,
-        user: {
-          officeId: manager.officeId
-        }
-      };
-    } else if (managerRole === Role.USER || managerRole === Role.MEDICAL_STAFF) {
-      // USER can only evaluate tasks if they have management permissions
-      const position = manager.jobPosition?.position;
-      if (!position?.canViewHierarchy && !position?.isManagement) {
-        return []; // No tasks can be evaluated
-      }
-
-      // Can evaluate tasks from subordinates in same department
-      whereClause.report = {
-        ...whereClause.report,
-        user: {
-          jobPosition: {
-            departmentId: manager.jobPosition.departmentId,
-            position: {
-              level: {
-                gt: position.level // Only subordinates
-              }
+    // ✅ FIXED: Filter by level (subordinates only)
+    // Only get tasks from users with higher level number (lower authority)
+    whereClause.report = {
+      ...whereClause.report,
+      user: {
+        ...whereClause.report?.user,
+        jobPosition: {
+          position: {
+            level: {
+              gt: managerPosition.level // Only subordinates with higher level number
             }
           }
         }
-      };
-    }
+      }
+    };
 
     const tasks = await this.prisma.reportTask.findMany({
       where: whereClause,
@@ -568,6 +558,12 @@ export class TaskEvaluationsService {
 
   /**
    * Check if evaluator has permission to evaluate a task
+   * ✅ FIXED: Check based on LEVEL and MANAGEMENT permissions, NOT role
+   * - Evaluator must have management permissions (isManagement OR canViewHierarchy)
+   * - Evaluator must have LOWER level number (higher authority) than task owner
+   * - Level 0 (TGĐ) can evaluate level 1,2,3...
+   * - Level 1 (PTGĐ) can evaluate level 2,3,4...
+   * - etc.
    */
   private async checkEvaluationPermission(
     evaluatorId: string,
@@ -591,45 +587,30 @@ export class TaskEvaluationsService {
       throw new NotFoundException('Evaluator not found');
     }
 
-    // SUPERADMIN can evaluate any task
-    if (evaluatorRole === Role.SUPERADMIN) {
-      return;
+    const evaluatorPosition = evaluator.jobPosition?.position;
+    const taskUser = task.report.user;
+    const taskUserPosition = taskUser.jobPosition?.position;
+
+    // ✅ CHECK 1: Evaluator must have management permissions
+    if (!evaluatorPosition?.canViewHierarchy && !evaluatorPosition?.isManagement) {
+      throw new ForbiddenException('Bạn không có quyền quản lý để đánh giá công việc');
     }
 
-    // ADMIN can evaluate tasks from their office
-    // if (evaluatorRole === Role.ADMIN) {
-    //   if (task.report.user.officeId === evaluator.officeId) {
-    //     return;
-    //   }
-    //   throw new ForbiddenException('Admin can only evaluate tasks from their office');
+    // ✅ CHECK 2: Must evaluate subordinates (lower level = higher number)
+    // Level càng thấp = Chức vụ càng cao
+    // Example: Level 0 (TGĐ) > Level 3 (PGĐ) > Level 7 (NV)
+    if (taskUserPosition.level <= evaluatorPosition.level) {
+      throw new ForbiddenException(
+        `Chỉ có thể đánh giá cấp dưới. Cấp của bạn: ${evaluatorPosition.level} (${evaluatorPosition.description}), Cấp nhân viên: ${taskUserPosition.level} (${taskUserPosition.description})`
+      );
+    }
+
+    // ✅ OPTIONAL CHECK 3: Same office check (có thể bỏ comment nếu cần)
+    // if (taskUser.officeId !== evaluator.officeId) {
+    //   throw new ForbiddenException('Chỉ có thể đánh giá nhân viên trong cùng văn phòng');
     // }
 
-    // USER role - check management permissions
-    // if (evaluatorRole === Role.USER) {
-      const position = evaluator.jobPosition?.position;
-      
-      if (!position?.canViewHierarchy && !position?.isManagement) {
-        throw new ForbiddenException('User does not have management permissions');
-      }
-
-      // Check if the task belongs to a subordinate
-      const taskUser = task.report.user;
-      
-      // Must be from same department
-      // if (taskUser.jobPosition.departmentId !== evaluator.jobPosition.departmentId) {
-      //   throw new ForbiddenException('Can only evaluate tasks from same department');
-      // }
-
-      // Must be from a subordinate (higher level number)
-      if (taskUser.jobPosition.position.level <= position.level) {
-        // throw new ForbiddenException('Can only evaluate tasks from subordinates with lower position level');
-        throw new ForbiddenException('Chỉ có thể đánh giá nhiệm vụ của cấp dưới có cấp bậc thấp hơn');
-      }
-
-      return;
-    // }
-
-    // throw new ForbiddenException('Insufficient permissions to evaluate this task');
+    return;
   }
 
   /**

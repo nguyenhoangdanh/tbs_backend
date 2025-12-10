@@ -140,11 +140,17 @@ export class AuthService {
         role,
       },
       include: {
-        office: true,
+        office: {
+          select: { id: true, name: true, type: true }
+        },
         jobPosition: {
           include: {
-            position: true,
-            department: true,
+            position: {
+              select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
+            },
+            department: {
+              select: { id: true, name: true }
+            },
           },
         },
       },
@@ -209,7 +215,7 @@ export class AuthService {
             jobPosition: {
               include: {
                 position: {
-                  select: { id: true, name: true, description: true, level: true}
+                  select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
                 },
                 department: {
                   select: { id: true, name: true }
@@ -238,7 +244,7 @@ export class AuthService {
             jobPosition: {
               include: {
                 position: {
-                  select: { id: true, name: true, description: true, level: true }
+                  select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
                 },
                 department: {
                   select: { id: true, name: true }
@@ -305,7 +311,8 @@ export class AuthService {
       const { password: _, ...userWithoutPassword } = user;
       const userResponse = {
         ...userWithoutPassword,
-        isManager: user.jobPosition.position.name === "NV" && user.jobPosition.position.level === 7 ? false : true,
+        // ✅ FIXED: Check based on position permissions, not hardcoded name/level
+        isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
         createdAt: userWithoutPassword.createdAt.toISOString(),
         updatedAt: userWithoutPassword.updatedAt.toISOString(),
       };
@@ -395,11 +402,17 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        office: true,
+        office: {
+          select: { id: true, name: true, type: true }
+        },
         jobPosition: {
           include: {
-            position: true,
-            department: true,
+            position: {
+              select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
+            },
+            department: {
+              select: { id: true, name: true }
+            },
           },
         },
       },
@@ -473,11 +486,17 @@ export class AuthService {
         isActive: true,
       },
       include: {
-        office: true,
+        office: {
+          select: { id: true, name: true, type: true }
+        },
         jobPosition: {
           include: {
-            position: true,
-            department: true,
+            position: {
+              select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
+            },
+            department: {
+              select: { id: true, name: true }
+            },
           },
         },
       },

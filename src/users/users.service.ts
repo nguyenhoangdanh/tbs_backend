@@ -103,11 +103,24 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
-        office: true,
+        office: {
+          select: { id: true, name: true, type: true }
+        },
         jobPosition: {
           include: {
-            position: true,
-            department: true,
+            position: {
+              select: { 
+                id: true, 
+                name: true, 
+                description: true, 
+                level: true, 
+                isManagement: true, 
+                canViewHierarchy: true 
+              }
+            },
+            department: {
+              select: { id: true, name: true }
+            },
           },
         },
         group: {
@@ -136,7 +149,12 @@ export class UsersService {
     }
 
     const { password, ...userWithoutPassword } = user;
-    return userWithoutPassword;
+    
+    // ✅ Add isManager field to response
+    return {
+      ...userWithoutPassword,
+      isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
+    };
   }
 
   async createUser(createUserDto: CreateUserDto) {

@@ -154,7 +154,7 @@ export class ReportsService {
 
     // Use transaction for atomic updates
     return this.prisma.$transaction(async (prisma) => {
-      // Update tasks if new tasks are provided - PRESERVE ALL EVALUATIONS
+      // Update tasks if new tasks are provided - SMART TASK MATCHING
       if (updateReportDto.tasks) {
         // Validate: require reasonNotDone if not completed
         for (const task of updateReportDto.tasks) {
@@ -168,81 +168,91 @@ export class ReportsService {
           }
         }
         
-        // ✅ FIX: Store existing evaluations with TASK ID mapping (not task name)
-        // This ensures we preserve ALL evaluations from ALL managers
-        const existingTasksWithEvaluations = await prisma.reportTask.findMany({
+        // Get existing tasks with evaluations
+        const existingTasks = await prisma.reportTask.findMany({
           where: { reportId },
           include: {
             evaluations: {
-              orderBy: { createdAt: 'asc' } // Preserve order
+              orderBy: { createdAt: 'asc' }
             },
           },
+          orderBy: { createdAt: 'asc' } // Maintain order
         });
 
-        // ✅ FIX: Create a map of OLD taskId -> NEW task index for matching
-        // Match by position in array (assumes same order during update)
-        const taskIdToIndexMap = new Map();
-        existingTasksWithEvaluations.forEach((task, index) => {
-          taskIdToIndexMap.set(task.id, index);
-        });
+        // Map existing tasks by their taskName for matching
+        const existingTasksMap = new Map(
+          existingTasks.map(task => [task.taskName.trim().toLowerCase(), task])
+        );
 
-        // Store evaluations grouped by original task index
-        const evaluationsByIndex = new Map();
-        existingTasksWithEvaluations.forEach((task, index) => {
-          if (task.evaluations.length > 0) {
-            evaluationsByIndex.set(index, task.evaluations);
-          }
-        });
+        // Track which existing tasks are still in use
+        const usedTaskIds = new Set<string>();
+        const newTasksData = [];
 
-        // Delete existing tasks (this will cascade delete evaluations)
-        await prisma.reportTask.deleteMany({
-          where: { reportId },
-        });
+        // Process new tasks from frontend (NO ID field expected)
+        for (const taskDto of updateReportDto.tasks) {
+          const taskNameKey = (taskDto.taskName || '').trim().toLowerCase();
+          const existingTask = existingTasksMap.get(taskNameKey);
 
-        // Create new tasks and restore ALL evaluations
-        if (updateReportDto.tasks.length > 0) {
-          for (let index = 0; index < updateReportDto.tasks.length; index++) {
-            const taskDto = updateReportDto.tasks[index];
+          if (existingTask) {
+            // Task exists - UPDATE it
+            usedTaskIds.add(existingTask.id);
             
-            // Create the new task
-            const newTask = await prisma.reportTask.create({
+            await prisma.reportTask.update({
+              where: { id: existingTask.id },
               data: {
-                reportId,
-                taskName: taskDto.taskName || '',
-                monday: taskDto.monday || false,
-                tuesday: taskDto.tuesday || false,
-                wednesday: taskDto.wednesday || false,
-                thursday: taskDto.thursday || false,
-                friday: taskDto.friday || false,
-                saturday: taskDto.saturday || false,
-                isCompleted: taskDto.isCompleted || false,
-                reasonNotDone: taskDto.reasonNotDone || null,
+                monday: taskDto.monday ?? existingTask.monday,
+                tuesday: taskDto.tuesday ?? existingTask.tuesday,
+                wednesday: taskDto.wednesday ?? existingTask.wednesday,
+                thursday: taskDto.thursday ?? existingTask.thursday,
+                friday: taskDto.friday ?? existingTask.friday,
+                saturday: taskDto.saturday ?? existingTask.saturday,
+                isCompleted: taskDto.isCompleted ?? existingTask.isCompleted,
+                reasonNotDone: taskDto.reasonNotDone ?? existingTask.reasonNotDone,
+                updatedAt: new Date(),
               },
             });
-
-            // ✅ FIX: Restore ALL evaluations from ALL managers for this task position
-            const savedEvaluations = evaluationsByIndex.get(index);
-            if (savedEvaluations && savedEvaluations.length > 0) {
-              console.log(`🔄 Restoring ${savedEvaluations.length} evaluations for task #${index + 1}: "${taskDto.taskName}"`);
-              
-              for (const evaluation of savedEvaluations) {
-                await prisma.taskEvaluation.create({
-                  data: {
-                    taskId: newTask.id,
-                    evaluatorId: evaluation.evaluatorId,
-                    originalIsCompleted: evaluation.originalIsCompleted,
-                    evaluatedIsCompleted: evaluation.evaluatedIsCompleted,
-                    originalReasonNotDone: evaluation.originalReasonNotDone,
-                    evaluatedReasonNotDone: evaluation.evaluatedReasonNotDone,
-                    evaluatorComment: evaluation.evaluatorComment,
-                    evaluationType: evaluation.evaluationType,
-                    createdAt: evaluation.createdAt, // Preserve original creation time
-                    updatedAt: evaluation.updatedAt, // Preserve update time
-                  },
-                });
-              }
-            }
+            
+            console.log(`✅ Updated task: "${taskDto.taskName}" (preserved ${existingTask.evaluations.length} evaluations)`);
+          } else {
+            // New task - CREATE it
+            newTasksData.push({
+              reportId,
+              taskName: taskDto.taskName || '',
+              monday: taskDto.monday || false,
+              tuesday: taskDto.tuesday || false,
+              wednesday: taskDto.wednesday || false,
+              thursday: taskDto.thursday || false,
+              friday: taskDto.friday || false,
+              saturday: taskDto.saturday || false,
+              isCompleted: taskDto.isCompleted || false,
+              reasonNotDone: taskDto.reasonNotDone || null,
+            });
           }
+        }
+
+        // Create new tasks in batch
+        if (newTasksData.length > 0) {
+          await prisma.reportTask.createMany({
+            data: newTasksData,
+          });
+          console.log(`✅ Created ${newTasksData.length} new tasks`);
+        }
+
+        // Delete tasks that are no longer in the new list
+        const tasksToDelete = existingTasks.filter(task => !usedTaskIds.has(task.id));
+        if (tasksToDelete.length > 0) {
+          // Check if any task has evaluations before deleting
+          const tasksWithEvaluations = tasksToDelete.filter(task => task.evaluations.length > 0);
+          if (tasksWithEvaluations.length > 0) {
+            console.warn(`⚠️ Deleting ${tasksWithEvaluations.length} tasks with evaluations`);
+          }
+          
+          await prisma.reportTask.deleteMany({
+            where: {
+              id: { in: tasksToDelete.map(t => t.id) }
+            },
+          });
+          console.log(`✅ Deleted ${tasksToDelete.length} removed tasks`);
         }
       }
 
