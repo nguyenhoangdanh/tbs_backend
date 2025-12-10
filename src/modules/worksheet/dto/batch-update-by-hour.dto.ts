@@ -22,6 +22,16 @@ export class ProductEntryDto {
   processId: string;
 
   @ApiProperty({
+    example: 180,
+    description: 'SLKH - Sản lượng kế hoạch cho entry này (optional, default from worksheet)',
+    required: false,
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  plannedOutput?: number;
+
+  @ApiProperty({
     example: 5,
     description: 'SLTH - Sản lượng thực hiện cho mã túi này',
   })
@@ -78,14 +88,14 @@ export class HourWorkerOutputDto {
  *     {
  *       "workerId": "uuid1",
  *       "entries": [
- *         { "productId": "tui-a", "processId": "chat", "actualOutput": 5 },
- *         { "productId": "tui-b", "processId": "chat", "actualOutput": 6 }
+ *         { "productId": "tui-a", "processId": "chat", "plannedOutput": 180, "actualOutput": 5 },
+ *         { "productId": "tui-b", "processId": "chat", "plannedOutput": 200, "actualOutput": 6 }
  *       ]
  *     },
  *     {
  *       "workerId": "uuid2",
  *       "entries": [
- *         { "productId": "tui-a", "processId": "chat", "actualOutput": 12 }
+ *         { "productId": "tui-a", "processId": "chat", "plannedOutput": 180, "actualOutput": 12 }
  *       ]
  *     },
  *     ...30 workers

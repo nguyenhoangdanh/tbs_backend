@@ -280,28 +280,34 @@ export class WorksheetService {
 
         // Create new items
         let totalActual = 0;
+        let totalPlanned = 0;
         let entryIndex = 1;
 
         for (const entry of output.entries) {
+          // ⭐ Use entry.plannedOutput if provided, otherwise fallback to worksheet.plannedOutput
+          const entryPlanned = entry.plannedOutput ?? worksheet.plannedOutput;
+          
           await tx.workSheetRecordItem.create({
             data: {
               recordId: record.id,
               entryIndex: entryIndex++,
               productId: entry.productId,
               processId: entry.processId,
+              plannedOutput: entryPlanned, // ⭐ Save planned for this entry
               actualOutput: entry.actualOutput,
-              plannedOutput: worksheet.plannedOutput,
               note: entry.note
             }
           });
 
           totalActual += entry.actualOutput;
+          totalPlanned += entryPlanned; // ⭐ Sum planned output
         }
 
-        // Update record totals
+        // Update record totals - now with summed plannedOutput
         const updated = await tx.workSheetRecord.update({
           where: { id: record.id },
           data: {
+            plannedOutput: totalPlanned, // ⭐ Save summed planned for this hour
             actualOutput: totalActual,
             status: WorkRecordStatus.COMPLETED,
             updatedById: user.id
@@ -418,26 +424,42 @@ export class WorksheetService {
         workHour: record.workHour,
         startTime: record.startTime,
         endTime: record.endTime,
-        plannedOutput: record.plannedOutput,
+        plannedOutput: record.plannedOutput, // ⭐ Sum of items' plannedOutput
         actualOutput: record.actualOutput,
         status: record.status,
         items: record.items.map(item => ({
           entryIndex: item.entryIndex,
+          productId: item.productId,  // ⭐ ADD: For frontend fallback
+          processId: item.processId,  // ⭐ ADD: For frontend fallback
           product: {
-            id: item.productId,  // ⭐ ADD: productId for frontend
+            id: item.productId,
             ...item.product
           },
           process: {
-            id: item.processId,  // ⭐ ADD: processId for frontend
+            id: item.processId,
             ...item.process
           },
+          plannedOutput: item.plannedOutput, // ⭐ ADD: SLKH for this entry
           actualOutput: item.actualOutput,
           note: item.note
         }))
       }));
 
-      // ⭐ FIX: Calculate from items, not records
-      const totalPlanned = ws.records.reduce((sum, r) => sum + (r.plannedOutput || 0), 0);
+      // ⭐ Calculate totalPlanned with fallback logic and hour duration coefficient
+      // If record.plannedOutput is null (old data), use worksheet.plannedOutput
+      // ⭐ Hour 9 in EXTENDED_9_5H is 1.5 hours (16:30-18:00), multiply by 1.5
+      const totalPlanned = ws.records.reduce((sum, r) => {
+        const hourCoefficient = (ws.shiftType === ShiftType.EXTENDED_9_5H && r.workHour === 9) ? 1.5 : 1;
+        
+        if (r.plannedOutput && r.plannedOutput > 0) {
+          // New data: use summed plannedOutput from items
+          return sum + (r.plannedOutput * hourCoefficient);
+        } else {
+          // Old data: fallback to worksheet.plannedOutput
+          return sum + (ws.plannedOutput * hourCoefficient);
+        }
+      }, 0);
+      
       const totalActual = ws.records.reduce((sum, r) => 
         sum + r.items.reduce((itemSum, item) => itemSum + (item.actualOutput || 0), 0), 0
       );
@@ -612,10 +634,14 @@ export class WorksheetService {
         process: { select: { id: true, name: true, code: true } },
         createdBy: { select: { firstName: true, lastName: true, employeeCode: true } },
         records: {
-          include: {
+          select: {
+            workHour: true,
+            plannedOutput: true,
+            status: true,
             items: {
               select: {
-                actualOutput: true
+                actualOutput: true,
+                plannedOutput: true
               }
             }
           }
@@ -635,18 +661,22 @@ export class WorksheetService {
     });
 
     return worksheets.map(ws => {
-      // ⭐ FIX: Calculate totalPlanned correctly using exact shift hours
-      const getShiftHours = (shiftType: string) => {
-        switch (shiftType) {
-          case 'NORMAL_8H': return 8;
-          case 'EXTENDED_9_5H': return 9.5;
-          case 'OVERTIME_11H': return 11;
-          default: return ws.records.length; // Fallback to record count
+      // ⭐ NEW LOGIC with SLKH per entry: SUM record.plannedOutput across all hours
+      // Each record.plannedOutput = SUM of items' plannedOutput for that hour
+      // ⭐ IMPORTANT: Hour 9 in EXTENDED_9_5H shift is 1.5 hours long (16:30-18:00), so multiply by 1.5
+      // Fallback to old calculation if record.plannedOutput is null (backward compatibility)
+      const totalPlanned = ws.records.reduce((sum, r) => {
+        // Calculate hour duration coefficient (1.5x for hour 9 in 9.5h shift)
+        const hourCoefficient = (ws.shiftType === ShiftType.EXTENDED_9_5H && r.workHour === 9) ? 1.5 : 1;
+        
+        if (r.plannedOutput && r.plannedOutput > 0) {
+          // New data: record already has summed plannedOutput from items
+          return sum + (r.plannedOutput * hourCoefficient);
+        } else {
+          // Old data: fallback to worksheet.plannedOutput per hour
+          return sum + (ws.plannedOutput * hourCoefficient);
         }
-      };
-      
-      const exactHours = getShiftHours(ws.shiftType);
-      const totalPlanned = (ws.plannedOutput || 0) * exactHours; // ⭐ CORRECT: SLKH/giờ × số giờ
+      }, 0);
       
       const totalActual = ws.records.reduce((sum, r) => 
         sum + r.items.reduce((itemSum, item) => itemSum + (item.actualOutput || 0), 0), 0
@@ -2319,13 +2349,6 @@ export class WorksheetService {
     // Create worker map for quick lookup
     const worksheetMap = new Map(worksheets.map(ws => [ws.workerId, ws]));
 
-    console.log('🗺️ [REPORT DEBUG] Worker-Worksheet mapping:', {
-      totalWorkers: allWorkers.length,
-      totalWorksheets: worksheets.length,
-      mappedWorkerIds: Array.from(worksheetMap.keys()),
-      allWorkerIds: allWorkers.map(w => w.id)
-    });
-
     // Build hierarchical structure: Line → Team → Group → Workers
     const lineMap = new Map<string, any>();
 
@@ -2443,25 +2466,22 @@ export class WorksheetService {
         });
       }
 
-      // ⭐ FIX: Calculate totalPlanned = plannedOutputPerHour × totalHours
+      // ⭐ FIX: Calculate totalPlanned with hour duration coefficient
+      // Sum record.plannedOutput across all hours (already includes 1.5x for hour 9)
       const totalHours = worksheet?.records.length || 0;
       const plannedOutputPerHour = worksheet?.plannedOutput || 0;
       
-      // ⭐ OPTION 1: Use record count (current - may be inaccurate for 9.5h shift with 9 records)
-      // const totalPlanned = plannedOutputPerHour * totalHours;
-      
-      // ⭐ OPTION 2: Use shiftType for exact hours
-      const getShiftHours = (shiftType: string) => {
-        switch (shiftType) {
-          case 'NORMAL_8H': return 8;
-          case 'EXTENDED_9_5H': return 9.5;
-          case 'OVERTIME_11H': return 11;
-          default: return totalHours; // Fallback to record count
-        }
-      };
-      
-      const exactHours = worksheet ? getShiftHours(worksheet.shiftType) : totalHours;
-      const totalPlanned = plannedOutputPerHour * exactHours; // ⭐ CORRECT: 90 × 9.5 = 855
+      // ⭐ CORRECT: Sum record.plannedOutput with hour coefficient applied
+      // For EXTENDED_9_5H: 8 hours × 10 + 1 hour × 10 × 1.5 = 80 + 15 = 95
+      let totalPlanned = 0;
+      if (worksheet) {
+        totalPlanned = worksheet.records.reduce((sum, record) => {
+          // Apply hour duration coefficient (1.5x for hour 9 in EXTENDED_9_5H)
+          const hourCoefficient = (worksheet.shiftType === 'EXTENDED_9_5H' && record.workHour === 9) ? 1.5 : 1;
+          const plannedForHour = (record.plannedOutput || worksheet.plannedOutput) * hourCoefficient;
+          return sum + plannedForHour;
+        }, 0);
+      }
 
       // ⭐ FIX: Efficiency = SLTH / SLKH (actualOutput / plannedOutput)
       const efficiency = totalPlanned > 0 ? Math.round((totalActual / totalPlanned) * 100) : 0;
@@ -2599,27 +2619,18 @@ export class WorksheetService {
     const totalWithWorksheet = worksheets.length;
     const totalWithoutWorksheet = totalWorkers - totalWithWorksheet;
     
-    // ⭐ FIX: Calculate totalPlanned correctly for all worksheets
+    // ⭐ FIX: Calculate totalPlanned with hour duration coefficient
     let totalPlanned = 0;
     let totalActual = 0;
     
-    const getShiftHours = (shiftType: string) => {
-      switch (shiftType) {
-        case 'NORMAL_8H': return 8;
-        case 'EXTENDED_9_5H': return 9.5;
-        case 'OVERTIME_11H': return 11;
-        default: return 0;
-      }
-    };
-    
     worksheets.forEach(ws => {
-      // ⭐ CRITICAL: totalPlanned = plannedOutputPerHour × exact shift hours
-      const exactHours = getShiftHours(ws.shiftType);
-      const worksheetTotalPlanned = (ws.plannedOutput || 0) * exactHours;
-      totalPlanned += worksheetTotalPlanned;
-      
-      // ⭐ CRITICAL: Sum actualOutput from items
+      // ⭐ Sum record.plannedOutput with hour coefficient (1.5x for hour 9 in EXTENDED_9_5H)
       ws.records.forEach(r => {
+        const hourCoefficient = (ws.shiftType === 'EXTENDED_9_5H' && r.workHour === 9) ? 1.5 : 1;
+        const plannedForHour = (r.plannedOutput || ws.plannedOutput) * hourCoefficient;
+        totalPlanned += plannedForHour;
+        
+        // ⭐ Sum actualOutput from items
         r.items.forEach(item => {
           totalActual += item.actualOutput || 0;
         });
@@ -2679,15 +2690,6 @@ export class WorksheetService {
       efficiency: p.planned > 0 ? Math.round((p.actual / p.planned) * 100) : 0
     }));
 
-    console.log('✅ [REPORT DEBUG] Final summary:', {
-      totalWorkers,
-      totalWithWorksheet,
-      totalWithoutWorksheet,
-      totalPlanned,
-      totalActual,
-      averageEfficiency,
-      linesCount: lines.length
-    });
 
     return {
       date: dateObj.toISOString().split('T')[0],
