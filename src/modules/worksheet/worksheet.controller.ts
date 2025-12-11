@@ -49,14 +49,14 @@ export class WorksheetController {
 
   @Get()
   @ApiOperation({ summary: 'Get all worksheets' })
-  @ApiQuery({ name: 'factoryId', required: false, type: String, description: 'Factory/Office ID' })
+  @ApiQuery({ name: 'officeId', required: false, type: String, description: 'Office ID' })
   @ApiQuery({ name: 'groupId', required: false, type: String })
   @ApiQuery({ name: 'departmentId', required: false, type: String, description: 'Filter by Department ID (Department → Team → Group)' })
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Worksheets retrieved successfully' })
   findAll(
-    @Query('factoryId') factoryId?: string,
+    @Query('officeId') officeId?: string,
     @Query('groupId') groupId?: string,
     @Query('departmentId') departmentId?: string,
     @Query('date') date?: string,
@@ -65,7 +65,7 @@ export class WorksheetController {
   ) {
     const dateFilter = date ? new Date(date) : undefined;
     return this.worksheetService.findAll({
-      factoryId,
+      officeId,
       groupId,
       departmentId,
       date: dateFilter,
@@ -118,34 +118,34 @@ export class WorksheetController {
     return this.worksheetService.getTodayProductionDashboard(today, user);
   }
 
-  @Get('dashboard/factory/:factoryId')
+  @Get('dashboard/office/:officeId')
   @UseGuards(RolesGuard)
   @Roles(Role.SUPERADMIN, Role.ADMIN)
-  @ApiOperation({ summary: 'Factory production dashboard' })
-  async getFactoryDashboard(
-    @Param('factoryId') factoryId: string,
+  @ApiOperation({ summary: 'Office production dashboard' })
+  async getOfficeDashboard(
+    @Param('officeId') officeId: string,
     @Query('date') date?: string,
     @GetUser() user?: any
   ) {
     const targetDate = date ? new Date(date) : new Date();
-    return this.worksheetService.getFactoryDashboard(factoryId, targetDate, user);
+    return this.worksheetService.getOfficeDashboard(officeId, targetDate, user);
   }
 
   @Get('analytics/realtime')
   @UseGuards(RolesGuard)
   @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
   @ApiOperation({ summary: 'Get real-time analytics' })
-  @ApiQuery({ name: 'factoryId', required: false, type: String })
+  @ApiQuery({ name: 'officeId', required: false, type: String })
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Real-time analytics retrieved' })
   getRealtimeAnalytics(
-    @Query('factoryId') factoryId?: string,
+    @Query('officeId') officeId?: string,
     @Query('date') date?: string,
     @GetUser() user?: any
   ) {
     const dateFilter = date ? new Date(date) : undefined;
     return this.worksheetService.getRealtimeAnalytics({
-      factoryId,
+      officeId,
       date: dateFilter,
       userId: user.id,
       userRole: user.role
@@ -339,26 +339,26 @@ export class WorksheetController {
   @Get('reports/by-organization')
   @ApiOperation({ 
     summary: 'Get worksheets for report export by organization structure',
-    description: 'Export data hierarchically: Factory → Line → Team → Group. Shows all workers (with/without worksheets).'
+    description: 'Export data hierarchically: Office → Department → Team → Group. Shows all workers (with/without worksheets).'
   })
   @ApiQuery({ name: 'date', required: true, type: String, description: 'Date (YYYY-MM-DD)' })
-  @ApiQuery({ name: 'factoryId', required: false, type: String, description: 'Filter by Factory' })
-  @ApiQuery({ name: 'lineId', required: false, type: String, description: 'Filter by Line' })
+  @ApiQuery({ name: 'officeId', required: false, type: String, description: 'Filter by Office' })
+  @ApiQuery({ name: 'departmentId', required: false, type: String, description: 'Filter by Department' })
   @ApiQuery({ name: 'teamId', required: false, type: String, description: 'Filter by Team' })
   @ApiQuery({ name: 'groupId', required: false, type: String, description: 'Filter by Group' })
   @ApiResponse({ status: 200, description: 'Report data retrieved successfully' })
   async getWorksheetsForReport(
     @Query('date') date: string,
-    @Query('factoryId') factoryId?: string,
-    @Query('lineId') lineId?: string,
+    @Query('officeId') officeId?: string,
+    @Query('departmentId') departmentId?: string,
     @Query('teamId') teamId?: string,
     @Query('groupId') groupId?: string,
     @GetUser() user?: any
   ) {
     return this.worksheetService.getWorksheetsForReport({
       date: new Date(date),
-      officeId: factoryId,
-      departmentId: lineId,
+      officeId: officeId,
+      departmentId: departmentId,
       teamId,
       groupId,
       userId: user?.id,

@@ -556,7 +556,7 @@ export class WorksheetService {
    * Find all worksheets with filters
    */
   async findAll(filters: {
-    factoryId?: string;
+    officeId?: string;
     groupId?: string;
     departmentId?: string; // ⭐ Filter by Department (= Line for production)
     date?: Date;
@@ -566,8 +566,8 @@ export class WorksheetService {
   }) {
     const where: any = {};
 
-    if (filters.factoryId) {
-      where.officeId = filters.factoryId; // factoryId is now officeId
+    if (filters.officeId) {
+      where.officeId = filters.officeId;
     }
 
     if (filters.groupId) {
@@ -628,9 +628,14 @@ export class WorksheetService {
       where.status = filters.status;
     }
 
-    // Role-based filtering
-    if (filters.userRole === Role.USER && filters.userId) {
-      // Group leader can only see their group's worksheets
+    // ⭐ Role-based filtering
+    // - WORKER with position "CN": Already filtered by groupId in controller
+    // - USER (Nhóm trưởng): Can see all worksheets in their department (via departmentId filter)
+    // - Note: departmentId filter is already handled above (lines 577-606)
+    if (filters.userRole === Role.USER && filters.userId && !filters.departmentId) {
+      // If USER role but no departmentId filter provided, fall back to group leader logic
+      console.log('[WorksheetService] USER role without departmentId - checking group leadership');
+      
       const ledGroups = await this.prisma.group.findMany({
         where: { leaderId: filters.userId },
         select: { id: true }
@@ -638,8 +643,10 @@ export class WorksheetService {
 
       if (ledGroups.length > 0) {
         where.groupId = { in: ledGroups.map(g => g.id) };
+        console.log('[WorksheetService] USER is group leader - filtering by groups:', ledGroups.map(g => g.id));
       } else {
-        // Not a leader, return empty
+        // Not a leader and no department filter, return empty
+        console.warn('[WorksheetService] USER is not a group leader and has no department filter');
         return [];
       }
     }
@@ -1707,9 +1714,9 @@ export class WorksheetService {
   }
 
   /**
-   * Get factory dashboard
+   * Get office dashboard
    */
-  async getFactoryDashboard(officeId: string, date: Date, user: any) {
+  async getOfficeDashboard(officeId: string, date: Date, user: any) {
     const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
@@ -1938,7 +1945,7 @@ export class WorksheetService {
    * Get realtime analytics
    */
   async getRealtimeAnalytics(filters: {
-    factoryId?: string;
+    officeId?: string;
     date?: Date;
     userId?: string;
     userRole?: Role;
@@ -1954,8 +1961,8 @@ export class WorksheetService {
       }
     };
 
-    if (filters.factoryId) {
-      where.factoryId = filters.factoryId;
+    if (filters.officeId) {
+      where.officeId = filters.officeId;
     }
 
     // Role-based filtering
@@ -2101,7 +2108,7 @@ export class WorksheetService {
    *     "totalActual": 13500,     // ⭐ SLTH tổng (sum of all items)
    *     "averageEfficiency": 94
    *   },
-   *   "lines": [...],              // Hierarchical structure: Factory → Line → Team → Group → Workers
+   *   "departments": [...],        // Hierarchical structure: Office → Department → Team → Group → Workers
    *   "chartData": {
    *     "hourly": [                // ⭐ For Line Chart (performance by hour)
    *       { "workHour": 1, "totalPlanned": 1600, "totalActual": 1550, "efficiency": 97 },

@@ -5,8 +5,8 @@ const resources = [
   'users',
   'reports',
   'gate-passes',
-  'factories',
-  'lines',
+  'offices',
+  'departments',
   'teams',
   'groups',
   'worksheets',
@@ -34,9 +34,9 @@ const rolePermissionsMap = {
   },
 
   [Role.ADMIN]: {
-    // Factory management
-    factories: ['view', 'create', 'update', 'delete', 'manage'],
-    lines: ['view', 'create', 'update', 'delete', 'manage'],
+    // Office and department management
+    offices: ['view', 'create', 'update', 'delete', 'manage'],
+    departments: ['view', 'create', 'update', 'delete', 'manage'],
     teams: ['view', 'create', 'update', 'delete', 'manage'],
     groups: ['view', 'create', 'update', 'delete', 'manage', 'assign'],
 
@@ -68,8 +68,8 @@ const rolePermissionsMap = {
     'gate-passes': ['view', 'create', 'approve'],
 
     // Production (can view and manage if assigned)
-    factories: ['view'],
-    lines: ['view'],
+    offices: ['view'],
+    departments: ['view'],
     teams: ['view'],
     groups: ['view'],
     worksheets: ['view'],

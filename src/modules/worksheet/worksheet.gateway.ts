@@ -61,8 +61,8 @@ export class WorksheetGateway implements OnGatewayConnection, OnGatewayDisconnec
    */
   emitReportRefresh(data: {
     date: string;
-    factoryId?: string;
-    lineId?: string;
+    officeId?: string;
+    departmentId?: string;
     teamId?: string;
     groupId?: string;
     summary: {

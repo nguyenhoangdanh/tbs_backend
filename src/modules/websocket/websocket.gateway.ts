@@ -110,10 +110,10 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.logger.debug(`Worksheet update broadcasted to room: worksheet-${worksheetId}`);
   }
 
-  // Broadcast factory dashboard updates
-  broadcastFactoryUpdate(factoryId: string, data: any) {
-    this.server.to(`factory-${factoryId}`).emit('factory-updated', data);
-    this.logger.debug(`Factory update broadcasted to room: factory-${factoryId}`);
+  // Broadcast office dashboard updates
+  broadcastOfficeUpdate(officeId: string, data: any) {
+    this.server.to(`office-${officeId}`).emit('office-updated', data);
+    this.logger.debug(`Office update broadcasted to room: office-${officeId}`);
   }
 
   // Broadcast gate pass updates

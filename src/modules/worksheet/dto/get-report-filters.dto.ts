@@ -15,21 +15,21 @@ export class GetReportFiltersDto {
 
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Factory UUID (optional - filter by factory)',
+    description: 'Office UUID (optional - filter by office)',
     required: false,
   })
   @IsOptional()
   @IsUUID()
-  factoryId?: string;
+  officeId?: string;
 
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Line UUID (optional - filter by line)',
+    description: 'Department UUID (optional - filter by department)',
     required: false,
   })
   @IsOptional()
   @IsUUID()
-  lineId?: string;
+  departmentId?: string;
 
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',

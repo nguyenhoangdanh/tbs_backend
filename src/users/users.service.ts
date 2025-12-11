@@ -170,7 +170,6 @@ export class UsersService {
       }
     }
     
-    // ✅ Add isManager field and departmentId (= lineId) to response
     return {
       ...userWithoutPassword,
       isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,

@@ -25,7 +25,7 @@ export class CacheService {
     // For now, we'll just delete commonly used cache keys
     const commonKeys = [
       'worksheet-analytics',
-      'factory-dashboard',
+      'office-dashboard',
       'realtime-analytics'
     ];
     
@@ -50,12 +50,12 @@ export class CacheService {
   }
 
   // Dashboard cache methods
-  async cacheFactoryDashboard(factoryId: string, date: string, data: any): Promise<void> {
-    await this.set(`factory-dashboard:${factoryId}:${date}`, data, 60); // 1 minute
+  async cacheOfficeDashboard(officeId: string, date: string, data: any): Promise<void> {
+    await this.set(`office-dashboard:${officeId}:${date}`, data, 60); // 1 minute
   }
 
-  async getCachedFactoryDashboard(factoryId: string, date: string): Promise<any> {
-    return await this.get(`factory-dashboard:${factoryId}:${date}`);
+  async getCachedOfficeDashboard(officeId: string, date: string): Promise<any> {
+    return await this.get(`office-dashboard:${officeId}:${date}`);
   }
 
   // Realtime analytics cache
@@ -70,12 +70,12 @@ export class CacheService {
   // Clear worksheet-related cache
   async clearWorksheetCache(worksheetId: string): Promise<void> {
     await this.del(`worksheet-analytics:${worksheetId}`);
-    // Clear related factory dashboard cache by pattern would require Redis SCAN
+    // Clear related office dashboard cache by pattern would require Redis SCAN
     // For now, we'll clear when we know the specific keys
   }
 
-  // Clear factory dashboard cache
-  async clearFactoryDashboardCache(factoryId: string, date: string): Promise<void> {
-    await this.del(`factory-dashboard:${factoryId}:${date}`);
+  // Clear office dashboard cache
+  async clearOfficeDashboardCache(officeId: string, date: string): Promise<void> {
+    await this.del(`office-dashboard:${officeId}:${date}`);
   }
 }
