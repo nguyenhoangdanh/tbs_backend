@@ -374,7 +374,18 @@ export class WorksheetService {
       select: { 
         leaderId: true, 
         name: true,
-        leader: { select: { id: true } }
+        leader: { select: { id: true } },
+        team: {
+          select: {
+            departmentId: true,
+            department: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -382,10 +393,41 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    const canView = 
+    // ⭐ NEW PERMISSION LOGIC:
+    // - SUPERADMIN/ADMIN: Can view all groups
+    // - USER: Can view all groups in their department
+    // - Group leader: Can view their own group
+    let canView = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
       group.leader?.id === user.id;
+
+    // If USER role, check if they're in the same department
+    if (!canView && user.role === Role.USER) {
+      // Get user's department
+      const userWithDept = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          jobPosition: {
+            select: {
+              departmentId: true
+            }
+          }
+        }
+      });
+
+      const userDepartmentId = userWithDept?.jobPosition?.departmentId;
+      const groupDepartmentId = group.team?.departmentId;
+
+      if (userDepartmentId && groupDepartmentId && userDepartmentId === groupDepartmentId) {
+        canView = true;
+        console.log('[WorksheetGrid] USER can view group in same department:', {
+          userId: user.id,
+          groupId,
+          departmentId: userDepartmentId
+        });
+      }
+    }
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -1429,7 +1471,18 @@ export class WorksheetService {
       select: { 
         leaderId: true, 
         name: true,
-        leader: { select: { id: true } }
+        leader: { select: { id: true } },
+        team: {
+          select: {
+            departmentId: true,
+            department: {
+              select: {
+                id: true,
+                name: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -1437,10 +1490,37 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    const canView = 
+    // ⭐ NEW PERMISSION LOGIC: Same as getWorksheetGrid
+    let canView = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
       group.leader?.id === user.id;
+
+    // If USER role, check if they're in the same department
+    if (!canView && user.role === Role.USER) {
+      const userWithDept = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: {
+          jobPosition: {
+            select: {
+              departmentId: true
+            }
+          }
+        }
+      });
+
+      const userDepartmentId = userWithDept?.jobPosition?.departmentId;
+      const groupDepartmentId = group.team?.departmentId;
+
+      if (userDepartmentId && groupDepartmentId && userDepartmentId === groupDepartmentId) {
+        canView = true;
+        console.log('[GetGroupWorksheets] USER can view group in same department:', {
+          userId: user.id,
+          groupId,
+          departmentId: userDepartmentId
+        });
+      }
+    }
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
