@@ -32,7 +32,6 @@ export class OfficeService {
           select: {
             departments: true,
             users: true,
-            factories: true,
           },
         },
       },
@@ -52,21 +51,10 @@ export class OfficeService {
           },
           orderBy: { name: 'asc' },
         },
-        factories: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            description: true,
-          },
-          orderBy: { code: 'asc' },
-        },
         _count: {
           select: {
             departments: true,
             users: true,
-            factories: true,
           },
         },
       },

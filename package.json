@@ -53,8 +53,7 @@
     "test:worksheet-implementation": "npx tsx scripts/test-worksheet-implementation.ts",
     "sample:worksheet-data": "dotenv -e .env.local -- npx tsx prisma/sample-worksheet-data.ts",
     "fix:worksheet-datetime": "dotenv -e .env.local -- npx tsx scripts/fix-worksheet-datetime.ts",
-    "prod:fix:worksheet-datetime": "dotenv -e .env.production -- npx tsx scripts/fix-worksheet-datetime.ts",
-    "validate:worksheet-datetime": "dotenv -e .env.local -- npx tsx scripts/validate-worksheet-datetime.ts"
+    "prod:fix:worksheet-datetime": "dotenv -e .env.production -- npx tsx scripts/fix-worksheet-datetime.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.56.0",

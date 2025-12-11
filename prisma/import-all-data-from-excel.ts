@@ -66,7 +66,8 @@ interface ProcessedData {
     userMsnv: string;
     managerMsnv: string;
     level: number;
-  }>; // New field to track management relationships
+  }>; // Track management relationships
+  // Note: No longer need separate Lines - Department = Line for production
 }
 
 async function testConnection(): Promise<boolean> {
@@ -352,7 +353,7 @@ async function processExcelData(): Promise<ProcessedData> {
         { cd: string; vt: string; pb: string; tt: string }
       >(),
       users: [],
-      managementRelations: [], // Initialize new field
+      managementRelations: [], // Track management relationships
     };
 
     // Skip header row (first row is header)
@@ -404,6 +405,8 @@ async function processExcelData(): Promise<ProcessedData> {
       if (!processed.departments.has(deptKey)) {
         processed.departments.set(deptKey, { name: pb, office: tt });
       }
+
+      // Note: Department = Line for production (no separate Lines table)
 
       // Collect unique positions
       processed.positions.add(cd);
@@ -464,7 +467,7 @@ async function processExcelData(): Promise<ProcessedData> {
 
     console.log(`📈 Data summary:`);
     console.log(`   - Offices: ${processed.offices.size}`);
-    console.log(`   - Departments: ${processed.departments.size}`);
+    console.log(`   - Departments: ${processed.departments.size} (Departments = Lines for production)`);
     console.log(`   - Positions: ${processed.positions.size}`);
     console.log(`   - Job Positions: ${processed.jobPositions.size}`);
     console.log(`   - Users to create: ${processed.users.length}`);
@@ -575,6 +578,8 @@ async function createDepartments(
 
   return departmentMap;
 }
+
+// Note: No longer need createLines - Department = Line for production departments
 
 async function createPositions(
   positions: Set<string>
@@ -1157,6 +1162,9 @@ async function main() {
       processedData.departments,
       officeMap
     );
+    
+    // Note: No longer create separate Lines - Department = Line for production
+    
     const positionMap = await createPositions(processedData.positions);
     const jobPositionMap = await createJobPositions(
       processedData.jobPositions,
@@ -1178,7 +1186,7 @@ async function main() {
     console.log("\n🎉 Complete data import finished successfully!");
     console.log("\n📋 Final summary:");
     console.log(`   🏢 Offices: ${processedData.offices.size}`);
-    console.log(`   🏬 Departments: ${processedData.departments.size}`);
+    console.log(`   🏬 Departments: ${processedData.departments.size} (= Production Lines)`);
     console.log(`   👔 Positions: ${processedData.positions.size}`);
     console.log(`   💼 Job Positions: ${processedData.jobPositions.size}`);
     console.log(`   👥 Users: ${processedData.users.length} processed`);

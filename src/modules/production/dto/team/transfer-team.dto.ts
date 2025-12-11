@@ -4,11 +4,11 @@ import { ApiProperty } from '@nestjs/swagger';
 export class TransferTeamDto {
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Target line UUID to transfer team to',
+    description: 'Target department UUID to transfer team to (Department = Line)',
   })
   @IsUUID()
   @IsNotEmpty()
-  targetLineId: string;
+  targetDepartmentId: string;
 
   @ApiProperty({
     example: 'TEAM_02',

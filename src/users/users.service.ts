@@ -127,9 +127,9 @@ export class UsersService {
           include: {
             team: {
               include: {
-                line: {
+                department: {
                   include: {
-                    factory: true,
+                    office: true,
                   },
                 },
               },
@@ -150,10 +150,31 @@ export class UsersService {
 
     const { password, ...userWithoutPassword } = user;
     
-    // ✅ Add isManager field to response
+    // ⭐ Department ID acts as Line ID for production departments
+    let departmentId: string | null = null;
+    
+    // 1. If user has group, get department from group.team.department
+    if (user.group?.team?.department?.id) {
+      departmentId = user.group.team.department.id;
+    }
+    // 2. If user manages departments, use the first managed department as their "line"
+    else if (user.managedDepartments && user.managedDepartments.length > 0) {
+      const managedDept = user.managedDepartments[0];
+      if (managedDept.department) {
+        departmentId = managedDept.department.id;
+        console.log('✅ [UserService] User manages department (line):', {
+          userId: user.id,
+          departmentId: departmentId,
+          departmentName: managedDept.department.name
+        });
+      }
+    }
+    
+    // ✅ Add isManager field and departmentId (= lineId) to response
     return {
       ...userWithoutPassword,
       isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
+      departmentId, // ⭐ Department ID (= Line ID for production departments)
     };
   }
 
@@ -736,16 +757,14 @@ export class UsersService {
                 id: true,
                 name: true,
                 code: true,
-                line: {
+                department: {
                   select: {
                     id: true,
                     name: true,
-                    code: true,
-                    factory: {
+                    office: {
                       select: {
                         id: true,
                         name: true,
-                        code: true,
                       },
                     },
                   },

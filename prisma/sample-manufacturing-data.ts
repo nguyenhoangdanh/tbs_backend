@@ -315,76 +315,38 @@ async function createManufacturingStructure() {
       console.log(`   ✅ Job positions for ${factoryCode}`);
     }
 
-    // 4. Create factories
-    console.log('\n🏭 Step 4: Creating factories...');
-    const factories = [];
-    
-    for (const { office, factoryCode } of offices) {
-      const factory = await prisma.factory.upsert({
-        where: { code: factoryCode },
-        update: {},
-        create: {
-          name: `Nhà máy ${factoryCode}`,
-          code: factoryCode,
-          description: `Nhà máy sản xuất túi xách ${factoryCode}`,
-          officeId: office.id
-        }
-      });
-      factories.push({ factory, factoryCode });
-      console.log(`   ✅ Factory: ${factory.name}`);
-    }
+    // 4. NOTE: No need to create Factory/Line - using Office & Department!
+    // Office (FACTORY_OFFICE) = Factory
+    // Department = Production Line
+    console.log('\n✅ Step 4: Skipped - Using Office as Factory, Department as Line');
 
-    // 5. Create lines
-    console.log('\n📏 Step 5: Creating production lines...');
-    const lines = [];
-    for (const { factory, factoryCode } of factories) {
-      for (let i = 1; i <= 3; i++) { // Create 3 lines per factory
-        const line = await prisma.line.upsert({
-          where: {
-            code_factoryId: {
-              code: `LINE_${i}`,
-              factoryId: factory.id
-            }
-          },
-          update: {},
-          create: {
-            name: `Line ${i}`,
-            code: `LINE_${i}`,
-            description: `Line ${i} - ${factory.name}`,
-            factoryId: factory.id
-          }
-        });
-        lines.push({ line, factoryCode });
-        console.log(`   ✅ Line: ${line.name} (${factoryCode})`);
-      }
-    }
-
-    // 6. Create teams
-    console.log('\n👥 Step 6: Creating teams...');
+    // 5. Create teams (under Department, not Line)
+    console.log('\n👥 Step 5: Creating teams under departments...');
     const teams = [];
-    for (const { line, factoryCode } of lines) {
-      for (let t = 1; t <= 2; t++) { // Create 2 teams per line
+    
+    for (const { office, department, factoryCode } of jobPositions) {
+      for (let t = 1; t <= 2; t++) { // Create 2 teams per department
         const team = await prisma.team.upsert({
           where: {
-            code_lineId: {
+            code_departmentId: {
               code: `TEAM_${t}`,
-              lineId: line.id
+              departmentId: department.id
             }
           },
           update: {},
           create: {
             name: `Tổ ${t}`,
             code: `TEAM_${t}`,
-            description: `Tổ ${t} - ${line.name}`,
-            lineId: line.id
+            description: `Tổ ${t} - ${department.name}`,
+            departmentId: department.id
           }
         });
-        teams.push({ team, factoryCode });
-        console.log(`   ✅ Team: ${team.name} (${line.name})`);
+        teams.push({ team, factoryCode, office, department });
+        console.log(`   ✅ Team: ${team.name} (${department.name})`);
       }
     }
 
-    // 7. Create groups
+    // 6. Create groups
     console.log('\n🏢 Step 7: Creating groups...');
     const groups = [];
     for (const { team, factoryCode } of teams) {
@@ -482,7 +444,8 @@ async function createWorkers(jobPositions: any[], groups: any[]) {
       employeeCounter++;
 
     } catch (error) {
-      console.error(`   ❌ Error creating worker ${workerData.firstName}:`, error.message);
+      const err = error as Error;
+      console.error(`   ❌ Error creating worker ${workerData.firstName}:`, err.message);
       employeeCounter++;
     }
   }
@@ -538,7 +501,8 @@ async function assignWorkersToGroups(workers: any[], groups: any[]) {
       }
 
     } catch (error) {
-      console.error(`   ❌ Error assigning to group ${group.name}:`, error.message);
+      const err = error as Error;
+      console.error(`   ❌ Error assigning to group ${group.name}:`, err.message);
     }
   }
 }

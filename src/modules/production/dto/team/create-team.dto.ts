@@ -29,9 +29,9 @@ export class CreateTeamDto {
 
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Line UUID',
+    description: 'Department UUID (Department = Line for production)',
   })
   @IsUUID()
   @IsNotEmpty()
-  lineId: string;
+  departmentId: string;
 }

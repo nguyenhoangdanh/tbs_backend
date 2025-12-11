@@ -29,18 +29,18 @@ export class WorksheetService {
     // Get workers list
     let workers: any[];
     let group: any;
-    let factoryId: string;
+    let officeId: string; // Office = Factory for FACTORY_OFFICE type
     let finalGroupId: string;
 
     if (groupId) {
-      // Get group with members and factory info
+      // Get group with members and office (factory) info
       group = await this.prisma.group.findUnique({
         where: { id: groupId },
         include: {
           team: {
             include: {
-              line: {
-                include: { factory: true }
+              department: {
+                include: { office: true }
               }
             }
           },
@@ -60,12 +60,12 @@ export class WorksheetService {
         throw new NotFoundException('Group not found');
       }
 
-      if (!group.team?.line?.factory) {
-        throw new BadRequestException('Group must belong to a factory');
+      if (!group.team?.department?.office) {
+        throw new BadRequestException('Group must belong to a factory office');
       }
 
       workers = group.members;
-      factoryId = group.team.line.factory.id;
+      officeId = group.team.department.office.id;
       finalGroupId = groupId;
 
       if (workers.length === 0) {
@@ -83,8 +83,8 @@ export class WorksheetService {
             include: {
               team: {
                 include: {
-                  line: {
-                    include: { factory: true }
+                  department: {
+                    include: { office: true }
                   }
                 }
               }
@@ -97,17 +97,17 @@ export class WorksheetService {
         throw new NotFoundException('No active workers found');
       }
 
-      // Use first worker's factory and group
+      // Use first worker's factory (office) and group
       const firstWorker = workers[0];
-      if (!firstWorker.group?.team?.line?.factory) {
-        throw new BadRequestException('Workers must belong to a factory');
+      if (!firstWorker.group?.team?.department?.office) {
+        throw new BadRequestException('Workers must belong to a factory office');
       }
 
       if (!firstWorker.groupId) {
         throw new BadRequestException('Workers must belong to a group');
       }
 
-      factoryId = firstWorker.group.team.line.factory.id;
+      officeId = firstWorker.group.team.department.office.id;
       finalGroupId = firstWorker.groupId;
       group = firstWorker.group;
     }
@@ -151,7 +151,7 @@ export class WorksheetService {
             date: dateObj,
             workerId: worker.id,
             groupId: finalGroupId,
-            factoryId,
+            officeId, // Office = Factory
             productId,
             processId,
             shiftType,
@@ -214,7 +214,12 @@ export class WorksheetService {
     // Verify group leader permission
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
-      select: { id: true, leaderId: true, name: true }
+      select: { 
+        id: true, 
+        leaderId: true, 
+        name: true,
+        leader: { select: { id: true } }
+      }
     });
 
     if (!group) {
@@ -224,7 +229,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      group.leaderId === user.id;
+      group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader can update records');
@@ -366,7 +371,11 @@ export class WorksheetService {
     // Check permission
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
-      select: { leaderId: true, name: true }
+      select: { 
+        leaderId: true, 
+        name: true,
+        leader: { select: { id: true } }
+      }
     });
 
     if (!group) {
@@ -376,7 +385,7 @@ export class WorksheetService {
     const canView = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      group.leaderId === user.id;
+      group.leader?.id === user.id;
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -398,8 +407,8 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { id: true, name: true, code: true } },
-        process: { select: { id: true, name: true, code: true } },
+        product: { select: { id: true, name: true } },
+        process: { select: { id: true, name: true } },
         records: {
           include: {
             items: {
@@ -549,6 +558,7 @@ export class WorksheetService {
   async findAll(filters: {
     factoryId?: string;
     groupId?: string;
+    departmentId?: string; // ⭐ Filter by Department (= Line for production)
     date?: Date;
     status?: string;
     userId?: string;
@@ -557,11 +567,40 @@ export class WorksheetService {
     const where: any = {};
 
     if (filters.factoryId) {
-      where.factoryId = filters.factoryId;
+      where.officeId = filters.factoryId; // factoryId is now officeId
     }
 
     if (filters.groupId) {
       where.groupId = filters.groupId;
+    }
+
+    // ⭐ Filter by Department (= Line for production departments)
+    if (filters.departmentId) {
+      console.log('[WorksheetService] Filtering by Department:', filters.departmentId);
+      
+      // Find all groups in this Department (through Team)
+      const groupsInDept = await this.prisma.group.findMany({
+        where: {
+          team: {
+            departmentId: filters.departmentId
+          }
+        },
+        select: { id: true, name: true, teamId: true, team: { select: { name: true, departmentId: true } } }
+      });
+
+      console.log('[WorksheetService] Groups found in Department:', {
+        departmentId: filters.departmentId,
+        groupCount: groupsInDept.length,
+        groups: groupsInDept.map(g => ({ id: g.id, name: g.name, teamId: g.teamId, teamName: g.team?.name, departmentId: g.team?.departmentId }))
+      });
+
+      if (groupsInDept.length > 0) {
+        where.groupId = { in: groupsInDept.map(g => g.id) };
+      } else {
+        // No groups in this Department, return empty
+        console.warn('[WorksheetService] No groups found for Department:', filters.departmentId);
+        return [];
+      }
     }
 
     if (filters.date) {
@@ -608,7 +647,7 @@ export class WorksheetService {
     const worksheets = await this.prisma.workSheet.findMany({
       where,
       include: {
-        factory: { select: { name: true, code: true } },
+        office: { select: { name: true } },
         group: {
           select: {
             id: true,
@@ -617,7 +656,7 @@ export class WorksheetService {
             team: {
               select: {
                 name: true,
-                line: { select: { name: true } }
+                department: { select: { name: true } }
               }
             }
           }
@@ -630,8 +669,8 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { id: true, name: true, code: true } },
-        process: { select: { id: true, name: true, code: true } },
+        product: { select: { id: true, name: true } },
+        process: { select: { id: true, name: true } },
         createdBy: { select: { firstName: true, lastName: true, employeeCode: true } },
         records: {
           select: {
@@ -692,7 +731,7 @@ export class WorksheetService {
         date: ws.date.toISOString().split('T')[0],
         worker: ws.worker,
         group: ws.group,
-        factory: ws.factory,
+        office: ws.office,
         productId: ws.productId,
         processId: ws.processId,
         product: ws.product,
@@ -721,12 +760,12 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id },
       include: {
-        factory: { select: { name: true, code: true } },
+        office: { select: { name: true } },
         group: {
           include: {
             team: {
               include: {
-                line: { select: { name: true } }
+                department: { select: { name: true } }
               }
             },
             leader: {
@@ -775,7 +814,7 @@ export class WorksheetService {
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
       worksheet.createdById === user.id ||
-      worksheet.group.leaderId === user.id ||
+      worksheet.group.leader?.id === user.id ||
       worksheet.workerId === user.id;
 
     if (!canAccess) {
@@ -814,7 +853,12 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id },
       include: { 
-        group: { select: { leaderId: true } },
+        group: { 
+          select: { 
+            leaderId: true,
+            leader: { select: { id: true } }
+          } 
+        },
         records: { select: { id: true, workHour: true, actualOutput: true, status: true } }
       }
     });
@@ -828,7 +872,7 @@ export class WorksheetService {
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
       worksheet.createdById === user.id ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to update this worksheet');
@@ -890,8 +934,8 @@ export class WorksheetService {
           status: updateDto.status
         },
         include: {
-          factory: { select: { name: true, code: true } },
-          group: { select: { name: true, id: true } },
+          office: { select: { name: true } },
+          group: { select: { name: true, id: true, leader: { select: { id: true } } } },
           worker: { select: { firstName: true, lastName: true, employeeCode: true } },
           product: { select: { name: true, code: true } },
           process: { select: { name: true, code: true } },
@@ -956,6 +1000,7 @@ export class WorksheetService {
         id: true, 
         name: true, 
         leaderId: true,
+        leader: { select: { id: true } },
         members: { where: { isActive: true }, select: { id: true } }
       }
     });
@@ -968,7 +1013,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      group.leaderId === user.id;
+      group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader or admin can bulk update worksheets');
@@ -1087,7 +1132,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true } },
+        group: { select: { leaderId: true, leader: { select: { id: true } } } },
         records: { where: { id: recordId } }
       }
     });
@@ -1105,7 +1150,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader can update records');
@@ -1182,7 +1227,7 @@ export class WorksheetService {
   async completeWorksheet(id: string, user: any) {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id },
-      include: { group: { select: { leaderId: true } } }
+      include: { group: { select: { leaderId: true, leader: { select: { id: true } } } } }
     });
 
     if (!worksheet) {
@@ -1193,7 +1238,7 @@ export class WorksheetService {
     const canComplete = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canComplete) {
       throw new ForbiddenException('No permission to complete this worksheet');
@@ -1231,8 +1276,8 @@ export class WorksheetService {
         }
       },
       include: {
-        factory: { select: { name: true, code: true } },
-        group: { select: { name: true, code: true } },
+        office: { select: { name: true } },
+        group: { select: { name: true, code: true, leader: { select: { id: true } } } },
         worker: { select: { firstName: true, lastName: true, employeeCode: true } },
         records: {
           include: {
@@ -1262,7 +1307,7 @@ export class WorksheetService {
         date: ws.date.toISOString().split('T')[0],
         worker: ws.worker,
         group: ws.group,
-        factory: ws.factory,
+        office: ws.office,
         completedRecords: ws._count.records,
         totalRecords: ws.records.length,
         totalPlanned,
@@ -1280,7 +1325,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true } },
+        group: { select: { leaderId: true, leader: { select: { id: true } } } },
         records: {
           include: {
             items: {
@@ -1303,7 +1348,7 @@ export class WorksheetService {
     const canView = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canView) {
       throw new ForbiddenException('No permission to view analytics');
@@ -1374,7 +1419,11 @@ export class WorksheetService {
     // Check permission
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
-      select: { leaderId: true, name: true }
+      select: { 
+        leaderId: true, 
+        name: true,
+        leader: { select: { id: true } }
+      }
     });
 
     if (!group) {
@@ -1384,7 +1433,7 @@ export class WorksheetService {
     const canView = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      group.leaderId === user.id;
+      group.leader?.id === user.id;
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -1408,14 +1457,14 @@ export class WorksheetService {
             lastName: true
           }
         },
-        product: { select: { id: true, name: true, code: true } },
-        process: { select: { id: true, name: true, code: true } },
+        product: { select: { id: true, name: true } },
+        process: { select: { id: true, name: true } },
         records: {
           include: {
             items: {
               include: {
-                product: { select: { id: true, name: true, code: true } },
-                process: { select: { id: true, name: true, code: true } }
+                product: { select: { id: true, name: true } },
+                process: { select: { id: true, name: true } }
               },
               orderBy: { entryIndex: 'asc' }
             }
@@ -1514,7 +1563,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true } }
+        group: { select: { leaderId: true, leader: { select: { id: true } } } }
       }
     });
 
@@ -1526,7 +1575,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader can update records');
@@ -1557,14 +1606,14 @@ export class WorksheetService {
         }
       },
       include: {
-        factory: { select: { id: true, name: true, code: true } },
+        office: { select: { id: true, name: true } },
         group: {
           select: {
             name: true,
             team: {
               select: {
                 name: true,
-                line: { select: { name: true } }
+                department: { select: { name: true } }
               }
             }
           }
@@ -1584,16 +1633,15 @@ export class WorksheetService {
     let completedRecords = 0;
     let totalRecords = 0;
 
-    const factoryStats = new Map<string, any>();
+    const officeStats = new Map<string, any>();
 
     worksheets.forEach(worksheet => {
-      const factoryId = worksheet.factory.id;
+      const officeId = worksheet.office.id;
 
-      if (!factoryStats.has(factoryId)) {
-        factoryStats.set(factoryId, {
-          id: factoryId,
-          name: worksheet.factory.name,
-          code: worksheet.factory.code,
+      if (!officeStats.has(officeId)) {
+        officeStats.set(officeId, {
+          id: officeId,
+          name: worksheet.office.name,
           totalWorksheets: 0,
           totalPlanned: 0,
           totalActual: 0,
@@ -1602,8 +1650,8 @@ export class WorksheetService {
         });
       }
 
-      const factory = factoryStats.get(factoryId)!;
-      factory.totalWorksheets += 1;
+      const office = officeStats.get(officeId)!;
+      office.totalWorksheets += 1;
 
       worksheet.records.forEach(record => {
         const recordPlanned = record.plannedOutput || 0;
@@ -1613,13 +1661,13 @@ export class WorksheetService {
         totalActual += recordActual;
         totalRecords += 1;
 
-        factory.totalPlanned += recordPlanned;
-        factory.totalActual += recordActual;
-        factory.totalRecords += 1;
+        office.totalPlanned += recordPlanned;
+        office.totalActual += recordActual;
+        office.totalRecords += 1;
 
         if (record.status === WorkRecordStatus.COMPLETED) {
           completedRecords += 1;
-          factory.completedRecords += 1;
+          office.completedRecords += 1;
         }
       });
     });
@@ -1636,21 +1684,21 @@ export class WorksheetService {
         overallEfficiency,
         completionRate: totalRecords > 0 ? 
           Math.round((completedRecords / totalRecords) * 100) : 0,
-        activeFactories: factoryStats.size
+        activeOffices: officeStats.size
       },
-      factories: Array.from(factoryStats.values()).map(factory => ({
-        ...factory,
-        efficiency: factory.totalPlanned > 0 ? 
-          Math.round((factory.totalActual / factory.totalPlanned) * 100) : 0,
-        completionRate: factory.totalRecords > 0 ? 
-          Math.round((factory.completedRecords / factory.totalRecords) * 100) : 0
+      offices: Array.from(officeStats.values()).map(office => ({
+        ...office,
+        efficiency: office.totalPlanned > 0 ? 
+          Math.round((office.totalActual / office.totalPlanned) * 100) : 0,
+        completionRate: office.totalRecords > 0 ? 
+          Math.round((office.completedRecords / office.totalRecords) * 100) : 0
       })),
       recentActivity: worksheets
         .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
         .slice(0, 10)
         .map(ws => ({
           id: ws.id,
-          factory: ws.factory.name,
+          office: ws.office.name,
           group: ws.group.name,
           status: ws.status,
           updatedAt: ws.updatedAt
@@ -1661,25 +1709,25 @@ export class WorksheetService {
   /**
    * Get factory dashboard
    */
-  async getFactoryDashboard(factoryId: string, date: Date, user: any) {
+  async getFactoryDashboard(officeId: string, date: Date, user: any) {
     const startOfDay = new Date(date.getFullYear(), date.getMonth(), date.getDate());
     const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
     const worksheets = await this.prisma.workSheet.findMany({
       where: {
-        factoryId,
+        officeId,
         date: {
           gte: startOfDay,
           lt: endOfDay
         }
       },
       include: {
-        factory: { select: { name: true, code: true } },
+        office: { select: { name: true } },
         group: {
           include: {
             team: {
               include: {
-                line: true
+                department: true
               }
             },
             leader: {
@@ -1694,8 +1742,8 @@ export class WorksheetService {
           include: {
             items: {
               include: {
-                product: { select: { id: true, name: true, code: true } },
-                process: { select: { id: true, name: true, code: true } }
+                product: { select: { id: true, name: true } },
+                process: { select: { id: true, name: true } }
               }
             }
           },
@@ -1736,7 +1784,7 @@ export class WorksheetService {
     });
 
     return {
-      factory: worksheets[0]?.factory || { name: 'Unknown', code: 'N/A' },
+      office: worksheets[0]?.office || { name: 'Unknown', code: 'N/A' },
       date: date.toISOString().split('T')[0],
       groups: Array.from(groupMap.values()).map(groupData => ({
         group: {
@@ -1773,7 +1821,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true } },
+        group: { select: { leaderId: true, leader: { select: { id: true } } } },
         records: { where: { workHour } }
       }
     });
@@ -1791,7 +1839,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader can adjust targets');
@@ -1817,7 +1865,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true } },
+        group: { select: { leaderId: true, leader: { select: { id: true } } } },
         records: {
           where: { workHour: fromHour },
           include: { items: true }
@@ -1838,7 +1886,7 @@ export class WorksheetService {
     const canUpdate = 
       user.role === Role.SUPERADMIN ||
       user.role === Role.ADMIN ||
-      worksheet.group.leaderId === user.id;
+      worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
       throw new ForbiddenException('Only group leader can copy forward');
@@ -2092,8 +2140,8 @@ export class WorksheetService {
    */
   async getWorksheetsForReport(filters: {
     date: Date;
-    factoryId?: string;
-    lineId?: string;
+    officeId?: string;
+    departmentId?: string;
     teamId?: string;
     groupId?: string;
     userId?: string;
@@ -2108,8 +2156,8 @@ export class WorksheetService {
     console.log('🔍 [REPORT DEBUG] Query params:', {
       inputDate: filters.date.toISOString(),
       queryDateStr: dateStr,
-      factoryId: filters.factoryId,
-      lineId: filters.lineId,
+      officeId: filters.officeId,
+      departmentId: filters.departmentId,
       teamId: filters.teamId,
       groupId: filters.groupId
     });
@@ -2126,14 +2174,14 @@ export class WorksheetService {
       where.group = {
         teamId: filters.teamId
       };
-    } else if (filters.lineId) {
+    } else if (filters.departmentId) {
       where.group = {
         team: {
-          lineId: filters.lineId
+          departmentId: filters.departmentId
         }
       };
-    } else if (filters.factoryId) {
-      where.factoryId = filters.factoryId;
+    } else if (filters.officeId) {
+      where.officeId = filters.officeId;
     }
 
     // Permission check for regular users (group leaders)
@@ -2170,10 +2218,10 @@ export class WorksheetService {
       workersQuery.groupId = filters.groupId;
     } else if (filters.teamId) {
       workersQuery.group = { teamId: filters.teamId };
-    } else if (filters.lineId) {
-      workersQuery.group = { team: { lineId: filters.lineId } };
-    } else if (filters.factoryId) {
-      workersQuery.group = { team: { line: { factoryId: filters.factoryId } } };
+    } else if (filters.departmentId) {
+      workersQuery.group = { team: { departmentId: filters.departmentId } };
+    } else if (filters.officeId) {
+      workersQuery.group = { team: { department: { officeId: filters.officeId } } };
     }
 
     const allWorkers = await this.prisma.user.findMany({
@@ -2220,18 +2268,16 @@ export class WorksheetService {
                 id: true,
                 name: true,
                 code: true,
-                lineId: true,
-                line: {
+                departmentId: true,
+                department: {
                   select: {
                     id: true,
                     name: true,
-                    code: true,
-                    factoryId: true,
-                    factory: {
+                    officeId: true,
+                    office: {
                       select: {
                         id: true,
-                        name: true,
-                        code: true
+                        name: true
                       }
                     }
                   }
@@ -2290,16 +2336,14 @@ export class WorksheetService {
                 id: true,
                 name: true,
                 code: true,
-                line: {
+                department: {
                   select: {
                     id: true,
                     name: true,
-                    code: true,
-                    factory: {
+                    office: {
                       select: {
                         id: true,
-                        name: true,
-                        code: true
+                        name: true
                       }
                     }
                   }
@@ -2309,17 +2353,17 @@ export class WorksheetService {
           }
         },
         product: {
-          select: { id: true, name: true, code: true }
+          select: { id: true, name: true }
         },
         process: {
-          select: { id: true, name: true, code: true }
+          select: { id: true, name: true }
         },
         records: {
           include: {
             items: {
               include: {
-                product: { select: { id: true, name: true, code: true } },
-                process: { select: { id: true, name: true, code: true } }
+                product: { select: { id: true, name: true } },
+                process: { select: { id: true, name: true } }
               },
               orderBy: { entryIndex: 'asc' }
             }
@@ -2328,7 +2372,7 @@ export class WorksheetService {
         }
       },
       orderBy: [
-        { group: { team: { line: { code: 'asc' } } } },
+        { group: { team: { department: { name: 'asc' } } } },
         { group: { team: { code: 'asc' } } },
         { group: { code: 'asc' } },
         { worker: { employeeCode: 'asc' } }
@@ -2349,34 +2393,34 @@ export class WorksheetService {
     // Create worker map for quick lookup
     const worksheetMap = new Map(worksheets.map(ws => [ws.workerId, ws]));
 
-    // Build hierarchical structure: Line → Team → Group → Workers
-    const lineMap = new Map<string, any>();
+    // Build hierarchical structure: Department → Team → Group → Workers
+    const departmentMap = new Map<string, any>();
 
-    allWorkers.forEach(worker => {
-      if (!worker.group?.team?.line) return;
+    allWorkers.forEach((worker: any) => {
+      if (!worker.group?.team?.department) return;
 
-      const line = worker.group.team.line;
+      const department = worker.group.team.department;
       const team = worker.group.team;
       const group = worker.group;
 
-      // Initialize line
-      if (!lineMap.has(line.id)) {
-        lineMap.set(line.id, {
-          line: {
-            id: line.id,
-            name: line.name,
-            code: line.code,
-            factory: line.factory
+      // Initialize department
+      if (!departmentMap.has(department.id)) {
+        departmentMap.set(department.id, {
+          department: {
+            id: department.id,
+            name: department.name,
+            code: department.code,
+            office: department.office
           },
           teams: new Map<string, any>()
         });
       }
 
-      const lineData = lineMap.get(line.id)!;
+      const departmentData = departmentMap.get(department.id)!;
 
       // Initialize team
-      if (!lineData.teams.has(team.id)) {
-        lineData.teams.set(team.id, {
+      if (!departmentData.teams.has(team.id)) {
+        departmentData.teams.set(team.id, {
           team: {
             id: team.id,
             name: team.name,
@@ -2386,7 +2430,7 @@ export class WorksheetService {
         });
       }
 
-      const teamData = lineData.teams.get(team.id)!;
+      const teamData = departmentData.teams.get(team.id)!;
 
       // Initialize group
       if (!teamData.groups.has(group.id)) {
@@ -2395,7 +2439,7 @@ export class WorksheetService {
             id: group.id,
             name: group.name,
             code: group.code,
-            leaderId: group.leaderId,
+            leaderId: group.leader?.id,
             leaderName: group.leader ? `${group.leader.firstName} ${group.leader.lastName}` : 'N/A'
           },
           workers: []
@@ -2516,9 +2560,9 @@ export class WorksheetService {
     });
 
     // Convert to array structure for response
-    const lines = Array.from(lineMap.values()).map((lineData: any) => ({
-      line: lineData.line,
-      teams: Array.from(lineData.teams.values()).map((teamData: any) => ({
+    const departments = Array.from(departmentMap.values()).map((departmentData: any) => ({
+      department: departmentData.department,
+      teams: Array.from(departmentData.teams.values()).map((teamData: any) => ({
         team: teamData.team,
         groups: Array.from(teamData.groups.values()).map((groupData: any) => {
           // ⭐ Calculate group-level aggregations for charts
@@ -2702,18 +2746,18 @@ export class WorksheetService {
         averageEfficiency
 
       },
-      lines,
+      departments,
       // ⭐ Overall chart data for dashboard
       chartData: {
         hourly: overallHourlyData,        // Overall performance by hour
         products: overallProductData,     // Overall performance by product
-        lineComparison: lines.map((line: any) => ({
-          lineName: line.line.name,
-          lineCode: line.line.code,
-          totalPlanned: line.teams.reduce((sum: number, t: any) => 
+        departmentComparison: departments.map((dept: any) => ({
+          departmentName: dept.department.name,
+          departmentCode: dept.department.code,
+          totalPlanned: dept.teams.reduce((sum: number, t: any) => 
             sum + t.groups.reduce((gSum: number, g: any) => gSum + g.summary.totalPlanned, 0), 0
           ),
-          totalActual: line.teams.reduce((sum: number, t: any) => 
+          totalActual: dept.teams.reduce((sum: number, t: any) => 
             sum + t.groups.reduce((gSum: number, g: any) => gSum + g.summary.totalActual, 0), 0
           ),
           efficiency: 0  // Will calculate below

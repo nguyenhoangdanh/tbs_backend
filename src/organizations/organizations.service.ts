@@ -13,7 +13,6 @@ export class OrganizationsService {
           select: {
             departments: true,
             users: true,
-            factories: true, // Include factories count
           },
         },
       },
@@ -33,21 +32,10 @@ export class OrganizationsService {
           },
           orderBy: { name: 'asc' },
         },
-        factories: {
-          where: { isActive: true },
-          select: {
-            id: true,
-            name: true,
-            code: true,
-            description: true,
-          },
-          orderBy: { code: 'asc' },
-        },
         _count: {
           select: {
             departments: true,
             users: true,
-            factories: true,
           },
         },
       },
@@ -259,10 +247,10 @@ export class OrganizationsService {
                 team: {
                   select: {
                     name: true,
-                    line: {
+                    department: {
                       select: {
                         name: true,
-                        factory: { select: { name: true, code: true } },
+                        office: { select: { name: true } },
                       },
                     },
                   },
@@ -300,23 +288,10 @@ export class OrganizationsService {
           },
           orderBy: { name: 'asc' },
         },
-        factories: {
-          where: { isActive: true },
-          include: {
-            _count: {
-              select: {
-                lines: true,
-                worksheets: true,
-              },
-            },
-          },
-          orderBy: { code: 'asc' },
-        },
         _count: {
           select: {
             departments: true,
             users: true,
-            factories: true,
           },
         },
       },
@@ -327,9 +302,8 @@ export class OrganizationsService {
       offices,
       summary: {
         totalOffices: offices.length,
-        totalDepartments: offices.reduce((sum, office) => sum + office._count.departments, 0),
-        totalFactories: offices.reduce((sum, office) => sum + office._count.factories, 0),
-        totalUsers: offices.reduce((sum, office) => sum + office._count.users, 0),
+        totalDepartments: offices.reduce((sum, office) => sum + (office._count?.departments || 0), 0),
+        totalUsers: offices.reduce((sum, office) => sum + (office._count?.users || 0), 0),
       },
     };
   }

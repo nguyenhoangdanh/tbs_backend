@@ -28,19 +28,19 @@ export class ProductionController {
   async getStructure() {
     this.logger.log('Fetching production structure...');
     const result = await this.hierarchyService.getProductionStructure();
-    this.logger.log(`Returned ${result.factories.length} factories`);
+    this.logger.log(`Returned ${result.offices.length} offices`);
     
-    // Log first factory structure to debug
-    if (result.factories.length > 0) {
-      const firstFactory = result.factories[0];
-      this.logger.debug(`First factory: ${firstFactory.name}, Lines: ${firstFactory.lines?.length || 0}`);
-      if (firstFactory.lines && firstFactory.lines.length > 0) {
-        const firstLine = firstFactory.lines[0];
-        this.logger.debug(`First line: ${firstLine.name}, Teams: ${firstLine.teams?.length || 0}`);
-        if (firstLine.teams && firstLine.teams.length > 0) {
-          const firstTeam = firstLine.teams[0];
-          this.logger.debug(`First team: ${firstTeam.name}, Groups: ${firstTeam.groups?.length || 0}`);
-        }
+    // Log first office structure to debug
+    if (result.offices.length > 0) {
+      const firstOffice = result.offices[0];
+      this.logger.debug(`First office: ${firstOffice.name}, Departments: ${firstOffice.departments?.length || 0}`);
+      if (firstOffice.departments && firstOffice.departments.length > 0) {
+        const firstDept = firstOffice.departments[0];
+        this.logger.debug(`First department: ${firstDept.name}, Teams: ${firstDept.teams?.length || 0}`);
+        // if (firstDept.teams && firstDept.teams.length > 0) {
+        //   const firstTeam = firstLine.teams[0];
+        //   this.logger.debug(`First team: ${firstTeam.name}, Groups: ${firstTeam.groups?.length || 0}`);
+        // }
       }
     }
     

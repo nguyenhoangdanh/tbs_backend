@@ -45,11 +45,10 @@ export class GroupService {
           select: {
             name: true,
             code: true,
-            line: {
+            department: {
               select: {
                 name: true,
-                code: true,
-                factory: { select: { name: true, code: true } },
+                office: { select: { name: true } },
               },
             },
           },
@@ -85,16 +84,14 @@ export class GroupService {
             id: true,
             name: true,
             code: true,
-            line: {
+            department: {
               select: {
                 id: true,
                 name: true,
-                code: true,
-                factory: {
+                office: {
                   select: {
                     id: true,
                     name: true,
-                    code: true,
                   },
                 },
               },
@@ -128,8 +125,8 @@ export class GroupService {
         },
       },
       orderBy: [
-        { team: { line: { factory: { code: 'asc' } } } },
-        { team: { line: { code: 'asc' } } },
+        { team: { department: { office: { name: 'asc' } } } },
+        { team: { department: { name: 'asc' } } },
         { team: { code: 'asc' } },
         { code: 'asc' },
       ],
@@ -142,8 +139,8 @@ export class GroupService {
       include: {
         team: {
           include: {
-            line: {
-              include: { factory: true },
+            department: {
+              include: { office: true },
             },
           },
         },
@@ -222,11 +219,10 @@ export class GroupService {
           select: {
             name: true,
             code: true,
-            line: {
+            department: {
               select: {
                 name: true,
-                code: true,
-                factory: { select: { name: true, code: true } },
+                office: { select: { name: true } },
               },
             },
           },
@@ -308,8 +304,8 @@ export class GroupService {
       include: {
         team: {
           include: {
-            line: {
-              include: { factory: true },
+            department: {
+              include: { office: true },
             },
           },
         },
@@ -359,7 +355,7 @@ export class GroupService {
         productId: true,
         processId: true,
         plannedOutput: true,
-        factoryId: true,
+        officeId: true,
       },
       orderBy: { date: 'desc' },
     });
@@ -407,7 +403,7 @@ export class GroupService {
               date: templateWorksheet.date,
               workerId: userId,
               groupId,
-              factoryId: templateWorksheet.factoryId,
+              officeId: templateWorksheet.officeId,
               productId: templateWorksheet.productId,
               processId: templateWorksheet.processId,
               shiftType: templateWorksheet.shiftType,
@@ -586,11 +582,10 @@ export class GroupService {
             id: true,
             name: true,
             code: true,
-            line: {
+            department: {
               select: {
                 name: true,
-                code: true,
-                factory: { select: { name: true, code: true } },
+                office: { select: { name: true } },
               },
             },
           },
@@ -610,11 +605,10 @@ export class GroupService {
         id: true,
         name: true,
         code: true,
-        line: {
+        department: {
           select: {
             name: true,
-            code: true,
-            factory: { select: { name: true, code: true } },
+            office: { select: { name: true } },
           },
         },
       },
@@ -657,11 +651,10 @@ export class GroupService {
           select: {
             name: true,
             code: true,
-            line: {
+            department: {
               select: {
                 name: true,
-                code: true,
-                factory: { select: { name: true, code: true } },
+                office: { select: { name: true } },
               },
             },
           },
@@ -695,14 +688,14 @@ export class GroupService {
         from: {
           teamId: group.teamId,
           teamName: group.team.name,
-          lineName: group.team.line.name,
-          factoryName: group.team.line.factory.name,
+          departmentName: group.team.department.name,
+          officeName: group.team.department.office.name,
         },
         to: {
           teamId: targetTeam.id,
           teamName: targetTeam.name,
-          lineName: targetTeam.line.name,
-          factoryName: targetTeam.line.factory.name,
+          departmentName: targetTeam.department.name,
+          officeName: targetTeam.department.office.name,
         },
         membersAffected: group._count.members,
       },

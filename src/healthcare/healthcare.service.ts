@@ -196,19 +196,15 @@ export class HealthcareService {
         }
       },
       // Thông tin Office trực tiếp
-      office: {
-        include: {
-          factories: true        // Danh sách các nhà máy thuộc office này
-        }
-      },
+      office: true,
       // Thông tin Group và các quan hệ lên trên
       group: {
         include: {
           team: {
             include: {
-              line: {
+              department: {
                 include: {
-                  factory: true  // Factory chứa line này
+                  office: true  // Office chứa department này
                 }
               }
             }
@@ -257,8 +253,8 @@ export class HealthcareService {
         group: user.group ? {
           name: user.group?.name || null,
           teamName: user.group?.team?.name || null,
-          line: user.group?.team?.line?.name || null,
-          factory: user.group?.team?.line?.factory.name || null,
+          department: user.group?.team?.department?.name || null,
+          office: user.group?.team?.department?.office.name || null,
         } : null,
       },
       medicalHistory

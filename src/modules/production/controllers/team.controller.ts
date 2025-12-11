@@ -44,11 +44,11 @@ export class TeamController {
   @ApiOperation({ summary: 'Get all teams' })
   @ApiResponse({ status: 200, description: 'Teams retrieved successfully' })
   findAll(
-    @Query('lineId') lineId?: string,
+    @Query('departmentId') departmentId?: string,
     @Query('includeGroups') includeGroups?: string,
   ) {
     return this.teamService.findAll({
-      lineId,
+      departmentId,
       includeGroups: includeGroups === 'true',
     });
   }

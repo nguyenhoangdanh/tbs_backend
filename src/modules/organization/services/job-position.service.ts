@@ -109,10 +109,10 @@ export class JobPositionService {
                 team: {
                   select: {
                     name: true,
-                    line: {
+                    department: {
                       select: {
                         name: true,
-                        factory: { select: { name: true, code: true } },
+                        office: { select: { name: true } },
                       },
                     },
                   },

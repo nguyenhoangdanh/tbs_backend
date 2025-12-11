@@ -9,16 +9,15 @@ export class ProductionHierarchyService {
 
   /**
    * Get complete production structure
+   * NEW: Office (FACTORY_OFFICE) → Department → Team → Group
    */
   async getProductionStructure() {
-    const factories = await this.prisma.factory.findMany({
-      where: { isActive: true },
+    const offices = await this.prisma.office.findMany({
+      where: { 
+        type: 'FACTORY_OFFICE'
+      },
       include: {
-        office: {
-          select: { id: true, name: true, type: true },
-        },
-        lines: {
-          where: { isActive: true },
+        departments: {
           include: {
             teams: {
               where: { isActive: true },
@@ -50,28 +49,28 @@ export class ProductionHierarchyService {
               select: { teams: true },
             },
           },
-          orderBy: { code: 'asc' },
+          orderBy: { name: 'asc' },
         },
         _count: {
           select: {
-            lines: true,
+            departments: true,
             worksheets: true,
           },
         },
       },
-      orderBy: { code: 'asc' },
+      orderBy: { name: 'asc' },
     });
 
     // Calculate summary stats
     let totalTeams = 0;
     let totalGroups = 0;
     
-    factories.forEach((factory) => {
-      if (factory.lines && Array.isArray(factory.lines)) {
-        factory.lines.forEach((line) => {
-          if (line.teams && Array.isArray(line.teams)) {
-            totalTeams += line.teams.length;
-            line.teams.forEach((team) => {
+    offices.forEach((office) => {
+      if (office.departments && Array.isArray(office.departments)) {
+        office.departments.forEach((department) => {
+          if (department.teams && Array.isArray(department.teams)) {
+            totalTeams += department.teams.length;
+            department.teams.forEach((team) => {
               if (team.groups && Array.isArray(team.groups)) {
                 totalGroups += team.groups.length;
               }
@@ -81,20 +80,20 @@ export class ProductionHierarchyService {
       }
     });
 
-    this.logger.log(`Production structure: ${factories.length} factories, ${totalTeams} teams, ${totalGroups} groups`);
+    this.logger.log(`Production structure: ${offices.length} offices, ${totalTeams} teams, ${totalGroups} groups`);
 
     return {
-      factories,
+      offices,
       summary: {
-        totalFactories: factories.length,
-        totalLines: factories.reduce(
-          (sum, factory) => sum + (factory._count?.lines || 0),
+        totalOffices: offices.length,
+        totalDepartments: offices.reduce(
+          (sum, office) => sum + (office._count?.departments || 0),
           0,
         ),
         totalTeams,
         totalGroups,
-        totalWorksheets: factories.reduce(
-          (sum, factory) => sum + (factory._count?.worksheets || 0),
+        totalWorksheets: offices.reduce(
+          (sum, office) => sum + (office._count?.worksheets || 0),
           0,
         ),
       },

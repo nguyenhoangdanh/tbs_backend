@@ -41,9 +41,9 @@ model Office {
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   departments  Department[]
-  factories    Factory[]
   jobPositions JobPosition[]
   users        User[]
+  worksheets   WorkSheet[] // Office = Factory for FACTORY_OFFICE type
 
   @@index([type])
   @@map("offices")
@@ -59,6 +59,7 @@ model Department {
   office       Office                     @relation(fields: [officeId], references: [id], onDelete: Cascade)
   jobPositions JobPosition[]
   managers     UserDepartmentManagement[]
+  teams        Team[] // Department = Line (for factory departments)
 
   @@unique([name, officeId])
   @@index([officeId])
@@ -211,56 +212,20 @@ model UserDepartmentManagement {
   @@map("user_department_managements")
 }
 
-model Factory {
-  id          String      @id @default(uuid())
-  name        String
-  code        String      @unique
-  description String?
-  officeId    String
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  office      Office      @relation(fields: [officeId], references: [id], onDelete: Cascade)
-  lines       Line[]
-  worksheets  WorkSheet[]
-
-  @@index([officeId])
-  @@index([isActive])
-  @@map("factories")
-}
-
-model Line {
-  id          String   @id @default(uuid())
-  name        String
-  code        String
-  description String?
-  factoryId   String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  factory     Factory  @relation(fields: [factoryId], references: [id], onDelete: Cascade)
-  teams       Team[]
-
-  @@unique([code, factoryId])
-  @@index([factoryId])
-  @@index([isActive])
-  @@map("lines")
-}
-
 model Team {
-  id          String   @id @default(uuid())
-  name        String
-  code        String
-  description String?
-  lineId      String
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  groups      Group[]
-  line        Line     @relation(fields: [lineId], references: [id], onDelete: Cascade)
+  id           String     @id @default(uuid())
+  name         String
+  code         String
+  description  String?
+  departmentId String // Department = Line (for production departments)
+  isActive     Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  groups       Group[]
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
 
-  @@unique([code, lineId])
-  @@index([lineId])
+  @@unique([code, departmentId])
+  @@index([departmentId])
   @@index([isActive])
   @@map("teams")
 }
@@ -347,19 +312,19 @@ model WorkSheet {
   date             DateTime          @db.Date
   workerId         String // Công nhân - mỗi phiếu chỉ cho 1 người
   groupId          String // Nhóm của công nhân
-  factoryId        String // Nhà máy
+  officeId         String // Office (= Factory for FACTORY_OFFICE type)
   productId        String // Mã túi xách
   processId        String // Công đoạn (chặt, lạng, dán,...)
   shiftType        ShiftType // Ca làm việc
   plannedOutput    Int // SLKH - Sản lượng kế hoạch/giờ của công nhân này
-  createdById      String // Người tạo (quản trị line)
+  createdById      String // Người tạo (quản trị line/department)
   status           WorkSheetStatus   @default(ACTIVE)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   attendanceEvents AttendanceEvent[]
   records          WorkSheetRecord[] // Records theo giờ
   createdBy        User              @relation("WorkSheetCreator", fields: [createdById], references: [id])
-  factory          Factory           @relation(fields: [factoryId], references: [id])
+  office           Office            @relation(fields: [officeId], references: [id])
   group            Group             @relation(fields: [groupId], references: [id])
   worker           User              @relation("WorkerWorkSheets", fields: [workerId], references: [id])
   product          Product           @relation(fields: [productId], references: [id])
@@ -369,7 +334,7 @@ model WorkSheet {
   @@index([date])
   @@index([workerId])
   @@index([groupId])
-  @@index([factoryId])
+  @@index([officeId])
   @@index([createdById])
   @@index([status])
   @@index([productId, processId])
@@ -446,7 +411,7 @@ model WorkSheetMonthlyBackup {
   id              String   @id @default(uuid())
   month           Int
   year            Int
-  factoryId       String
+  officeId        String // Office = Factory
   groupId         String
   totalWorksheets Int
   totalOutput     Int
@@ -454,9 +419,9 @@ model WorkSheetMonthlyBackup {
   backupData      Json
   createdAt       DateTime @default(now())
 
-  @@unique([month, year, factoryId, groupId])
+  @@unique([month, year, officeId, groupId])
   @@index([year, month])
-  @@index([factoryId])
+  @@index([officeId])
   @@map("worksheet_monthly_backups")
 }
 

@@ -13,36 +13,35 @@ export class TeamService {
   constructor(private prisma: PrismaService) {}
 
   async create(createTeamDto: CreateTeamDto) {
-    const { code, lineId } = createTeamDto;
+    const { code, departmentId } = createTeamDto;
 
-    // Check if team code already exists in this line
+    // Check if team code already exists in this department
     const existingTeam = await this.prisma.team.findUnique({
       where: {
-        code_lineId: { code, lineId },
+        code_departmentId: { code, departmentId },
       },
     });
 
     if (existingTeam) {
-      throw new ConflictException('Team with this code already exists in line');
+      throw new ConflictException('Team with this code already exists in department');
     }
 
-    // Validate line exists
-    const line = await this.prisma.line.findUnique({
-      where: { id: lineId },
+    // Validate department exists
+    const department = await this.prisma.department.findUnique({
+      where: { id: departmentId },
     });
 
-    if (!line) {
-      throw new NotFoundException('Line not found');
+    if (!department) {
+      throw new NotFoundException('Department not found');
     }
 
     return this.prisma.team.create({
       data: createTeamDto,
       include: {
-        line: {
+        department: {
           select: {
             name: true,
-            code: true,
-            factory: { select: { name: true, code: true } },
+            office: { select: { name: true, type: true } },
           },
         },
         _count: {
@@ -52,22 +51,21 @@ export class TeamService {
     });
   }
 
-  async findAll(options: { lineId?: string; includeGroups?: boolean } = {}) {
+  async findAll(options: { departmentId?: string; includeGroups?: boolean } = {}) {
     const where: any = {};
 
-    if (options.lineId) {
-      where.lineId = options.lineId;
+    if (options.departmentId) {
+      where.departmentId = options.departmentId;
     }
 
     return this.prisma.team.findMany({
       where,
       include: {
-        line: {
+        department: {
           select: {
             id: true,
             name: true,
-            code: true,
-            factory: { select: { id: true, name: true, code: true } },
+            office: { select: { id: true, name: true, type: true } },
           },
         },
         groups: options.includeGroups
@@ -94,8 +92,8 @@ export class TeamService {
         },
       },
       orderBy: [
-        { line: { factory: { code: 'asc' } } },
-        { line: { code: 'asc' } },
+        { department: { office: { name: 'asc' } } },
+        { department: { name: 'asc' } },
         { code: 'asc' },
       ],
     });
@@ -105,9 +103,9 @@ export class TeamService {
     const team = await this.prisma.team.findUnique({
       where: { id },
       include: {
-        line: {
+        department: {
           include: {
-            factory: true,
+            office: true,
           },
         },
         groups: {
@@ -158,11 +156,10 @@ export class TeamService {
         id: true,
         name: true,
         code: true,
-        line: {
+        department: {
           select: {
             name: true,
-            code: true,
-            factory: { select: { name: true, code: true } },
+            office: { select: { name: true } },
           },
         },
       },
@@ -219,20 +216,20 @@ export class TeamService {
       throw new NotFoundException('Team not found');
     }
 
-    // If updating code, check for conflicts in the same line
+    // If updating code, check for conflicts in the same department
     if (updateTeamDto.code && updateTeamDto.code !== team.code) {
       const existingTeam = await this.prisma.team.findUnique({
         where: {
-          code_lineId: {
+          code_departmentId: {
             code: updateTeamDto.code,
-            lineId: team.lineId,
+            departmentId: team.departmentId,
           },
         },
       });
 
       if (existingTeam) {
         throw new ConflictException(
-          'Team with this code already exists in line',
+          'Team with this code already exists in department',
         );
       }
     }
@@ -241,11 +238,10 @@ export class TeamService {
       where: { id },
       data: updateTeamDto,
       include: {
-        line: {
+        department: {
           select: {
             name: true,
-            code: true,
-            factory: { select: { name: true, code: true } },
+            office: { select: { name: true, type: true } },
           },
         },
         _count: {
@@ -279,21 +275,20 @@ export class TeamService {
   }
 
   /**
-   * Transfer team to another line
+   * Transfer team to another department (line)
    */
   async transferTeam(teamId: string, transferDto: TransferTeamDto) {
-    const { targetLineId, newCode } = transferDto;
+    const { targetDepartmentId, newCode } = transferDto;
 
     // Validate team exists
     const team = await this.prisma.team.findUnique({
       where: { id: teamId },
       include: {
-        line: {
+        department: {
           select: {
             id: true,
             name: true,
-            code: true,
-            factory: { select: { id: true, name: true, code: true } },
+            office: { select: { id: true, name: true, type: true } },
           },
         },
         _count: { select: { groups: true } },
@@ -304,39 +299,38 @@ export class TeamService {
       throw new NotFoundException('Team not found');
     }
 
-    // Validate target line exists
-    const targetLine = await this.prisma.line.findUnique({
-      where: { id: targetLineId },
+    // Validate target department exists
+    const targetDepartment = await this.prisma.department.findUnique({
+      where: { id: targetDepartmentId },
       select: {
         id: true,
         name: true,
-        code: true,
-        factory: { select: { id: true, name: true, code: true } },
+        office: { select: { id: true, name: true, type: true } },
       },
     });
 
-    if (!targetLine) {
-      throw new NotFoundException('Target line not found');
+    if (!targetDepartment) {
+      throw new NotFoundException('Target department not found');
     }
 
-    // Check if already in target line
-    if (team.lineId === targetLineId && !newCode) {
-      throw new ConflictException('Team is already in target line');
+    // Check if already in target department
+    if (team.departmentId === targetDepartmentId && !newCode) {
+      throw new ConflictException('Team is already in target department');
     }
 
     // Determine final code
     const finalCode = newCode || team.code;
 
-    // Check code conflict in target line
+    // Check code conflict in target department
     const existingTeam = await this.prisma.team.findUnique({
       where: {
-        code_lineId: { code: finalCode, lineId: targetLineId },
+        code_departmentId: { code: finalCode, departmentId: targetDepartmentId },
       },
     });
 
     if (existingTeam && existingTeam.id !== teamId) {
       throw new ConflictException(
-        `Team with code '${finalCode}' already exists in target line`,
+        `Team with code '${finalCode}' already exists in target department`,
       );
     }
 
@@ -344,15 +338,14 @@ export class TeamService {
     const transferredTeam = await this.prisma.team.update({
       where: { id: teamId },
       data: {
-        lineId: targetLineId,
+        departmentId: targetDepartmentId,
         code: finalCode,
       },
       include: {
-        line: {
+        department: {
           select: {
             name: true,
-            code: true,
-            factory: { select: { name: true, code: true } },
+            office: { select: { name: true, type: true } },
           },
         },
         groups: {
@@ -368,14 +361,14 @@ export class TeamService {
       team: transferredTeam,
       transfer: {
         from: {
-          lineId: team.lineId,
-          lineName: team.line.name,
-          factoryName: team.line.factory.name,
+          departmentId: team.departmentId,
+          departmentName: team.department.name,
+          officeName: team.department.office.name,
         },
         to: {
-          lineId: targetLine.id,
-          lineName: targetLine.name,
-          factoryName: targetLine.factory.name,
+          departmentId: targetDepartment.id,
+          departmentName: targetDepartment.name,
+          officeName: targetDepartment.office.name,
         },
         groupsAffected: team._count.groups,
       },

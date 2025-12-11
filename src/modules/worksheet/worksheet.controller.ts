@@ -49,14 +49,16 @@ export class WorksheetController {
 
   @Get()
   @ApiOperation({ summary: 'Get all worksheets' })
-  @ApiQuery({ name: 'factoryId', required: false, type: String })
+  @ApiQuery({ name: 'factoryId', required: false, type: String, description: 'Factory/Office ID' })
   @ApiQuery({ name: 'groupId', required: false, type: String })
+  @ApiQuery({ name: 'departmentId', required: false, type: String, description: 'Filter by Department ID (Department → Team → Group)' })
   @ApiQuery({ name: 'date', required: false, type: String })
   @ApiQuery({ name: 'status', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Worksheets retrieved successfully' })
   findAll(
     @Query('factoryId') factoryId?: string,
     @Query('groupId') groupId?: string,
+    @Query('departmentId') departmentId?: string,
     @Query('date') date?: string,
     @Query('status') status?: string,
     @GetUser() user?: any
@@ -65,6 +67,7 @@ export class WorksheetController {
     return this.worksheetService.findAll({
       factoryId,
       groupId,
+      departmentId,
       date: dateFilter,
       status,
       userId: user.id,
@@ -354,8 +357,8 @@ export class WorksheetController {
   ) {
     return this.worksheetService.getWorksheetsForReport({
       date: new Date(date),
-      factoryId,
-      lineId,
+      officeId: factoryId,
+      departmentId: lineId,
       teamId,
       groupId,
       userId: user?.id,

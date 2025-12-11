@@ -24,23 +24,10 @@ export class OrganizationHierarchyService {
           },
           orderBy: { name: 'asc' },
         },
-        factories: {
-          where: { isActive: true },
-          include: {
-            _count: {
-              select: {
-                lines: true,
-                worksheets: true,
-              },
-            },
-          },
-          orderBy: { code: 'asc' },
-        },
         _count: {
           select: {
             departments: true,
             users: true,
-            factories: true,
           },
         },
       },
@@ -52,15 +39,11 @@ export class OrganizationHierarchyService {
       summary: {
         totalOffices: offices.length,
         totalDepartments: offices.reduce(
-          (sum, office) => sum + office._count.departments,
-          0,
-        ),
-        totalFactories: offices.reduce(
-          (sum, office) => sum + office._count.factories,
+          (sum, office) => sum + (office._count?.departments || 0),
           0,
         ),
         totalUsers: offices.reduce(
-          (sum, office) => sum + office._count.users,
+          (sum, office) => sum + (office._count?.users || 0),
           0,
         ),
       },
