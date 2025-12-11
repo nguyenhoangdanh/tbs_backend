@@ -15,6 +15,60 @@ export class WorksheetService {
   ) {}
 
   /**
+   * Helper: Check if user can access/update a group
+   * - SUPERADMIN/ADMIN: Can access all groups
+   * - USER: Can access groups in their department
+   * - Group leader: Can access their own group
+   */
+  private async canAccessGroup(
+    userId: string,
+    userRole: Role,
+    groupId: string,
+    groupLeaderId?: string | null
+  ): Promise<boolean> {
+    // SUPERADMIN/ADMIN can access all
+    if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+      return true;
+    }
+
+    // Check if user is the group leader
+    if (groupLeaderId && groupLeaderId === userId) {
+      return true;
+    }
+
+    // For USER role, check if they're in the same department as the group
+    if (userRole === Role.USER) {
+      const [user, group] = await Promise.all([
+        this.prisma.user.findUnique({
+          where: { id: userId },
+          select: {
+            jobPosition: {
+              select: { departmentId: true }
+            }
+          }
+        }),
+        this.prisma.group.findUnique({
+          where: { id: groupId },
+          select: {
+            team: {
+              select: { departmentId: true }
+            }
+          }
+        })
+      ]);
+
+      const userDepartmentId = user?.jobPosition?.departmentId;
+      const groupDepartmentId = group?.team?.departmentId;
+
+      if (userDepartmentId && groupDepartmentId && userDepartmentId === groupDepartmentId) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Create worksheets for a group
    * Tạo phiếu công cho toàn bộ nhóm (bulk create)
    */
@@ -211,14 +265,13 @@ export class WorksheetService {
     batchDto: BatchUpdateByHourDto,
     user: any
   ) {
-    // Verify group leader permission
+    // Verify group exists
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       select: { 
         id: true, 
         leaderId: true, 
-        name: true,
-        leader: { select: { id: true } }
+        name: true
       }
     });
 
@@ -226,13 +279,11 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      group.leader?.id === user.id;
+    // Check permission using helper
+    const canUpdate = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
 
     if (!canUpdate) {
-      throw new ForbiddenException('Only group leader can update records');
+      throw new ForbiddenException('No permission to update this group');
     }
 
     // Get all worksheets for this group on this date
@@ -368,24 +419,12 @@ export class WorksheetService {
    * Dùng cho UI hiển thị bảng công
    */
   async getWorksheetGrid(groupId: string, date: Date, user: any) {
-    // Check permission
+    // Check group exists
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       select: { 
         leaderId: true, 
-        name: true,
-        leader: { select: { id: true } },
-        team: {
-          select: {
-            departmentId: true,
-            department: {
-              select: {
-                id: true,
-                name: true
-              }
-            }
-          }
-        }
+        name: true
       }
     });
 
@@ -393,41 +432,8 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    // ⭐ NEW PERMISSION LOGIC:
-    // - SUPERADMIN/ADMIN: Can view all groups
-    // - USER: Can view all groups in their department
-    // - Group leader: Can view their own group
-    let canView = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      group.leader?.id === user.id;
-
-    // If USER role, check if they're in the same department
-    if (!canView && user.role === Role.USER) {
-      // Get user's department
-      const userWithDept = await this.prisma.user.findUnique({
-        where: { id: user.id },
-        select: {
-          jobPosition: {
-            select: {
-              departmentId: true
-            }
-          }
-        }
-      });
-
-      const userDepartmentId = userWithDept?.jobPosition?.departmentId;
-      const groupDepartmentId = group.team?.departmentId;
-
-      if (userDepartmentId && groupDepartmentId && userDepartmentId === groupDepartmentId) {
-        canView = true;
-        console.log('[WorksheetGrid] USER can view group in same department:', {
-          userId: user.id,
-          groupId,
-          departmentId: userDepartmentId
-        });
-      }
-    }
+    // Check permission using helper
+    const canView = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -1049,7 +1055,6 @@ export class WorksheetService {
         id: true, 
         name: true, 
         leaderId: true,
-        leader: { select: { id: true } },
         members: { where: { isActive: true }, select: { id: true } }
       }
     });
@@ -1058,14 +1063,11 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    // Check permissions
-    const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      group.leader?.id === user.id;
+    // Check permission using helper
+    const canUpdate = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
 
     if (!canUpdate) {
-      throw new ForbiddenException('Only group leader or admin can bulk update worksheets');
+      throw new ForbiddenException('No permission to bulk update worksheets for this group');
     }
 
     // Find all worksheets for this group on the specified date
@@ -1465,24 +1467,13 @@ export class WorksheetService {
    * Get group worksheets for a specific date
    */
   async getGroupWorksheets(groupId: string, date: Date, user: any) {
-    // Check permission
+    // Check group exists
     const group = await this.prisma.group.findUnique({
       where: { id: groupId },
       select: { 
-        leaderId: true, 
+        id: true,
         name: true,
-        leader: { select: { id: true } },
-        team: {
-          select: {
-            departmentId: true,
-            department: {
-              select: {
-                id: true,
-                name: true
-              }
-            }
-          }
-        }
+        leaderId: true
       }
     });
 
@@ -1490,37 +1481,8 @@ export class WorksheetService {
       throw new NotFoundException('Group not found');
     }
 
-    // ⭐ NEW PERMISSION LOGIC: Same as getWorksheetGrid
-    let canView = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      group.leader?.id === user.id;
-
-    // If USER role, check if they're in the same department
-    if (!canView && user.role === Role.USER) {
-      const userWithDept = await this.prisma.user.findUnique({
-        where: { id: user.id },
-        select: {
-          jobPosition: {
-            select: {
-              departmentId: true
-            }
-          }
-        }
-      });
-
-      const userDepartmentId = userWithDept?.jobPosition?.departmentId;
-      const groupDepartmentId = group.team?.departmentId;
-
-      if (userDepartmentId && groupDepartmentId && userDepartmentId === groupDepartmentId) {
-        canView = true;
-        console.log('[GetGroupWorksheets] USER can view group in same department:', {
-          userId: user.id,
-          groupId,
-          departmentId: userDepartmentId
-        });
-      }
-    }
+    // Check permission using helper
+    const canView = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -1908,7 +1870,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true, leader: { select: { id: true } } } },
+        group: { select: { id: true, leaderId: true } },
         records: { where: { workHour } }
       }
     });
@@ -1922,14 +1884,11 @@ export class WorksheetService {
       throw new NotFoundException(`Record not found for hour ${workHour}`);
     }
 
-    // Check permissions
-    const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      worksheet.group.leader?.id === user.id;
+    // Check permission using helper
+    const canUpdate = await this.canAccessGroup(user.id, user.role, worksheet.groupId, worksheet.group.leaderId);
 
     if (!canUpdate) {
-      throw new ForbiddenException('Only group leader can adjust targets');
+      throw new ForbiddenException('No permission to adjust targets for this group');
     }
 
     return this.prisma.workSheetRecord.update({
@@ -1952,7 +1911,7 @@ export class WorksheetService {
     const worksheet = await this.prisma.workSheet.findUnique({
       where: { id: worksheetId },
       include: {
-        group: { select: { leaderId: true, leader: { select: { id: true } } } },
+        group: { select: { id: true, leaderId: true } },
         records: {
           where: { workHour: fromHour },
           include: { items: true }
@@ -1969,14 +1928,11 @@ export class WorksheetService {
       throw new NotFoundException(`Source record not found for hour ${fromHour}`);
     }
 
-    // Check permissions
-    const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
-      worksheet.group.leader?.id === user.id;
+    // Check permission using helper
+    const canUpdate = await this.canAccessGroup(user.id, user.role, worksheet.groupId, worksheet.group.leaderId);
 
     if (!canUpdate) {
-      throw new ForbiddenException('Only group leader can copy forward');
+      throw new ForbiddenException('No permission to copy forward for this group');
     }
 
     // Get target records
