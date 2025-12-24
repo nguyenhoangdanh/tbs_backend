@@ -33,7 +33,7 @@
     "prod:import:medicine": "dotenv -e .env.production -- npx tsx prisma/seed-medicines.ts",
     "prod:import:worker": "dotenv -e .env.production -- npx tsx prisma/import-worker.ts",
     "prod:import:manufacturing": "dotenv -e .env.production -- npx tsx prisma/sample-manufacturing-data.ts",
-    "prod:seed": "dotenv -e .env.production -- npx tsx prisma/seed.ts",
+    "prod:seed:permissions": "dotenv -e .env.production -- npx tsx prisma/seed-permissions.ts",
     "prod:migrate": "dotenv -e .env.production -- npx prisma migrate deploy",
     "prod:migrate:reset": "dotenv -e .env.production -- npx prisma migrate reset --force",
     "prod:db:push": "dotenv -e .env.production -- npx prisma db push",
