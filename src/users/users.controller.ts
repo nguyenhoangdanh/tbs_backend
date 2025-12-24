@@ -26,7 +26,6 @@ import {
   ApiBody,
 } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import type { Express } from 'express'; // ⭐ ADD: Import Express namespace
 import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
@@ -85,6 +84,50 @@ export class UsersController {
     @Body() dto: { currentPassword: string; newPassword: string },
   ) {
     return this.usersService.changePassword(user.id, dto);
+  }
+
+  @Post('avatar')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'Upload avatar for current user' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Avatar uploaded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        avatarUrl: { type: 'string' }
+      }
+    }
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+        },
+      },
+    },
+  })
+  async uploadAvatar(
+    @GetUser() user: any,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('No file uploaded');
+    }
+
+    return this.usersService.uploadAvatar(user.id, user.employeeCode, file);
+  }
+
+  @Delete('avatar')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Remove avatar for current user' })
+  @ApiResponse({ status: 200, description: 'Avatar removed successfully' })
+  async removeAvatar(@GetUser() user: any) {
+    return this.usersService.removeAvatar(user.id);
   }
 
   // ========== LOOKUP ROUTES (BEFORE :id) ==========

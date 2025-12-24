@@ -4,17 +4,16 @@ import {
   ConflictException,
   BadRequestException,
   ForbiddenException,
-  InternalServerErrorException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CloudflareR2Service } from '../common/r2.service';
+import { PermissionsService } from '../common/permissions.service';
 import { Role, Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as XLSX from 'xlsx';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import type { Express } from 'express'; // ⭐ ADD: Import Express namespace
 
 interface GetAllUsersParams {
   page: number;
@@ -33,6 +32,7 @@ export class UsersService {
   constructor(
     private prisma: PrismaService,
     private r2Service: CloudflareR2Service,
+    private permissionsService: PermissionsService,
   ) {}
 
   // ========== USER CRUD ==========
@@ -88,8 +88,18 @@ export class UsersService {
       this.prisma.user.count({ where }),
     ]);
 
+    // Add permissions for each user (including roles)
+    const usersWithPermissions = await Promise.all(
+      users.map(async ({ password, ...user }) => {
+        const permissions = await this.permissionsService.getUserPermissions(
+          user.id,
+        );
+        return { ...user, permissions };
+      }),
+    );
+
     return {
-      data: users.map(({ password, ...user }) => user),
+      data: usersWithPermissions,
       pagination: {
         page,
         limit,
@@ -141,6 +151,11 @@ export class UsersService {
             department: true,
           },
         },
+        customPermissions: {
+          include: {
+            permission: true,
+          },
+        },
       },
     });
 
@@ -162,18 +177,30 @@ export class UsersService {
       const managedDept = user.managedDepartments[0];
       if (managedDept.department) {
         departmentId = managedDept.department.id;
-        console.log('✅ [UserService] User manages department (line):', {
-          userId: user.id,
-          departmentId: departmentId,
-          departmentName: managedDept.department.name
-        });
+        // console.log('✅ [UserService] User manages department (line):', {
+        //   userId: user.id,
+        //   departmentId: departmentId,
+        //   departmentName: managedDept.department.name
+        // });
       }
     }
+
+    // Build custom permissions array
+    const customPermissions = user.customPermissions.map(up => ({
+      resource: up.permission.resource,
+      action: up.permission.action,
+      isGranted: up.isGranted,
+    }));
+
+    // Get full permissions (role + custom merged)
+    const permissions = await this.permissionsService.getUserPermissions(user.id);
     
     return {
       ...userWithoutPassword,
       isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
       departmentId, // ⭐ Department ID (= Line ID for production departments)
+      customPermissions, // ⭐ User's custom permissions
+      permissions, // ⭐ Full merged permissions (role + custom)
     };
   }
 
@@ -783,5 +810,95 @@ export class UsersService {
 
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
+  }
+
+  // ========== AVATAR MANAGEMENT ==========
+
+  /**
+   * Upload avatar for user
+   */
+  async uploadAvatar(
+    userId: string,
+    employeeCode: string,
+    file: Express.Multer.File,
+  ) {
+    try {
+      // Validate user exists
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // Delete old avatar if exists
+      if (user.avatar) {
+        try {
+          await this.r2Service.deleteAvatar(user.avatar);
+        } catch (error) {
+          this.logger.warn(`Failed to delete old avatar: ${error.message}`);
+        }
+      }
+
+      // Upload new avatar to R2
+      const avatarUrl = await this.r2Service.uploadAvatar(
+        file,
+        userId,
+        employeeCode,
+      );
+
+      // Update user with new avatar URL
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatar: avatarUrl },
+      });
+
+      return {
+        message: 'Avatar uploaded successfully',
+        avatarUrl,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to upload avatar: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Remove avatar for user
+   */
+  async removeAvatar(userId: string) {
+    try {
+      // Validate user exists
+      const user = await this.prisma.user.findUnique({
+        where: { id: userId },
+      });
+
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      // Delete avatar from R2 if exists
+      if (user.avatar) {
+        try {
+          await this.r2Service.deleteAvatar(user.avatar);
+        } catch (error) {
+          this.logger.warn(`Failed to delete avatar: ${error.message}`);
+        }
+      }
+
+      // Update user to remove avatar
+      await this.prisma.user.update({
+        where: { id: userId },
+        data: { avatar: null },
+      });
+
+      return {
+        message: 'Avatar removed successfully',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to remove avatar: ${error.message}`);
+      throw error;
+    }
   }
 }

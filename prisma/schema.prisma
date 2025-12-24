@@ -94,8 +94,9 @@ model User {
   dateOfBirth        DateTime?                  @db.Date
   address            String?
   sex                Sex?
-  role               Role                       @default(USER)
+  role               Role                       @default(USER) // ⚠️ DEPRECATED: Keep for backward compatibility, will migrate to roles table
   customPermissions  UserPermission[]           @relation("UserCustomPermissions")
+  roles              UserRole[]                 @relation("UserRoles") // ⭐ NEW: Multiple roles support
   jobPositionId      String
   isActive           Boolean                    @default(false)
   officeId           String
@@ -654,6 +655,62 @@ model PushSubscription {
 
 // ========== RBAC SYSTEM ==========
 
+// ⭐ NEW: Dynamic Roles Table
+model RoleDefinition {
+  id          String   @id @default(uuid())
+  name        String   @unique // "ADMIN", "MANAGER", "TEAM_LEADER", etc.
+  code        String   @unique // Internal code for system
+  description String?
+  isSystem    Boolean  @default(false) // true for SUPERADMIN, ADMIN, USER, WORKER, MEDICAL_STAFF
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  permissions     RoleDefinitionPermission[]
+  userAssignments UserRole[]
+
+  @@index([isActive])
+  @@index([isSystem])
+  @@map("role_definitions")
+}
+
+// ⭐ NEW: Many-to-Many relationship between RoleDefinition and Permission
+model RoleDefinitionPermission {
+  id               String         @id @default(uuid())
+  roleDefinitionId String
+  permissionId     String
+  isGranted        Boolean        @default(true)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  roleDefinition RoleDefinition @relation(fields: [roleDefinitionId], references: [id], onDelete: Cascade)
+  permission     Permission     @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleDefinitionId, permissionId])
+  @@index([roleDefinitionId])
+  @@index([permissionId])
+  @@map("role_definition_permissions")
+}
+
+// ⭐ NEW: Many-to-Many relationship between User and RoleDefinition
+model UserRole {
+  id               String   @id @default(uuid())
+  userId           String
+  roleDefinitionId String
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user           User           @relation("UserRoles", fields: [userId], references: [id], onDelete: Cascade)
+  roleDefinition RoleDefinition @relation(fields: [roleDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleDefinitionId])
+  @@index([userId])
+  @@index([roleDefinitionId])
+  @@index([isActive])
+  @@map("user_roles")
+}
+
 model Permission {
   id          String   @id @default(uuid())
   resource    String // users, reports, factories, lines, teams, groups, worksheets, products, processes, medicines, medical-records
@@ -662,8 +719,9 @@ model Permission {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  rolePermissions RolePermission[]
-  userPermissions UserPermission[]
+  rolePermissions           RolePermission[]           @relation("LegacyRolePermissions") // ⚠️ DEPRECATED: Keep for backward compatibility
+  userPermissions           UserPermission[]
+  roleDefinitionPermissions RoleDefinitionPermission[] // ⭐ NEW
 
   @@unique([resource, action])
   @@index([resource])
@@ -679,7 +737,7 @@ model RolePermission {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  permission Permission @relation("LegacyRolePermissions", fields: [permissionId], references: [id], onDelete: Cascade)
 
   @@unique([role, permissionId])
   @@index([role])
@@ -702,4 +760,17 @@ model UserPermission {
   @@index([userId])
   @@index([permissionId])
   @@map("user_permissions")
+}
+
+// ========== ANONYMOUS FEEDBACK SYSTEM ==========
+
+model Feedback {
+  id        String   @id @default(uuid())
+  content   String   @db.Text
+  ipAddress String?  // Track IP for spam prevention
+  userAgent String?  // Track browser/device info
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("feedbacks")
 }

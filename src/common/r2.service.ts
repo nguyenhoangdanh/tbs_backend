@@ -44,11 +44,11 @@ export class CloudflareR2Service {
         this.logger.warn('Please setup a proper R2.dev public URL or custom domain');
       }
 
-      this.logger.log('Cloudflare R2 initialized successfully');
-      this.logger.log(`Account ID: ${this.accountId}`);
-      this.logger.log(`Bucket: ${this.bucketName}`);
-      this.logger.log(`Public URL: ${this.publicUrl}`);
-      this.logger.log('Using native Node.js fetch for R2 operations');
+      // this.logger.log('Cloudflare R2 initialized successfully');
+      // this.logger.log(`Account ID: ${this.accountId}`);
+      // this.logger.log(`Bucket: ${this.bucketName}`);
+      // this.logger.log(`Public URL: ${this.publicUrl}`);
+      // this.logger.log('Using native Node.js fetch for R2 operations');
       
     } catch (error) {
       this.logger.error('Failed to initialize Cloudflare R2:', error);
@@ -130,7 +130,6 @@ export class CloudflareR2Service {
     // Try R2 upload first, fallback to local if it fails
     try {
       const r2Url = await this.uploadToR2Direct(file, userId, employeeCode);
-      this.logger.log(`✅ Avatar uploaded to R2 successfully for user ${userId}: ${r2Url}`);
       return r2Url;
     } catch (r2Error) {
       this.logger.warn(`⚠️ R2 upload failed, falling back to local storage: ${r2Error.message}`);
@@ -166,7 +165,7 @@ export class CloudflareR2Service {
         const signedHeaders = this.getSignedHeaders('PUT', path, basicHeaders, file.buffer);
         
         const url = `https://${this.accountId}.r2.cloudflarestorage.com${path}`;
-        this.logger.debug(`🔗 R2 Upload URL: ${url}`);
+        // this.logger.debug(`🔗 R2 Upload URL: ${url}`);
         
         // Try different fetch configurations based on attempt
         let fetchOptions: RequestInit;
@@ -214,7 +213,7 @@ export class CloudflareR2Service {
         
         if (response.ok) {
           const publicUrl = `${this.publicUrl}/${fileName}`;
-          this.logger.log(`✅ Avatar uploaded to R2 successfully: ${publicUrl}`);
+          // this.logger.log(`✅ Avatar uploaded to R2 successfully: ${publicUrl}`);
           return publicUrl;
         } else {
           const errorText = await response.text().catch(() => 'Unable to read response body');
@@ -278,7 +277,7 @@ export class CloudflareR2Service {
       const fileExtension = this.getFileExtension(file.originalname);
       const fileName = `avatars/${employeeCode}_${userId}_${Date.now()}.${fileExtension}`;
       
-      this.logger.log(`🔄 Trying R2 signed URL approach for user ${userId}, filename: ${fileName}`);
+      // this.logger.log(`🔄 Trying R2 signed URL approach for user ${userId}, filename: ${fileName}`);
       
       // Generate presigned URL for upload
       const signedUrl = await this.generatePresignedUrl(fileName, file.mimetype);
@@ -294,7 +293,7 @@ export class CloudflareR2Service {
 
       if (response.ok) {
         const publicUrl = `${this.publicUrl}/${fileName}`;
-        this.logger.log(`✅ Avatar uploaded via signed URL: ${publicUrl}`);
+        // this.logger.log(`✅ Avatar uploaded via signed URL: ${publicUrl}`);
         return publicUrl;
       } else {
         const errorText = await response.text();
@@ -348,7 +347,7 @@ export class CloudflareR2Service {
         return;
       }
 
-      this.logger.log(`🗑️ Starting avatar deletion: ${fileName}`);
+      // this.logger.log(`🗑️ Starting avatar deletion: ${fileName}`);
       
       const path = `/${this.bucketName}/${fileName}`;
       

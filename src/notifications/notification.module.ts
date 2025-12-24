@@ -6,7 +6,6 @@ import { NotificationGateway } from './notification.gateway';
 import { NotificationController } from './notification.controller';
 import { NotificationCleanupService } from './notification-cleanup.service';
 import { PrismaService } from 'src/common/prisma.service';
-import { EmailService } from 'src/common/email.service';
 
 @Module({
   imports: [
@@ -22,8 +21,7 @@ import { EmailService } from 'src/common/email.service';
     NotificationGateway, 
     NotificationCleanupService,
     PrismaService,
-    EmailService
   ],
-  exports: [NotificationService, NotificationGateway, EmailService],
+  exports: [NotificationService, NotificationGateway],
 })
 export class NotificationModule {}

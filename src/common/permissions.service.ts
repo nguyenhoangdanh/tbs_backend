@@ -7,7 +7,14 @@ import { PrismaService } from './prisma.service';
 import { Role } from '@prisma/client';
 
 export interface UserPermissions {
-  role: Role;
+  role: Role; // Legacy single role (kept for backwards compatibility)
+  roles: Array<{
+    id: string;
+    name: string;
+    code: string;
+    description: string | null;
+    isSystem: boolean;
+  }>; // ⭐ NEW: Multiple role assignments
   permissions: string[];
   resources: {
     [resource: string]: {
@@ -47,13 +54,28 @@ export class PermissionsService {
   // ========== USER PERMISSIONS ==========
 
   /**
-   * Get all permissions for a user
+   * Get all permissions for a user (supports multiple roles)
    */
   async getUserPermissions(userId: string): Promise<UserPermissions> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: {
-        role: true,
+        role: true, // Legacy single role
+        roles: {
+          where: { isActive: true },
+          include: {
+            roleDefinition: {
+              include: {
+                permissions: {
+                  where: { isGranted: true },
+                  include: {
+                    permission: true,
+                  },
+                },
+              },
+            },
+          },
+        },
         customPermissions: {
           include: { permission: true },
         },
@@ -64,24 +86,32 @@ export class PermissionsService {
       throw new NotFoundException('User not found');
     }
 
-    // Get role-based permissions
-    const rolePermissions = await this.prisma.rolePermission.findMany({
-      where: {
-        role: user.role,
-        isGranted: true,
-      },
-      include: { permission: true },
-    });
-
-
     // Combine role permissions with custom user permissions
     const permissionsMap = new Map<string, boolean>();
 
-    // Add role permissions
-    rolePermissions.forEach((rp) => {
-      const key = `${rp.permission.resource}:${rp.permission.action}`;
-      permissionsMap.set(key, true);
-    });
+    // ⭐ NEW: Get permissions from all assigned roles
+    if (user.roles && user.roles.length > 0) {
+      user.roles.forEach((userRole) => {
+        userRole.roleDefinition.permissions.forEach((rdp) => {
+          const key = `${rdp.permission.resource}:${rdp.permission.action}`;
+          permissionsMap.set(key, rdp.isGranted);
+        });
+      });
+    } else {
+      // ⚠️ FALLBACK: Use legacy single role if no roles assigned
+      const rolePermissions = await this.prisma.rolePermission.findMany({
+        where: {
+          role: user.role,
+          isGranted: true,
+        },
+        include: { permission: true },
+      });
+
+      rolePermissions.forEach((rp) => {
+        const key = `${rp.permission.resource}:${rp.permission.action}`;
+        permissionsMap.set(key, true);
+      });
+    }
 
     // Override with custom user permissions
     user.customPermissions.forEach((up) => {
@@ -93,7 +123,6 @@ export class PermissionsService {
     const permissions = Array.from(permissionsMap.entries())
       .filter(([_, granted]) => granted)
       .map(([key, _]) => key);
-
 
     // Build resources object for easy frontend access
     const resources: any = {};
@@ -113,8 +142,18 @@ export class PermissionsService {
       resources[resource][action] = true;
     });
 
+    // Build roles array from user role assignments
+    const roles = user.roles.map((userRole) => ({
+      id: userRole.roleDefinition.id,
+      name: userRole.roleDefinition.name,
+      code: userRole.roleDefinition.code,
+      description: userRole.roleDefinition.description,
+      isSystem: userRole.roleDefinition.isSystem,
+    }));
+
     return {
-      role: user.role,
+      role: user.role, // Legacy single role
+      roles, // ⭐ NEW: Array of assigned roles
       permissions,
       resources,
     };

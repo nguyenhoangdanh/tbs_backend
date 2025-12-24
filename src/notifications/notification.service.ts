@@ -1,6 +1,5 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from 'src/common/prisma.service';
-import { EmailService } from 'src/common/email.service';
 import { NotificationGateway } from './notification.gateway';
 import { format } from 'date-fns';
 import * as webPush from 'web-push';
@@ -34,7 +33,6 @@ export class NotificationService {
 
   constructor(
     private prisma: PrismaService,
-    private emailService: EmailService,
     @Optional() private notificationGateway?: NotificationGateway,
   ) {
     // Validate and configure web-push with VAPID details
@@ -333,19 +331,6 @@ export class NotificationService {
     return overallResult;
   }
 
-  async sendEmail(emailData: EmailData): Promise<void> {
-    try {
-      await this.emailService.sendEmail({
-        to: emailData.to,
-        subject: emailData.subject,
-        template: emailData.template,
-        data: emailData.data,
-      });
-    } catch (error) {
-      this.logger.error('Failed to send email:', error);
-    }
-  }
-
   async notifyGatePassCreated(gatePassId: string): Promise<void> {
     try {
       const gatePass = await this.prisma.gatePass.findUnique({
@@ -382,39 +367,6 @@ export class NotificationService {
       }
 
       this.logger.log(`Sending notifications for gate pass: ${gatePass.passNumber} (${gatePassId})`);
-
-      // Send email notifications to approvers
-      for (const approval of gatePass.approvals) {
-        if (approval.approver.email) {
-          try {
-            const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-            const approvalLink = `${frontendUrl}/gate-pass/${gatePass.id}/approval`;
-            
-            await this.sendEmail({
-              to: approval.approver.email,
-              subject: `Yêu cầu duyệt giấy ra vào cổng - ${gatePass.passNumber}`,
-              template: 'gate-pass-approval-request',
-              data: {
-                gatePassId: gatePass.id,
-                approverName: `${approval.approver.firstName} ${approval.approver.lastName}`,
-                requesterName: `${gatePass.user.firstName} ${gatePass.user.lastName}`,
-                employeeCode: gatePass.user.employeeCode,
-                passNumber: gatePass.passNumber,
-                reason: gatePass.reasonType,
-                startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-                endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-                approvalLink,
-                quickApproveLink: approvalLink,
-              },
-            });
-            this.logger.log(`Email sent to approver: ${approval.approver.email}`);
-          } catch (emailError) {
-            this.logger.error(`Failed to send email to ${approval.approver.email}:`, emailError);
-          }
-        } else {
-          this.logger.warn(`No email address found for approver: ${approval.approverId}`);
-        }
-      }
 
       // Send real-time notifications to approvers
       const approverIds = gatePass.approvals.map(approval => approval.approverId);
@@ -496,25 +448,6 @@ export class NotificationService {
         return;
       }
 
-      // Send email notification
-      try {
-        await this.sendEmail({
-          to: gatePass.user.email,
-          subject: `Giấy ra vào cổng đã được duyệt - ${gatePass.passNumber}`,
-          template: 'gate-pass-approved',
-          data: {
-            gatePassId: gatePass.id,
-            userName: `${gatePass.user.firstName} ${gatePass.user.lastName}`,
-            passNumber: gatePass.passNumber,
-            startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-            endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-          },
-        });
-        this.logger.log(`Approval email sent to: ${gatePass.user.email}`);
-      } catch (emailError) {
-        this.logger.error(`Failed to send approval email to ${gatePass.user.email}:`, emailError);
-      }
-
       // Send real-time notification
       if (this.notificationGateway) {
         try {
@@ -579,20 +512,6 @@ export class NotificationService {
         return;
       }
 
-      await this.sendEmail({
-        to: gatePass.user.email,
-        subject: `Giấy ra vào cổng bị từ chối - ${gatePass.passNumber}`,
-        template: 'gate-pass-rejected',
-        data: {
-          gatePassId: gatePass.id,
-          userName: `${gatePass.user.firstName} ${gatePass.user.lastName}`,
-          passNumber: gatePass.passNumber,
-          rejectionReason,
-          startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-          endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-        },
-      });
-
       // Send real-time notification
       if (this.notificationGateway) {
         await this.notificationGateway.notifyGatePassRejected(gatePass.user.id, {
@@ -626,17 +545,6 @@ export class NotificationService {
       if (!gatePass || !gatePass.user.email) {
         return;
       }
-
-      await this.sendEmail({
-        to: gatePass.user.email,
-        subject: `Giấy ra vào cổng sắp hết hạn - ${gatePass.passNumber}`,
-        template: 'gate-pass-expiring',
-        data: {
-          userName: `${gatePass.user.firstName} ${gatePass.user.lastName}`,
-          passNumber: gatePass.passNumber,
-          endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-        },
-      });
 
       this.logger.log(`Expiration notification sent for gate pass: ${gatePassId}`);
     } catch (error) {
@@ -686,28 +594,6 @@ export class NotificationService {
       if (!nextApproval.approver.email) {
         return;
       }
-
-      // Send email notification to the next approver
-      const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
-      const approvalLink = `${frontendUrl}/gate-pass/${gatePass.id}/approval`;
-
-      await this.sendEmail({
-        to: nextApproval.approver.email,
-        subject: `Yêu cầu duyệt giấy ra vào cổng - ${gatePass.passNumber}`,
-        template: 'gate-pass-approval-request',
-        data: {
-          gatePassId: gatePass.id,
-          approverName: `${nextApproval.approver.firstName} ${nextApproval.approver.lastName}`,
-          requesterName: `${gatePass.user.firstName} ${gatePass.user.lastName}`,
-          employeeCode: gatePass.user.employeeCode,
-          passNumber: gatePass.passNumber,
-          reason: gatePass.reasonType,
-          startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-          endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-          approvalLink,
-          quickApproveLink: approvalLink,
-        },
-      });
 
       // Send real-time notification to the next approver
       if (this.notificationGateway) {
@@ -806,30 +692,6 @@ export class NotificationService {
         return;
       }
 
-      // Send email notification to approver
-      if (approver.email) {
-        try {
-          await this.sendEmail({
-            to: approver.email,
-            subject: `Yêu cầu hủy giấy ra vào cổng - ${gatePass.passNumber}`,
-            template: 'gate-pass-cancellation-request',
-            data: {
-              approverName: `${approver.firstName} ${approver.lastName}`,
-              requesterName: `${requester.firstName} ${requester.lastName}`,
-              passNumber: gatePass.passNumber,
-              reason: gatePass.reasonType,
-              cancellationReason: reason,
-              startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-              endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-              gatePassId: gatePass.id,
-            },
-          });
-          this.logger.log(`Cancellation request email sent to approver: ${approver.email}`);
-        } catch (emailError) {
-          this.logger.error(`Failed to send cancellation request email to ${approver.email}:`, emailError);
-        }
-      }
-
       // Send real-time WebSocket notification
       if (this.notificationGateway) {
         try {
@@ -907,30 +769,6 @@ export class NotificationService {
         return;
       }
 
-      // Send email notification to requester
-      if (requester.email) {
-        try {
-          await this.sendEmail({
-            to: requester.email,
-            subject: `Yêu cầu hủy giấy ra vào cổng đã được phê duyệt - ${gatePass.passNumber}`,
-            template: 'gate-pass-cancellation-approved',
-            data: {
-              requesterName: `${requester.firstName} ${requester.lastName}`,
-              approverName: `${approver.firstName} ${approver.lastName}`,
-              passNumber: gatePass.passNumber,
-              reason: gatePass.reasonType,
-              comment: comment || 'Không có ghi chú',
-              startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-              endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-              gatePassId: gatePass.id,
-            },
-          });
-          this.logger.log(`Cancellation approved email sent to requester: ${requester.email}`);
-        } catch (emailError) {
-          this.logger.error(`Failed to send cancellation approved email to ${requester.email}:`, emailError);
-        }
-      }
-
       // Send real-time WebSocket notification
       if (this.notificationGateway) {
         try {
@@ -1005,30 +843,6 @@ export class NotificationService {
       if (!gatePass) {
         this.logger.error(`Gate pass not found: ${gatePassId}`);
         return;
-      }
-
-      // Send email notification to requester
-      if (requester.email) {
-        try {
-          await this.sendEmail({
-            to: requester.email,
-            subject: `Yêu cầu hủy giấy ra vào cổng bị từ chối - ${gatePass.passNumber}`,
-            template: 'gate-pass-cancellation-rejected',
-            data: {
-              requesterName: `${requester.firstName} ${requester.lastName}`,
-              approverName: `${approver.firstName} ${approver.lastName}`,
-              passNumber: gatePass.passNumber,
-              reason: gatePass.reasonType,
-              comment: comment || 'Không có lý do cụ thể',
-              startDateTime: format(new Date(gatePass.startDateTime), 'dd/MM/yyyy HH:mm'),
-              endDateTime: format(new Date(gatePass.endDateTime), 'dd/MM/yyyy HH:mm'),
-              gatePassId: gatePass.id,
-            },
-          });
-          this.logger.log(`Cancellation rejected email sent to requester: ${requester.email}`);
-        } catch (emailError) {
-          this.logger.error(`Failed to send cancellation rejected email to ${requester.email}:`, emailError);
-        }
       }
 
       // Send real-time WebSocket notification

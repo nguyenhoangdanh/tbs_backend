@@ -21,6 +21,7 @@ import { WebSocketModule } from './modules/websocket/websocket.module';
 import { GatePassModule } from './gate-pass/gate-pass.module';
 import { NotificationModule } from './notifications/notification.module';
 import { HealthcareModule } from './healthcare/healthcare.module';
+import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 
 // ✅ New consolidated modules
 import { OrganizationModule } from './modules/organization/organization.module';
@@ -78,6 +79,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     GatePassModule,
     NotificationModule,
     HealthcareModule,
+    FeedbackModule, // ⭐ NEW
 
     // ✅ New consolidated modules (Use these for new development)
     OrganizationModule,

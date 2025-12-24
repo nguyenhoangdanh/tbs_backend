@@ -14,6 +14,9 @@ const resources = [
   'processes',
   'medicines',
   'medical-records',
+  'feedback', // ⭐ NEW: Anonymous feedback,
+  'roles',
+  'permissions',
 ];
 
 const actions = [
@@ -55,6 +58,9 @@ const rolePermissionsMap = {
     // Medical (read-only)
     medicines: ['view'],
     'medical-records': ['view'],
+
+    // Feedback management
+    feedback: ['view', 'delete'],
   },
 
   [Role.USER]: {

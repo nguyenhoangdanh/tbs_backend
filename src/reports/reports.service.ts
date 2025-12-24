@@ -212,7 +212,7 @@ export class ReportsService {
               },
             });
             
-            console.log(`✅ Updated task: "${taskDto.taskName}" (preserved ${existingTask.evaluations.length} evaluations)`);
+            // console.log(`✅ Updated task: "${taskDto.taskName}" (preserved ${existingTask.evaluations.length} evaluations)`);
           } else {
             // New task - CREATE it
             newTasksData.push({
@@ -235,7 +235,7 @@ export class ReportsService {
           await prisma.reportTask.createMany({
             data: newTasksData,
           });
-          console.log(`✅ Created ${newTasksData.length} new tasks`);
+          // console.log(`✅ Created ${newTasksData.length} new tasks`);
         }
 
         // Delete tasks that are no longer in the new list
@@ -252,7 +252,7 @@ export class ReportsService {
               id: { in: tasksToDelete.map(t => t.id) }
             },
           });
-          console.log(`✅ Deleted ${tasksToDelete.length} removed tasks`);
+          // console.log(`✅ Deleted ${tasksToDelete.length} removed tasks`);
         }
       }
 
