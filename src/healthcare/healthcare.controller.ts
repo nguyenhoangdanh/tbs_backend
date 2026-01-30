@@ -16,7 +16,6 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { HealthcareService } from './healthcare.service';
 import { 
   CreateMedicalRecordDto, 
@@ -34,7 +33,7 @@ export class HealthcareController {
   constructor(private readonly healthcareService: HealthcareService) {}
 
   @Get('dashboard')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get healthcare dashboard statistics' })
   @ApiResponse({ status: 200, description: 'Dashboard statistics retrieved successfully' })
   async getDashboard() {
@@ -42,7 +41,7 @@ export class HealthcareController {
   }
 
   @Get('recent-activities')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get recent healthcare activities' })
   @ApiResponse({ status: 200, description: 'Recent activities retrieved successfully' })
   async getRecentActivities(
@@ -53,14 +52,14 @@ export class HealthcareController {
 
   // Medicine Management Endpoints
   @Get('medicines')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get all medicines' })
   async getMedicines(@Query('search') search?: string) {
     return this.healthcareService.getMedicines(search);
   }
 
   @Post('medicines')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create new medicine' })
   @UsePipes(new ValidationPipe({ 
     whitelist: true, 
@@ -72,7 +71,7 @@ export class HealthcareController {
   }
 
   @Patch('medicines/:id')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update medicine' })
   @UsePipes(new ValidationPipe({ 
     whitelist: true, 
@@ -87,7 +86,7 @@ export class HealthcareController {
   }
 
   @Delete('medicines/:id')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Delete medicine' })
   async deleteMedicine(@Param('id') id: string) {
     return this.healthcareService.deleteMedicine(id);
@@ -103,7 +102,7 @@ export class HealthcareController {
 
   // Medical Record Management
   @Post('medical-records')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create new medical record with prescriptions' })
   @UsePipes(new ValidationPipe({ 
     whitelist: true, 
@@ -115,7 +114,7 @@ export class HealthcareController {
   }
 
   @Patch('medical-records/:id')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update medical record' })
   @UsePipes(new ValidationPipe({ 
     whitelist: true, 
@@ -130,7 +129,7 @@ export class HealthcareController {
   }
 
   @Post('prescriptions/:id/dispense')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Dispense medicine prescription' })
   async dispenseMedicine(
     @Param('id') prescriptionId: string,
@@ -141,7 +140,7 @@ export class HealthcareController {
 
   // Medicine Statistics & Analytics
   @Get('statistics/medicine-usage')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get medicine usage statistics' })
   @ApiResponse({ status: 200, description: 'Medicine usage statistics retrieved successfully' })
   async getMedicineUsageStatistics(
@@ -153,7 +152,7 @@ export class HealthcareController {
   }
 
   @Get('statistics/prescription-trends')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get prescription trends by time period' })
   @ApiResponse({ status: 200, description: 'Prescription trends retrieved successfully' })
   async getPrescriptionTrends(
@@ -164,7 +163,7 @@ export class HealthcareController {
   }
 
   @Get('statistics/top-medicines')
-  @Roles(Role.MEDICAL_STAFF, Role.ADMIN, Role.SUPERADMIN)
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get top prescribed medicines' })
   @ApiResponse({ status: 200, description: 'Top medicines retrieved successfully' })
   async getTopPrescribedMedicines(

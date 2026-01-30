@@ -14,7 +14,6 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { AuthResponseDto } from './dto/auth-response.dto';
-import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { Response } from 'express';
 import { EnvironmentConfig } from 'src/config/config.environment';
@@ -137,7 +136,6 @@ export class AuthService {
         phone,
         jobPositionId,
         officeId,
-        role,
       },
       include: {
         office: {
@@ -189,12 +187,12 @@ export class AuthService {
       // Ensure database connection before query
       // await this.prisma.ensureConnection();
 
-      // Enhanced user lookup - support both MSNV and email prefix
+      // Enhanced user lookup - support both MSNV, email prefix, and special codes
       let user = null;
       
-      // Determine if input is MSNV (all digits) or email prefix (contains letters)
+      // Determine if input is MSNV (all digits) or email prefix (lowercase letters)
       const isNumericMSNV = /^\d+$/.test(employeeCode);
-      const isEmailPrefix = /^[a-zA-Z][a-zA-Z0-9]*$/.test(employeeCode) && employeeCode.length >= 2 && employeeCode.length <= 20;
+      const isEmailPrefix = /^[a-z][a-z0-9]*$/.test(employeeCode) && employeeCode.length >= 2 && employeeCode.length <= 20;
       
       if (process.env.NODE_ENV !== 'production') {
         this.logger.log(`Login type detection for "${employeeCode}":`, {
@@ -204,37 +202,34 @@ export class AuthService {
         });
       }
 
-      // First, try direct lookup by employeeCode (MSNV)
-      if (isNumericMSNV) {
-        user = await this.prisma.user.findUnique({
-          where: { employeeCode },
-          include: {
-            office: {
-              select: { id: true, name: true, type: true }
-            },
-            jobPosition: {
-              include: {
-                position: {
-                  select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
-                },
-                department: {
-                  select: { id: true, name: true }
-                },
+      // ALWAYS try direct lookup by employeeCode first (handles MSNV and special codes like SUPERADMIN)
+      user = await this.prisma.user.findUnique({
+        where: { employeeCode },
+        include: {
+          office: {
+            select: { id: true, name: true, type: true }
+          },
+          jobPosition: {
+            include: {
+              position: {
+                select: { id: true, name: true, description: true, level: true, isManagement: true, canViewHierarchy: true }
+              },
+              department: {
+                select: { id: true, name: true }
               },
             },
           },
-        });
-      
-      }
+        },
+      });
 
-      // If not found by MSNV and input looks like email prefix, try email search
+      // If not found and input looks like email prefix (lowercase), try email search
       if (!user && isEmailPrefix) {
         // Find user by email prefix - construct full email pattern
         const expectedEmail = `${employeeCode}@tbsgroup.vn`;
         
         user = await this.prisma.user.findFirst({
           where: {
-            email: expectedEmail,  // Search for exact email match
+            email: expectedEmail,
             // isActive: true
           },
           include: {
@@ -253,7 +248,6 @@ export class AuthService {
             },
           },
         });
-
       }
 
       if (!user) {
@@ -269,11 +263,7 @@ export class AuthService {
       // }
 
       // Check password
-      // const isPasswordValid = await bcrypt.compare(password, user.password);
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      const isPasswordValid = await bcrypt.compare(password, hashedPassword);
+      const isPasswordValid = await bcrypt.compare(password, user.password);
 
       if (!isPasswordValid) {
         if (process.env.NODE_ENV !== 'production') {
@@ -423,7 +413,7 @@ export class AuthService {
     }
 
     // Generate new tokens
-    const payload = { sub: user.id, employeeCode: user.employeeCode, role: user.role };
+    const payload = { sub: user.id, employeeCode: user.employeeCode };
     const access_token = this.jwtService.sign(payload, {
       expiresIn: rememberMe ? '30d' : '7d'
     });

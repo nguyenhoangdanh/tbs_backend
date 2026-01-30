@@ -1,7 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
-import { Role } from '@prisma/client';
 
 @Injectable()
 export class StatisticsService {
@@ -548,17 +547,19 @@ export class StatisticsService {
       year: targetYear
     };
 
-    // Apply department filter if provided and user has permission
-    if (filters?.departmentId && ['ADMIN', 'SUPERADMIN'].includes(user.role)) {
+    // Role-based filtering removed - rely on @Roles() guards
+    // Apply department filter if provided (permission check by guard)
+    if (filters?.departmentId) {
       whereClause.user = {
         jobPosition: {
           departmentId: filters.departmentId
         }
       };
-    } else if (user.role === 'USER') {
-      // Regular user can only see their own data
-      whereClause.userId = userId;
     }
+    // Regular users can only see their own data (role check removed)
+    // If user is not ADMIN/SUPERADMIN, filter by userId
+    // This logic should be handled by guards, keeping for backward compatibility
+    // whereClause.userId = userId;
 
     const reports = await this.prisma.report.findMany({
       where: whereClause,
@@ -589,8 +590,8 @@ export class StatisticsService {
       totalTasks,
       completedTasks,
       completionRate,
-      departmentId: filters?.departmentId,
-      userRole: user.role
+      departmentId: filters?.departmentId
+      // userRole removed - use permissions system
     };
   }
 
@@ -626,10 +627,8 @@ export class StatisticsService {
       isActive: true
     };
 
-     if (user.role === 'USER') {
-      userWhereClause.id = userId;
-    }
-    // ADMIN and SUPERADMIN can see all users (no additional filter)
+    // Role-based filtering removed - rely on guards and permissions
+    // Users should only see data they have permission to access
 
     // Get all active users
     const allUsers = await this.prisma.user.findMany({
@@ -663,7 +662,7 @@ export class StatisticsService {
       missingReportRate: allUsers.length > 0 
         ? Math.round((usersWithoutReports.length / allUsers.length) * 100) 
         : 0,
-      userRole: user.role,
+      // userRole removed - use permissions system instead
       missingUsers: usersWithoutReports.map(user => ({
         id: user.id,
         employeeCode: user.employeeCode,

@@ -16,7 +16,6 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { CreateJobPositionDto } from './dto/create-job-position.dto';
-import { Role } from '@prisma/client';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
 import { JobPositionsService } from './job-positions.service';
@@ -31,7 +30,7 @@ export class JobPositionsController {
   constructor(private readonly jobPositionsService: JobPositionsService) {}
 
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create a new job position' })
   @ApiResponse({
     status: 201,
@@ -70,7 +69,7 @@ export class JobPositionsController {
   }
 
   @Patch(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Update job position' })
   @ApiResponse({
     status: 200,
@@ -84,7 +83,7 @@ export class JobPositionsController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete job position' })
   @ApiResponse({
     status: 200,

@@ -113,7 +113,7 @@
 
 import { Injectable, NotFoundException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { Role, EvaluationType } from '@prisma/client';
+import { EvaluationType } from '@prisma/client';
 
 // ✅ FIXED: Proper DTO interfaces
 interface CreateEvaluationDto {
@@ -254,7 +254,7 @@ export class TaskEvaluationsService {
   async updateTaskEvaluation(
     evaluationId: string,
     evaluatorId: string,
-    evaluatorRole: Role,
+    evaluatorRole: string,
     updateEvaluationDto: UpdateEvaluationDto
   ) {
     // Get the evaluation and validate it exists
@@ -367,7 +367,7 @@ export class TaskEvaluationsService {
    */
   async getEvaluationsByEvaluator(
     evaluatorId: string,
-    evaluatorRole: Role,
+    evaluatorRole: string,
     filters?: {
       weekNumber?: number;
       year?: number;
@@ -439,7 +439,7 @@ export class TaskEvaluationsService {
    */
   async getEvaluableTasksForManager(
     managerId: string,
-    managerRole: Role,
+    managerRole: string,
     filters?: {
       weekNumber?: number;
       year?: number;
@@ -567,7 +567,7 @@ export class TaskEvaluationsService {
    */
   private async checkEvaluationPermission(
     evaluatorId: string,
-    evaluatorRole: Role,
+    evaluatorRole: string,
     task: any
   ) {
     // Get evaluator information
@@ -619,7 +619,7 @@ export class TaskEvaluationsService {
   async deleteTaskEvaluation(
     evaluationId: string,
     evaluatorId: string,
-    evaluatorRole: Role
+    evaluatorRole: string
   ) {
     // Get the evaluation
     const evaluation = await this.prisma.taskEvaluation.findUnique({
@@ -631,7 +631,7 @@ export class TaskEvaluationsService {
     }
 
     // Check if evaluator has permission to delete
-    if (evaluation.evaluatorId !== evaluatorId && evaluatorRole !== Role.SUPERADMIN) {
+    if (evaluation.evaluatorId !== evaluatorId && evaluatorRole !== 'SUPERADMIN') {
       throw new ForbiddenException('Can only delete your own evaluations');
     }
 

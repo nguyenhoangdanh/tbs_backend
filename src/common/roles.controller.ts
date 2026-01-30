@@ -15,7 +15,6 @@ import { CreateRoleDto, UpdateRoleDto, AssignRolesToUserDto, AssignUsersToRoleDt
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 
 @ApiTags('Roles Management')
 @Controller('roles')
@@ -25,7 +24,7 @@ export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
   @Get()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Get all roles' })
   async getAllRoles(
     @Query('includeInactive') includeInactive?: string,
@@ -40,35 +39,35 @@ export class RolesController {
   }
 
   @Get(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Get role by ID' })
   async getRoleById(@Param('id') id: string) {
     return this.rolesService.getRoleById(id);
   }
 
   @Post()
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Create new role' })
   async createRole(@Body() dto: CreateRoleDto) {
     return this.rolesService.createRole(dto);
   }
 
   @Put(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Update role' })
   async updateRole(@Param('id') id: string, @Body() dto: UpdateRoleDto) {
     return this.rolesService.updateRole(id, dto);
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete role' })
   async deleteRole(@Param('id') id: string) {
     return this.rolesService.deleteRole(id);
   }
 
   @Put(':id/permissions')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Assign permissions to role' })
   async assignPermissions(
     @Param('id') id: string,
@@ -78,14 +77,14 @@ export class RolesController {
   }
 
   @Get(':id/users')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Get users assigned to role' })
   async getUsersByRole(@Param('id') id: string) {
     return this.rolesService.getUsersByRole(id);
   }
 
   @Post(':id/users')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Assign users to role' })
   async assignUsersToRole(
     @Param('id') id: string,
@@ -95,7 +94,7 @@ export class RolesController {
   }
 
   @Delete(':roleId/users/:userId')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Remove user from role' })
   async removeUserFromRole(
     @Param('roleId') roleId: string,
@@ -105,7 +104,7 @@ export class RolesController {
   }
 
   @Put('users/:userId/roles')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Assign roles to user (replace all)' })
   async assignRolesToUser(
     @Param('userId') userId: string,
@@ -115,7 +114,7 @@ export class RolesController {
   }
 
   @Get('users/:userId/roles')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Get roles assigned to user' })
   async getUserRoles(@Param('userId') userId: string) {
     return this.rolesService.getUserRoles(userId);

@@ -6,7 +6,6 @@ import { JwtStrategy } from './jwt.strategy';
 import { PrismaService } from '../common/prisma.service';
 import { EnvironmentConfig } from '../config/config.environment';
 import { PermissionsService } from '../common/permissions.service';
-import { PermissionsController } from '../common/controllers/permissions.controller';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CommonModule } from '../common/common.module';
@@ -21,7 +20,7 @@ import { CommonModule } from '../common/common.module';
       },
     }),
   ],
-  controllers: [AuthController, PermissionsController],
+  controllers: [AuthController],
   providers: [
     AuthService,
     JwtStrategy,

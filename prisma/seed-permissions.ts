@@ -1,4 +1,4 @@
-import { PrismaClient, Role } from '@prisma/client';
+import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 
 const resources = [
@@ -14,7 +14,7 @@ const resources = [
   'processes',
   'medicines',
   'medical-records',
-  'feedback', // ⭐ NEW: Anonymous feedback,
+  'feedback',
   'roles',
   'permissions',
 ];
@@ -29,14 +29,23 @@ const actions = [
   'assign',
 ];
 
+// ⭐ Role codes (matching RoleDefinition.code)
+const ROLE_CODES = {
+  SUPERADMIN: 'SUPERADMIN',
+  ADMIN: 'ADMIN',
+  USER: 'USER',
+  WORKER: 'WORKER',
+  MEDICAL_STAFF: 'MEDICAL_STAFF',
+} as const;
+
 // ⭐ Define permissions for each role
 const rolePermissionsMap = {
-  [Role.SUPERADMIN]: {
+  [ROLE_CODES.SUPERADMIN]: {
     // Full access to everything
     all: ['view', 'create', 'update', 'delete', 'approve', 'manage', 'assign'],
   },
 
-  [Role.ADMIN]: {
+  [ROLE_CODES.ADMIN]: {
     // Office and department management
     offices: ['view', 'create', 'update', 'delete', 'manage'],
     departments: ['view', 'create', 'update', 'delete', 'manage'],
@@ -63,7 +72,7 @@ const rolePermissionsMap = {
     feedback: ['view', 'delete'],
   },
 
-  [Role.USER]: {
+  [ROLE_CODES.USER]: {
     // Self profile & department management
     users: ['view', 'update'],
 
@@ -87,7 +96,7 @@ const rolePermissionsMap = {
     'medical-records': ['view'],
   },
 
-  [Role.WORKER]: {
+  [ROLE_CODES.WORKER]: {
     // Self profile
     users: ['view'],
 
@@ -107,7 +116,7 @@ const rolePermissionsMap = {
     'medical-records': ['view'],
   },
 
-  [Role.MEDICAL_STAFF]: {
+  [ROLE_CODES.MEDICAL_STAFF]: {
     // Full medical access
     medicines: ['view', 'create', 'update', 'delete', 'manage'],
     'medical-records': ['view', 'create', 'update', 'delete', 'manage'],
@@ -148,31 +157,51 @@ async function main() {
 
   console.log(`\n📋 Total permissions created: ${permissions.length}`);
 
-  // 2. Assign permissions to roles
-  console.log('\n🎭 Assigning permissions to roles...');
+  // 2. Fetch all system roles from database
+  console.log('\n🎭 Fetching system roles...');
+  const systemRoles = await prisma.roleDefinition.findMany({
+    where: { isSystem: true },
+  });
 
-  for (const [role, resourcePerms] of Object.entries(rolePermissionsMap)) {
-    console.log(`\n🎯 Processing role: ${role}`);
+  if (systemRoles.length === 0) {
+    console.error('❌ No system roles found! Please run "pnpm seed" first to create system roles.');
+    process.exit(1);
+  }
+
+  console.log(`✅ Found ${systemRoles.length} system roles`);
+
+  // 3. Assign permissions to roles
+  console.log('\n🎯 Assigning permissions to roles...');
+
+  for (const [roleCode, resourcePerms] of Object.entries(rolePermissionsMap)) {
+    console.log(`\n🎯 Processing role: ${roleCode}`);
+
+    // Find role by code
+    const role = systemRoles.find(r => r.code === roleCode);
+    if (!role) {
+      console.warn(`⚠️  Role ${roleCode} not found, skipping...`);
+      continue;
+    }
 
     // SUPERADMIN gets all permissions
-    if (role === Role.SUPERADMIN) {
+    if (roleCode === ROLE_CODES.SUPERADMIN) {
       for (const permission of permissions) {
-        await prisma.rolePermission.upsert({
+        await prisma.roleDefinitionPermission.upsert({
           where: {
-            role_permissionId: {
-              role: role as Role,
+            roleDefinitionId_permissionId: {
+              roleDefinitionId: role.id,
               permissionId: permission.id,
             },
           },
           update: { isGranted: true },
           create: {
-            role: role as Role,
+            roleDefinitionId: role.id,
             permissionId: permission.id,
             isGranted: true,
           },
         });
       }
-      console.log(`  ✅ Granted ALL permissions to ${role}`);
+      console.log(`  ✅ Granted ALL permissions to ${roleCode}`);
       continue;
     }
 
@@ -184,21 +213,21 @@ async function main() {
         );
 
         if (permission) {
-          await prisma.rolePermission.upsert({
+          await prisma.roleDefinitionPermission.upsert({
             where: {
-              role_permissionId: {
-                role: role as Role,
+              roleDefinitionId_permissionId: {
+                roleDefinitionId: role.id,
                 permissionId: permission.id,
               },
             },
             update: { isGranted: true },
             create: {
-              role: role as Role,
+              roleDefinitionId: role.id,
               permissionId: permission.id,
               isGranted: true,
             },
           });
-          console.log(`  ✅ ${role}: ${resource}.${action}`);
+          console.log(`  ✅ ${roleCode}: ${resource}.${action}`);
         }
       }
     }

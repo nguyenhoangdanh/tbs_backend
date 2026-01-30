@@ -136,7 +136,7 @@ export class DepartmentService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
             groupId: true,
           },
           orderBy: { employeeCode: 'asc' },

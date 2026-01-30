@@ -12,7 +12,6 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
 
 @ApiTags('statistics')
@@ -155,7 +154,7 @@ export class StatisticsController {
   // Admin endpoints
   @Get('admin/dashboard')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get admin dashboard statistics' })
   @ApiResponse({ status: 200, description: 'Admin dashboard statistics retrieved successfully' })
   @ApiQuery({ name: 'departmentId', required: false, description: 'Department ID' })
@@ -194,7 +193,7 @@ export class StatisticsController {
 
   @Get('overview')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get overview statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Overview statistics retrieved successfully' })
   @HttpCode(HttpStatus.OK)
@@ -205,7 +204,7 @@ export class StatisticsController {
 
   @Get('completion-rate')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get completion rate statistics' })
   @ApiResponse({ status: 200, description: 'Completion rate statistics retrieved successfully' })
   @ApiQuery({ name: 'week', required: false, description: 'Week number' })
@@ -244,7 +243,7 @@ export class StatisticsController {
 
   @Get('missing-reports')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get missing reports statistics' })
   @ApiResponse({ status: 200, description: 'Missing reports statistics retrieved successfully' })
   @ApiQuery({ name: 'week', required: false, description: 'Week number' })
@@ -277,7 +276,7 @@ export class StatisticsController {
 
   @Get('summary-report')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get summary report' })
   @ApiResponse({ status: 200, description: 'Summary report retrieved successfully' })
   @ApiQuery({ name: 'week', required: false, description: 'Week number' })

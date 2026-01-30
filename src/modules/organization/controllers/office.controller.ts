@@ -19,7 +19,6 @@ import {
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { OfficeService } from '../services/office.service';
 import { CreateOfficeDto } from '../dto/office/create-office.dto';
 import { UpdateOfficeDto } from '../dto/office/update-office.dto';
@@ -33,7 +32,7 @@ export class OfficeController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new office' })
   @ApiResponse({ status: 201, description: 'Office created successfully' })
@@ -68,7 +67,7 @@ export class OfficeController {
 
   @Put(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Update office' })
   @ApiResponse({ status: 200, description: 'Office updated successfully' })
   update(@Param('id') id: string, @Body() updateOfficeDto: UpdateOfficeDto) {
@@ -77,7 +76,7 @@ export class OfficeController {
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete office' })
   @ApiResponse({ status: 200, description: 'Office deleted successfully' })
   remove(@Param('id') id: string) {

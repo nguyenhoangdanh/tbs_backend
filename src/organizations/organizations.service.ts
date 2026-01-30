@@ -111,7 +111,7 @@ export class OrganizationsService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
               orderBy: { employeeCode: 'asc' },
             },
@@ -153,7 +153,7 @@ export class OrganizationsService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
             groupId: true, // Include group membership for workers
           },
           orderBy: { employeeCode: 'asc' },
@@ -324,7 +324,7 @@ export class OrganizationsService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
             },
           },

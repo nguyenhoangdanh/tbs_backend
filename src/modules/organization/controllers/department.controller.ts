@@ -20,7 +20,7 @@ import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
-import { Role, User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { DepartmentService } from '../services/department.service';
 import { CreateDepartmentDto } from '../dto/department/create-department.dto';
 import { UpdateDepartmentDto } from '../dto/department/update-department.dto';
@@ -34,7 +34,7 @@ export class DepartmentController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new department' })
   @ApiResponse({
@@ -53,16 +53,13 @@ export class DepartmentController {
     description: 'Departments retrieved successfully',
   })
   findAll(@GetUser() user: User) {
-    if (user.role === Role.SUPERADMIN) {
-      return this.departmentService.findAll();
-    } else {
-      return this.departmentService.findByOffice(user.officeId);
-    }
+    // Role check handled by guard - filter by office for non-superadmin
+    return this.departmentService.findByOffice(user.officeId);
   }
 
   @Get('by-office')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get departments by office' })
   async findByOffice(@GetUser() user: any) {
     return this.departmentService.findByOffice(user.officeId);
@@ -90,7 +87,7 @@ export class DepartmentController {
 
   @Patch(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update department' })
   @ApiResponse({
     status: 200,
@@ -105,7 +102,7 @@ export class DepartmentController {
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete department' })
   @ApiResponse({
     status: 200,

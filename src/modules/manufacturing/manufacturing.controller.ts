@@ -20,7 +20,6 @@ import {
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { ManufacturingService } from './manufacturing.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -39,7 +38,7 @@ export class ManufacturingController {
   // Product endpoints
   @Post('products')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create new product' })
   @ApiResponse({ status: 201, description: 'Product created successfully' })
   createProduct(@Body() createProductDto: CreateProductDto) {
@@ -63,7 +62,7 @@ export class ManufacturingController {
 
   @Put('products/:id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Update product' })
   @ApiResponse({ status: 200, description: 'Product updated successfully' })
   updateProduct(@Param('id') id: string, @Body() updateProductDto: UpdateProductDto) {
@@ -72,7 +71,7 @@ export class ManufacturingController {
 
   @Delete('products/:id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete product' })
   @ApiResponse({ status: 200, description: 'Product deleted successfully' })
   removeProduct(@Param('id') id: string) {
@@ -82,7 +81,7 @@ export class ManufacturingController {
   // Process endpoints
   @Post('processes')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create new process' })
   @ApiResponse({ status: 201, description: 'Process created successfully' })
   createProcess(@Body() createProcessDto: CreateProcessDto) {
@@ -105,7 +104,7 @@ export class ManufacturingController {
 
   @Put('processes/:id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Update process' })
   @ApiResponse({ status: 200, description: 'Process updated successfully' })
   updateProcess(@Param('id') id: string, @Body() updateProcessDto: UpdateProcessDto) {
@@ -114,7 +113,7 @@ export class ManufacturingController {
 
   @Delete('processes/:id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete process' })
   @ApiResponse({ status: 200, description: 'Process deleted successfully' })
   removeProcess(@Param('id') id: string) {
@@ -124,7 +123,7 @@ export class ManufacturingController {
   // Product-Process relationship endpoints
   @Post('products/:productId/processes')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Add process to product with standard output' })
   @ApiResponse({ status: 201, description: 'Process added to product successfully' })
   addProcessToProduct(
@@ -154,7 +153,7 @@ export class ManufacturingController {
   // ✅ NEW: Update product-process endpoint
   @Patch('products/:productId/processes/:processId')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Update product-process relationship' })
   @ApiResponse({ status: 200, description: 'Product-process updated successfully' })
   updateProductProcess(
@@ -175,7 +174,7 @@ export class ManufacturingController {
 
   @Delete('products/:productId/processes/:processId')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Remove process from product' })
   @ApiQuery({ 
     name: 'reorderSequences', 

@@ -1,4 +1,4 @@
-import { PrismaClient, Role, OfficeType, Sex } from "@prisma/client";
+import { PrismaClient, OfficeType, Sex } from "@prisma/client";
 import * as bcrypt from "bcrypt";
 import * as XLSX from "xlsx";
 import * as path from "path";
@@ -124,7 +124,7 @@ async function testConnection(): Promise<boolean> {
 }
 
 // Function to determine role based on position
-function determineRole(cd: string, vt: string, pb: string): Role {
+function determineRole(cd: string, vt: string, pb: string): string {
   const position = cd.toLowerCase();
   const jobTitle = vt.toLowerCase();
   const department = pb.toLowerCase();
@@ -135,11 +135,11 @@ function determineRole(cd: string, vt: string, pb: string): Role {
     position.includes("tgđ") ||
     position.includes("tổng giám đốc")
   ) {
-    return Role.ADMIN;
+    return 'ADMIN';
   }
 
   // USER - Tất cả còn lại (sẽ phân quyền chi tiết qua isManagement và canViewHierarchy)
-  return Role.USER;
+  return 'USER';
 }
 
 // Function to determine if position is management and can view hierarchy
@@ -741,6 +741,11 @@ async function createUsers(
   // Return user map for management relations
   console.log("\n👥 Creating users...");
 
+  // Load all roles first
+  const roles = await prisma.roleDefinition.findMany();
+  const roleMap = new Map(roles.map(r => [r.code, r]));
+  console.log(`📋 Loaded ${roles.length} roles: ${roles.map(r => r.code).join(', ')}`);
+
   const hashedPassword = await bcrypt.hash("123456", 10);
   let successCount = 0;
   let errorCount = 0;
@@ -759,10 +764,15 @@ async function createUsers(
         : null;
       const sex = userData.sex || null;
 
-      const userRole = userData.role
-        ? Role[userData.role as keyof typeof Role] ||
-          determineRole(userData.cd, userData.vt, userData.pb)
-        : determineRole(userData.cd, userData.vt, userData.pb);
+      // Determine role code
+      const roleCode = determineRole(userData.cd, userData.vt, userData.pb);
+      const roleDefinition = roleMap.get(roleCode);
+
+      if (!roleDefinition) {
+        console.warn(`   ⚠️  Role '${roleCode}' not found for user ${employeeCode}, skipping...`);
+        errorCount++;
+        continue;
+      }
 
       // Check if user already exists by employeeCode only
       const existingUser = await prisma.user.findUnique({
@@ -845,7 +855,7 @@ async function createUsers(
       const firstName = nameParts[0];
       const lastName = nameParts.slice(1).join(" ") || "";
 
-      // Create user with proper email and role
+      // Create user with role assignment via UserRole table
       const newUser = await prisma.user.create({
         data: {
           employeeCode,
@@ -856,16 +866,20 @@ async function createUsers(
           dateOfBirth,
           sex,
           phone,
-          role: userRole,
           jobPositionId: jobPosition.id,
           officeId: office.id,
+          roles: {
+            create: {
+              roleDefinitionId: roleDefinition.id
+            }
+          }
         },
       });
 
       userMap.set(employeeCode, newUser); // Store created user
       successCount++;
       console.log(
-        `   ✅ ${employeeCode} - ${fullName} (${userData.vt}) [${userRole}] - ${email}`
+        `   ✅ ${employeeCode} - ${fullName} (${userData.vt}) [${roleCode}] - ${email}`
       );
     } catch (error) {
       console.error(
@@ -883,14 +897,15 @@ async function createUsers(
 
   // Show role distribution
   console.log("\n👥 Role Distribution:");
-  const roleStats = await prisma.user.groupBy({
-    by: ["role"],
-    _count: { role: true },
+  const roleStats = await prisma.userRole.groupBy({
+    by: ['roleDefinitionId'],
+    _count: { roleDefinitionId: true },
   });
 
-  roleStats.forEach((stat) => {
-    console.log(`   ${stat.role}: ${stat._count.role} users`);
-  });
+  for (const stat of roleStats) {
+    const role = roles.find(r => r.id === stat.roleDefinitionId);
+    console.log(`   ${role?.code || 'UNKNOWN'}: ${stat._count.roleDefinitionId} users`);
+  }
 
   // Show email examples
   console.log("\n📧 Email Examples:");

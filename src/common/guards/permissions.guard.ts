@@ -7,7 +7,6 @@ import {
 import { Reflector } from '@nestjs/core';
 import { PermissionsService } from '../permissions.service';
 import { PERMISSIONS_KEY } from '../decorators/permissions.decorator';
-import { Role } from '@prisma/client';
 
 @Injectable()
 export class PermissionsGuard implements CanActivate {
@@ -34,7 +33,7 @@ export class PermissionsGuard implements CanActivate {
     }
 
     // ⭐ COMMENT OUT BYPASS - Test permissions for all users including SUPERADMIN
-    // if (user.role === Role.SUPERADMIN) {
+    // if (user.role === 'SUPERADMIN') {
     //   return true;
     // }
 

@@ -12,7 +12,6 @@ import { GatePassFiltersDto } from './dto/gate-pass-filters.dto';
 import { 
   GatePassStatus, 
   GatePassApprovalStatus, 
-  Role 
 } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 
@@ -381,13 +380,13 @@ export class GatePassService {
     return this.create(userId, standardDto);
   }
 
-  async findAll(userId: string, userRole: Role, filters: GatePassFiltersDto) {
+  async findAll(userId: string, userRole: string, filters: GatePassFiltersDto) {
     const { status, reasonType, startDate, endDate, page = 1, limit = 10 } = filters;
     
     // Build where clause based on user role
     let whereClause: any = {};
     
-    if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+    if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
       // Admins can see all gate passes, optionally filtered by user
       if (filters.userId) {
         whereClause.userId = filters.userId;
@@ -591,7 +590,7 @@ export class GatePassService {
     };
   }
 
-  async findOne(id: string, userId: string, userRole: Role) {
+  async findOne(id: string, userId: string, userRole: string) {
     const gatePass = await this.prisma.gatePass.findUnique({
       where: { id },
       include: {
@@ -633,8 +632,8 @@ export class GatePassService {
 
     // Check access permissions
     const canAccess = 
-      userRole === Role.SUPERADMIN || 
-      userRole === Role.ADMIN ||
+      userRole === 'SUPERADMIN' || 
+      userRole === 'ADMIN' ||
       gatePass.userId === userId ||
       gatePass.approvals.some(approval => approval.approverId === userId);
 
@@ -645,7 +644,7 @@ export class GatePassService {
     return gatePass;
   }
 
-  async update(id: string, userId: string, updateGatePassDto: UpdateGatePassDto, userRole?: Role) {
+  async update(id: string, userId: string, updateGatePassDto: UpdateGatePassDto, userRole?: string) {
     const gatePass = await this.prisma.gatePass.findUnique({
       where: { id },
     });
@@ -737,7 +736,7 @@ export class GatePassService {
     return updatedGatePass;
   }
 
-  async remove(id: string, userId: string, userRole: Role) {
+  async remove(id: string, userId: string, userRole: string) {
     const gatePass = await this.prisma.gatePass.findUnique({
       where: { id },
       include: {
@@ -754,8 +753,8 @@ export class GatePassService {
     }
 
     const canDelete = 
-      userRole === Role.SUPERADMIN || 
-      userRole === Role.ADMIN ||
+      userRole === 'SUPERADMIN' || 
+      userRole === 'ADMIN' ||
       (gatePass.userId === userId && gatePass.status === GatePassStatus.PENDING);
 
     if (!canDelete) {
@@ -1215,11 +1214,11 @@ export class GatePassService {
     );
   }
 
-  async getStats(userId: string, userRole: Role, filters?: any) {
+  async getStats(userId: string, userRole: string, filters?: any) {
     // Build where clause based on user role
     let whereClause: any = {};
     
-    if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+    if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
       // Admins can see all gate passes
     } else {
       // Regular users can only see their own gate passes or ones they need to approve

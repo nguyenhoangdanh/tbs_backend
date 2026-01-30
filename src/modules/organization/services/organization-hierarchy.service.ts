@@ -69,7 +69,7 @@ export class OrganizationHierarchyService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
             },
           },

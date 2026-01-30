@@ -28,7 +28,6 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { Role } from '@prisma/client';
 import { WorksheetService } from './worksheet.service';
 
 @ApiTags('worksheets')
@@ -40,7 +39,7 @@ export class WorksheetController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Create new worksheet' })
   @ApiResponse({ status: 201, description: 'Worksheet created successfully' })
   create(@Body() createWorksheetDto: CreateWorksheetDto, @GetUser() user: any) {
@@ -110,7 +109,7 @@ export class WorksheetController {
 
   @Get('dashboard/today')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Today production dashboard' })
   @ApiResponse({ status: 200, description: 'Dashboard data retrieved' })
   async getTodayDashboard(@GetUser() user: any) {
@@ -120,7 +119,7 @@ export class WorksheetController {
 
   @Get('dashboard/office/:officeId')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Office production dashboard' })
   async getOfficeDashboard(
     @Param('officeId') officeId: string,
@@ -133,7 +132,7 @@ export class WorksheetController {
 
   @Get('analytics/realtime')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Get real-time analytics' })
   @ApiQuery({ name: 'officeId', required: false, type: String })
   @ApiQuery({ name: 'date', required: false, type: String })
@@ -168,7 +167,7 @@ export class WorksheetController {
 
   @Put(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Update worksheet' })
   @ApiResponse({ status: 200, description: 'Worksheet updated successfully' })
   update(
@@ -181,7 +180,7 @@ export class WorksheetController {
 
   @Put('group/:groupId/bulk-update')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ 
     summary: 'Bulk update all worksheets in a group',
     description: 'Update shift type, product, process, and planned output for all workers in group at once'
@@ -197,7 +196,7 @@ export class WorksheetController {
 
   @Patch(':id/records/:recordId')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Update worksheet record' })
   @ApiResponse({ status: 200, description: 'Record updated successfully' })
   updateRecord(
@@ -211,7 +210,7 @@ export class WorksheetController {
 
   @Patch(':id/records/:recordId/quick-update')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Quick update record for mobile (group leaders)' })
   @ApiResponse({ status: 200, description: 'Record updated successfully' })
   async quickUpdateRecord(
@@ -231,7 +230,7 @@ export class WorksheetController {
   // ⭐ CORE ENDPOINT - Batch update by hour for entire group
   @Post('group/:groupId/hour/:workHour/batch-update')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ 
     summary: 'Batch update outputs for all workers in a specific hour',
     description: 'Group leader updates 30 workers at once. Supports multiple products per worker per hour.'
@@ -253,7 +252,7 @@ export class WorksheetController {
 
   @Post(':id/complete')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Complete worksheet' })
   @ApiResponse({ status: 200, description: 'Worksheet completed successfully' })
   completeWorksheet(@Param('id') id: string, @GetUser() user: any) {
@@ -262,7 +261,7 @@ export class WorksheetController {
 
   @Post('archive-old')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Archive old worksheets' })
   @ApiQuery({ name: 'beforeDate', required: false, type: String })
   @ApiResponse({ status: 200, description: 'Old worksheets archived successfully' })
@@ -276,7 +275,7 @@ export class WorksheetController {
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Delete worksheet' })
   @ApiResponse({ status: 200, description: 'Worksheet deleted successfully' })
   remove(@Param('id') id: string, @GetUser() user: any) {
@@ -300,7 +299,7 @@ export class WorksheetController {
 
   @Patch(':id/adjust-target/:workHour')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Adjust planned output for a specific hour' })
   @ApiResponse({ status: 200, description: 'Record target adjusted successfully' })
   adjustRecordTarget(
@@ -319,7 +318,7 @@ export class WorksheetController {
 
     @Post(':id/copy-forward')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN, Role.ADMIN, Role.USER)
+  @Roles('SUPERADMIN', 'ADMIN', 'USER')
   @ApiOperation({ summary: 'Copy forward product/process for speed input' })
   @ApiResponse({ status: 200, description: 'Product/process copied successfully' })
   async copyForwardProductProcess(

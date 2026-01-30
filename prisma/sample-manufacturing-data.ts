@@ -1,4 +1,4 @@
-import { PrismaClient, OfficeType, Role } from '@prisma/client';
+import { PrismaClient, OfficeType } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient({
@@ -150,29 +150,29 @@ const SAMPLE_PROCESSES = [
 
 // Sample worker data (20 workers)
 const SAMPLE_WORKERS = [
-  // 4 Group leaders (Role.USER)
-  { firstName: 'Văn', lastName: 'Minh', phone: '0987654321', role: Role.USER },
-  { firstName: 'Thị', lastName: 'Lan', phone: '0987654322', role: Role.USER },
-  { firstName: 'Văn', lastName: 'Tùng', phone: '0987654323', role: Role.USER },
-  { firstName: 'Thị', lastName: 'Mai', phone: '0987654324', role: Role.USER },
+  // 4 Group leaders (will get USER role via UserRole table)
+  { firstName: 'Văn', lastName: 'Minh', phone: '0987654321' },
+  { firstName: 'Thị', lastName: 'Lan', phone: '0987654322' },
+  { firstName: 'Văn', lastName: 'Tùng', phone: '0987654323' },
+  { firstName: 'Thị', lastName: 'Mai', phone: '0987654324' },
   
-  // 16 Workers (Role.WORKER)
-  { firstName: 'Văn', lastName: 'An', phone: '0987654325', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Bích', phone: '0987654326', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Cường', phone: '0987654327', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Dung', phone: '0987654328', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Đức', phone: '0987654329', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Em', phone: '0987654330', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Phong', phone: '0987654331', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Giang', phone: '0987654332', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Hải', phone: '0987654333', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Hoa', phone: '0987654334', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Khoa', phone: '0987654335', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Linh', phone: '0987654336', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Nam', phone: '0987654337', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Oanh', phone: '0987654338', role: Role.WORKER },
-  { firstName: 'Văn', lastName: 'Phú', phone: '0987654339', role: Role.WORKER },
-  { firstName: 'Thị', lastName: 'Quyên', phone: '0987654340', role: Role.WORKER }
+  // 16 Workers (will get WORKER role via UserRole table)
+  { firstName: 'Văn', lastName: 'An', phone: '0987654325' },
+  { firstName: 'Thị', lastName: 'Bích', phone: '0987654326' },
+  { firstName: 'Văn', lastName: 'Cường', phone: '0987654327' },
+  { firstName: 'Thị', lastName: 'Dung', phone: '0987654328' },
+  { firstName: 'Văn', lastName: 'Đức', phone: '0987654329' },
+  { firstName: 'Thị', lastName: 'Em', phone: '0987654330' },
+  { firstName: 'Văn', lastName: 'Phong', phone: '0987654331' },
+  { firstName: 'Thị', lastName: 'Giang', phone: '0987654332' },
+  { firstName: 'Văn', lastName: 'Hải', phone: '0987654333' },
+  { firstName: 'Thị', lastName: 'Hoa', phone: '0987654334' },
+  { firstName: 'Văn', lastName: 'Khoa', phone: '0987654335' },
+  { firstName: 'Thị', lastName: 'Linh', phone: '0987654336' },
+  { firstName: 'Văn', lastName: 'Nam', phone: '0987654337' },
+  { firstName: 'Thị', lastName: 'Oanh', phone: '0987654338' },
+  { firstName: 'Văn', lastName: 'Phú', phone: '0987654339' },
+  { firstName: 'Thị', lastName: 'Quyên', phone: '0987654340' }
 ];
 
 async function testConnection(): Promise<boolean> {
@@ -382,11 +382,22 @@ async function createManufacturingStructure() {
 async function createWorkers(jobPositions: any[], groups: any[]) {
   console.log('\n👥 Creating sample workers...');
   
+  // Load roles
+  const userRole = await prisma.roleDefinition.findUnique({ where: { code: 'USER' } });
+  const workerRole = await prisma.roleDefinition.findUnique({ where: { code: 'WORKER' } });
+  
+  if (!userRole || !workerRole) {
+    throw new Error('USER or WORKER role not found. Please run seed:permissions first.');
+  }
+  
+  console.log(`📋 Loaded roles: ${userRole.code}, ${workerRole.code}`);
+  
   const hashedPassword = await bcrypt.hash('123456', 10);
   let employeeCounter = 5001;
   const workers = [];
 
-  for (const workerData of SAMPLE_WORKERS) {
+  for (let i = 0; i < SAMPLE_WORKERS.length; i++) {
+    const workerData = SAMPLE_WORKERS[i];
     try {
       const employeeCode = employeeCounter.toString().padStart(4, '0');
       const fullName = `${workerData.lastName} ${workerData.firstName}`;
@@ -420,9 +431,12 @@ async function createWorkers(jobPositions: any[], groups: any[]) {
       const jobPosIndex = (employeeCounter - 5001) % jobPositions.length;
       const selectedJobPos = jobPositions[jobPosIndex];
       
-      const jobPosition = workerData.role === Role.USER 
+      // First 4 workers are leaders (index 0-3), rest are workers
+      const isLeader = i < 4;
+      const jobPosition = isLeader
         ? selectedJobPos.leaderJobPosition 
         : selectedJobPos.workerJobPosition;
+      const role = isLeader ? userRole : workerRole;
 
       const worker = await prisma.user.create({
         data: {
@@ -432,15 +446,19 @@ async function createWorkers(jobPositions: any[], groups: any[]) {
           firstName: workerData.firstName,
           lastName: workerData.lastName,
           phone: workerData.phone,
-          role: workerData.role,
           isActive: true,
           jobPositionId: jobPosition.id,
-          officeId: selectedJobPos.office.id
+          officeId: selectedJobPos.office.id,
+          roles: {
+            create: {
+              roleDefinitionId: role.id
+            }
+          }
         }
       });
 
       workers.push(worker);
-      console.log(`   ✅ ${employeeCode} - ${fullName} (${workerData.role}) - ${email}`);
+      console.log(`   ✅ ${employeeCode} - ${fullName} [${role.code}] - ${email}`);
       employeeCounter++;
 
     } catch (error) {
@@ -464,9 +482,9 @@ async function assignWorkersToGroups(workers: any[], groups: any[]) {
   // Take first 4 groups
   const targetGroups = groups.slice(0, 4);
   
-  // Split workers: 4 leaders + 16 workers
-  const leaders = workers.filter(w => w.role === Role.USER).slice(0, 4);
-  const regularWorkers = workers.filter(w => w.role === Role.WORKER);
+  // Split workers: first 4 are leaders, rest are workers
+  const leaders = workers.slice(0, 4);
+  const regularWorkers = workers.slice(4);
 
   console.log(`👑 Leaders: ${leaders.length}, 👷 Workers: ${regularWorkers.length}`);
 
@@ -614,14 +632,10 @@ async function createSampleData() {
     // Summary
     console.log('\n📊 Final Summary:');
     const userCount = await prisma.user.count();
-    const workerCount = await prisma.user.count({ where: { role: Role.WORKER } });
-    const leaderCount = await prisma.user.count({ where: { role: Role.USER, groupId: { not: null } } });
     const groupsWithLeaders = await prisma.group.count({ where: { leaderId: { not: null } } });
+    const groupsWithMembers = await prisma.group.count({ where: { users: { some: {} } } });
 
-    console.log(`   👥 Total users: ${userCount}`);
-    console.log(`   👷 Workers: ${workerCount}`);
-    console.log(`   👑 Leaders: ${leaderCount}`);
-    console.log(`   🏢 Groups with leaders: ${groupsWithLeaders}`);
+    console.log(`   👥 Total users: ${userCount}`);\n    console.log(`   🏢 Groups with leaders: ${groupsWithLeaders}`);\n    console.log(`   📦 Groups with members: ${groupsWithMembers}`);
     console.log(`   🎒 Products: ${products.length}`);
     console.log(`   ⚙️ Processes: ${processes.length}`);
     console.log(`   🔗 Mappings: ${mappingCount}`);

@@ -33,7 +33,6 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
-import { Role } from '@prisma/client';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -184,7 +183,7 @@ export class UsersController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'officeId', required: false, type: String })
   @ApiQuery({ name: 'departmentId', required: false, type: String })
-  @ApiQuery({ name: 'role', required: false, enum: Role })
+  @ApiQuery({ name: 'role', required: false, type: String, description: 'Filter by role code' })
   @ApiQuery({ name: 'isActive', required: false, type: String })
   async getAllUsers(
     @Query('page') page?: string,
@@ -192,7 +191,7 @@ export class UsersController {
     @Query('search') search?: string,
     @Query('officeId') officeId?: string,
     @Query('departmentId') departmentId?: string,
-    @Query('role') role?: Role,
+    @Query('role') role?: string,
     @Query('isActive') isActive?: string,
   ) {
     return this.usersService.getAllUsers({
@@ -216,7 +215,7 @@ export class UsersController {
   }
 
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @RequirePermissions('users:create')
   @ApiOperation({ summary: 'Create new user (SUPERADMIN/ADMIN)' })
   @ApiResponse({ status: 201, description: 'User created successfully' })
@@ -245,7 +244,7 @@ export class UsersController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @RequirePermissions('users:delete')
   @ApiOperation({ summary: 'Delete user (SUPERADMIN only)' })
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
@@ -254,7 +253,7 @@ export class UsersController {
   }
 
   @Put(':id/toggle-active')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @RequirePermissions('users:update')
   @ApiOperation({ summary: 'Toggle user active status (SUPERADMIN/ADMIN)' })
   async toggleUserActive(@Param('id', ParseUUIDPipe) id: string) {
@@ -262,7 +261,7 @@ export class UsersController {
   }
 
   @Put(':id/reset-password')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @RequirePermissions('users:update')
   @ApiOperation({
     summary: 'Reset user password to default (SUPERADMIN/ADMIN)',
@@ -274,7 +273,7 @@ export class UsersController {
   // ========== BULK IMPORT FROM EXCEL ==========
 
   @Get('import-template')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @RequirePermissions('users:view')
   @ApiOperation({ summary: 'Download Excel import template (12-column format)' })
   @ApiResponse({ 
@@ -298,7 +297,7 @@ export class UsersController {
   }
 
   @Post('bulk-create')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @RequirePermissions('users:create')
   @ApiOperation({ summary: 'Bulk create users (SUPERADMIN only)' })
   @ApiResponse({ status: 201, description: 'Users created successfully' })
@@ -307,7 +306,7 @@ export class UsersController {
   }
 
   @Post('import-excel')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @RequirePermissions('users:create')
   @UseInterceptors(FileInterceptor('file'))
   @ApiConsumes('multipart/form-data')

@@ -1,6 +1,5 @@
 import { Injectable, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { Role } from '@prisma/client';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
 import { off } from 'node:process';
 
@@ -23,7 +22,7 @@ export class HierarchyReportsService {
   /**
    * Management hierarchy view - Group by Position (chức vụ quản lý)
    */
-  private async getManagementHierarchyView(userId: string, userRole: Role, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
+  private async getManagementHierarchyView(userId: string, userRole: string, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
     // Get management positions - CHỈ dựa trên isManagement và tên chức danh
     const positions = await this.prisma.position.findMany({
       where: {
@@ -74,7 +73,7 @@ export class HierarchyReportsService {
             users: {
               some: { 
                 isActive: true,
-                role: { not: Role.WORKER },
+                // role filter removed - use roles relation,
                 ...(await this.buildUserAccessFilter(userId, userRole))
               }
             }
@@ -88,7 +87,7 @@ export class HierarchyReportsService {
             users: {
               some: { 
                 isActive: true,
-                role: { not: Role.WORKER },
+                // role filter removed - use roles relation,
                 ...(await this.buildUserAccessFilter(userId, userRole))
               }
             }
@@ -195,7 +194,7 @@ export class HierarchyReportsService {
   /**
    * Staff hierarchy view - Group by JobPosition (vị trí công việc nhân viên)
    */
-  private async getStaffHierarchyView(userId: string, userRole: Role, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
+  private async getStaffHierarchyView(userId: string, userRole: string, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
     // Get staff job positions - Loại trừ management positions
     const jobPositions = await this.prisma.jobPosition.findMany({
       where: {
@@ -227,7 +226,7 @@ export class HierarchyReportsService {
         users: {
           some: { 
             isActive: true,
-            role: { not: Role.WORKER },
+            // role filter removed - use roles relation,
             ...(await this.buildUserAccessFilter(userId, userRole))
           }
         }
@@ -344,7 +343,7 @@ export class HierarchyReportsService {
   /**
    * Mixed hierarchy view - Trả về cả positions và jobPositions
    */
-  private async getMixedHierarchyView(userId: string, userRole: Role, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
+  private async getMixedHierarchyView(userId: string, userRole: string, weekNumber: number, year: number, filters: HierarchyFilters = {}) {
     // Get both management positions and staff job positions
     const [managementView, staffView] = await Promise.all([
       this.getManagementHierarchyView(userId, userRole, weekNumber, year, filters),
@@ -382,17 +381,17 @@ export class HierarchyReportsService {
   /**
  * ENHANCED: Build user access filter with department management support
  */
-private async buildUserAccessFilter(userId: string, userRole: Role) {
-  if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+private async buildUserAccessFilter(userId: string, userRole: string) {
+  if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
     return {};
   }
   
-  if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
+  if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
     const user = await this.prisma.user.findUnique({
       where: { 
         id: userId,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
       },
       include: {
         jobPosition: {
@@ -464,13 +463,13 @@ private async buildUserAccessFilter(userId: string, userRole: Role) {
 /**
  * ENHANCED: Get subordinates with department management support
  */
-private async getSubordinates(manager: any, userRole: Role) {
-  if (userRole === Role.ADMIN || userRole === Role.SUPERADMIN) {
+private async getSubordinates(manager: any, userRole: string) {
+  if (userRole === 'ADMIN' || userRole === 'SUPERADMIN') {
     return await this.prisma.user.findMany({
       where: {
         isActive: true,
         id: { not: manager.id },
-        role: { not: Role.WORKER }
+        // role filter removed - use roles relation
       },
       include: {
         office: true,
@@ -489,13 +488,13 @@ private async getSubordinates(manager: any, userRole: Role) {
     });
   }
 
-  if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
+  if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
     // Get manager's information with managed departments
     const managerWithDepartments = await this.prisma.user.findUnique({
       where: { 
         id: manager.id,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
       },
       include: {
         jobPosition: {
@@ -531,7 +530,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         // users:{
         //   some: { 
         //     isActive: true,
-        //     role: { not: Role.WORKER },
+        //     // role filter removed - use roles relation,
         //   },
         // },
         // position: {
@@ -586,7 +585,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         isActive: true,
         id: { not: manager.id },
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
         officeId: managerWithDepartments.officeId, // Same office constraint
         OR: subordinateConditions
       },
@@ -613,7 +612,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get hierarchy view based on user role and permissions
    */
-  async getMyHierarchyView(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getMyHierarchyView(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year } = this.getWeekFilters(filters);
 
 
@@ -621,7 +620,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: { 
         id: userId,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
       },
       include: {
         office: true,
@@ -640,7 +639,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
 
     // Xác định quyền xem dựa trên role và position
-    const isAdminRole = userRole === Role.SUPERADMIN || userRole === Role.ADMIN;
+    const isAdminRole = userRole === 'SUPERADMIN' || userRole === 'ADMIN';
     const userCanViewHierarchy = user.jobPosition?.position?.canViewHierarchy === true;
 
     // Check if there are management positions and job positions accessible to user
@@ -661,7 +660,7 @@ private async getSubordinates(manager: any, userRole: Role) {
               users: {
                 some: { 
                   isActive: true,
-                  role: { not: Role.WORKER },
+                  // role filter removed - use roles relation,
                   ...(await this.buildUserAccessFilter(userId, userRole))
                 }
               }
@@ -707,7 +706,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       } else if (jobPositionCount > 0) {
         return this.getStaffHierarchyView(userId, userRole, weekNumber, year, filters);
       }
-    } else if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
+    } else if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
       if (userCanViewHierarchy) {
         if (managementPositionCount > 0 && jobPositionCount > 0) {
           return this.getMixedHierarchyView(userId, userRole, weekNumber, year, filters);
@@ -979,7 +978,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   private async getUserOfficeId(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
+      where: { id: userId, isActive: true },
       select: { officeId: true }
     });
     return user?.officeId || '';
@@ -987,7 +986,7 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   private async getUserDepartmentId(userId: string): Promise<string> {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
+      where: { id: userId, isActive: true },
       include: { jobPosition: { select: { departmentId: true } } }
     });
     return user?.jobPosition?.departmentId || '';
@@ -1078,7 +1077,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         },
         // Fix: Get users directly from office relation
         users: {
-          where: { isActive: true, role: { not: Role.WORKER } },
+          where: { isActive: true },
           include: {
             reports: {
               where: { weekNumber, year },
@@ -1130,7 +1129,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get position details
    */
-  async getPositionDetails(userId: string, userRole: Role, positionId: string, filters: HierarchyFilters = {}) {
+  async getPositionDetails(userId: string, userRole: string, positionId: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year } = this.getWeekFilters(filters);
 
     const position = await this.prisma.position.findUnique({
@@ -1216,7 +1215,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get position users list
    */
-  async getPositionUsers(userId: string, userRole: Role, positionId: string, filters: HierarchyFilters = {}) {
+  async getPositionUsers(userId: string, userRole: string, positionId: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year } = this.getWeekFilters(filters);
 
     const users = await this.prisma.user.findMany({
@@ -1225,7 +1224,7 @@ private async getSubordinates(manager: any, userRole: Role) {
           positionId: positionId
         },
         isActive: true,
-        role: { not: Role.WORKER }
+        // role filter removed - use roles relation
       },
       include: {
         office: true,
@@ -1259,11 +1258,11 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get user details
    */
-  async getUserDetails(userId: string, userRole: Role, targetUserId: string, filters: HierarchyFilters = {}) {
+  async getUserDetails(userId: string, userRole: string, targetUserId: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year, limit } = filters;
 
     const user = await this.prisma.user.findUnique({
-      where: { id: targetUserId, isActive: true, role: { not: Role.WORKER } },
+      where: { id: targetUserId, isActive: true },
       include: {
         office: true,
         jobPosition: {
@@ -1342,7 +1341,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         lastName: user.lastName,
         avatar: user.avatar,
         email: user.email,
-        role: user.role,
+        // role removed
         isActive: user.isActive,
         office: user.office,
         jobPosition: user.jobPosition
@@ -1381,7 +1380,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get employees without reports
    */
-  async getEmployeesWithoutReports(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getEmployeesWithoutReports(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year, page = 1, limit = 10 } = filters;
     const { weekNumber: currentWeek, year: currentYear } = this.getWeekFilters(filters);
 
@@ -1391,7 +1390,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         ...whereClause,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
         reports: {
           none: {
             weekNumber: currentWeek,
@@ -1420,7 +1419,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         ...whereClause,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
         reports: {
           none: {
             weekNumber: currentWeek,
@@ -1440,7 +1439,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         lastName: user.lastName,
         fullName: `${user.firstName} ${user.lastName}`,
         email: user.email,
-        role: user.role,
+        // role removed
         office: user.office,
         jobPosition: user.jobPosition,
         status: 'not_submitted' as const,
@@ -1464,7 +1463,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get employees with incomplete reports
    */
-  async getEmployeesWithIncompleteReports(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getEmployeesWithIncompleteReports(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year, page = 1, limit = 10 } = filters;
     const { weekNumber: currentWeek, year: currentYear } = this.getWeekFilters(filters);
 
@@ -1474,7 +1473,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         ...whereClause,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
         reports: {
           some: {
             weekNumber: currentWeek,
@@ -1513,7 +1512,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: {
         ...whereClause,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
         reports: {
           some: {
             weekNumber: currentWeek,
@@ -1539,7 +1538,7 @@ private async getSubordinates(manager: any, userRole: Role) {
           lastName: user.lastName,
           fullName: `${user.firstName} ${user.lastName}`,
           email: user.email,
-          role: user.role,
+          // role removed
           office: user.office,
           jobPosition: user.jobPosition,
           status: 'incomplete' as const,
@@ -1571,7 +1570,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get employees reporting status
    */
-  async getEmployeesReportingStatus(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getEmployeesReportingStatus(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year, page = 1, limit = 10, status } = filters;
     const { weekNumber: currentWeek, year: currentYear } = this.getWeekFilters(filters);
 
@@ -1615,7 +1614,7 @@ private async getSubordinates(manager: any, userRole: Role) {
         ...whereClause,
         ...statusWhere,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
       },
       include: {
         office: true,
@@ -1668,7 +1667,7 @@ private async getSubordinates(manager: any, userRole: Role) {
           lastName: user.lastName,
           fullName: `${user.firstName} ${user.lastName}`,
           email: user.email,
-          role: user.role,
+          // role removed
           office: user.office,
           jobPosition: user.jobPosition,
           status: userStatus,
@@ -1701,7 +1700,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get task completion trends
    */
-  async getTaskCompletionTrends(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getTaskCompletionTrends(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { officeId, departmentId, weeks = 4 } = filters;
     const current = getCurrentWorkWeek();
 
@@ -1775,7 +1774,7 @@ private async getSubordinates(manager: any, userRole: Role) {
   /**
    * Get incomplete reasons hierarchy analysis
    */
-  async getIncompleteReasonsHierarchy(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getIncompleteReasonsHierarchy(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     const { weekNumber, year } = this.getWeekFilters(filters);
 
     const whereClause = await this.buildUserWhereClause(userId, userRole, filters);
@@ -1867,9 +1866,9 @@ private async getSubordinates(manager: any, userRole: Role) {
 
   // Helper methods
 
-  private async buildUserWhereClause(userId: string, userRole: Role, filters: any = {}) {
+  private async buildUserWhereClause(userId: string, userRole: string, filters: any = {}) {
     const user = await this.prisma.user.findUnique({
-      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
+      where: { id: userId, isActive: true },
       include: { 
         office: true, 
         jobPosition: { 
@@ -1887,9 +1886,9 @@ private async getSubordinates(manager: any, userRole: Role) {
 
     const whereClause: any = { isActive: true };
 
-    if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+    if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
       // No additional filters for super admin/admin
-    } else if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
+    } else if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
       // Check if user has hierarchy viewing permission
       if (user.jobPosition?.position?.canViewHierarchy === true) {
         // Management user can see their department
@@ -2080,7 +2079,7 @@ private async getSubordinates(manager: any, userRole: Role) {
       where: { 
         id: userId,
         isActive: true,
-        role: { not: Role.WORKER },
+        // role filter removed - use roles relation,
       },
       include: {
         office: true,
@@ -2098,7 +2097,7 @@ private async getSubordinates(manager: any, userRole: Role) {
     }
 
     // Check permissions - admin can only view reports from their office
-    // if (currentUser.role === Role.ADMIN && targetUser.officeId !== currentUser.officeId) {
+    // if (currentUser.role === 'ADMIN' && targetUser.officeId !== currentUser.officeId) {
     //   throw new ForbiddenException('You can only view reports from your office');
     // }
 
@@ -2220,10 +2219,10 @@ private async getSubordinates(manager: any, userRole: Role) {
    * - Each group contains employee list with their task report details
    * - Optimized for frontend display and navigation
    */
-  async getManagerReports(userId: string, userRole: Role, filters: HierarchyFilters = {}) {
+  async getManagerReports(userId: string, userRole: string, filters: HierarchyFilters = {}) {
     // Get the manager's information
     const manager = await this.prisma.user.findUnique({
-      where: { id: userId, isActive: true, role: { not: Role.WORKER } },
+      where: { id: userId, isActive: true },
       include: {
         office: true,
         jobPosition: {
@@ -2329,14 +2328,14 @@ private async getSubordinates(manager: any, userRole: Role) {
    * USER: Level-based permissions (Level 1-6 can view subordinates, Level 7 cannot)
    * Special case: Trợ lý (Assistant) at Level 5 has no viewing rights
    */
-  private checkManagerPermissions(user: any, userRole: Role): boolean {
+  private checkManagerPermissions(user: any, userRole: string): boolean {
     // ADMIN (Tổng Giám Đốc) and SUPERADMIN always have management permissions
-    if (userRole === Role.ADMIN || userRole === Role.SUPERADMIN) {
+    if (userRole === 'ADMIN' || userRole === 'SUPERADMIN') {
       return true;
     }
 
     // USER Role: Check level-based permissions
-    if (userRole === Role.USER || userRole === Role.MEDICAL_STAFF) {
+    if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
       const position = user.jobPosition?.position;
       const level = position?.level;
 

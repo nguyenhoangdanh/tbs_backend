@@ -186,7 +186,6 @@ export class AuthController {
         const newPayload = {
           sub: user.id,
           employeeCode: user.employeeCode,
-          role: user.role,
         };
         const accessToken = this.jwtService.sign(newPayload, {
           expiresIn: '7d',

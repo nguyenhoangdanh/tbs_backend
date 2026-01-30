@@ -19,7 +19,6 @@ import {
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { PositionService } from '../services/position.service';
 import { CreatePositionDto } from '../dto/position/create-position.dto';
 import { UpdatePositionDto } from '../dto/position/update-position.dto';
@@ -33,7 +32,7 @@ export class PositionController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new position' })
   @ApiResponse({ status: 201, description: 'Position created successfully' })
@@ -64,7 +63,7 @@ export class PositionController {
 
   @Put(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update position' })
   @ApiResponse({ status: 200, description: 'Position updated successfully' })
   update(
@@ -76,7 +75,7 @@ export class PositionController {
 
   @Delete(':id')
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete position' })
   @ApiResponse({ status: 200, description: 'Position deleted successfully' })
   remove(@Param('id') id: string) {

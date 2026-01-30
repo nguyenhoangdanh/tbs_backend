@@ -126,7 +126,7 @@ export class TeamService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
               orderBy: { employeeCode: 'asc' },
             },
@@ -181,7 +181,7 @@ export class TeamService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         members: options.includeMembers
@@ -192,7 +192,7 @@ export class TeamService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
               orderBy: { employeeCode: 'asc' },
             }

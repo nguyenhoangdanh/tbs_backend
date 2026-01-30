@@ -13,7 +13,6 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 
 @ApiTags('hierarchy-reports')
 @Controller('hierarchy-reports')
@@ -64,7 +63,7 @@ export class HierarchyReportsController {
 
   @Get('offices-overview')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get offices overview (Admin/Superadmin only)' })
   @ApiResponse({ status: 200, description: 'Offices overview retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Week number' })
@@ -201,7 +200,7 @@ export class HierarchyReportsController {
 
   @Get('employees-without-reports')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees without reports' })
   @ApiResponse({ status: 200, description: 'Employees without reports retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Week number' })
@@ -251,7 +250,7 @@ export class HierarchyReportsController {
 
   @Get('employees-incomplete-reports')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees with incomplete reports' })
   @ApiResponse({ status: 200, description: 'Employees with incomplete reports retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Week number' })
@@ -301,7 +300,7 @@ export class HierarchyReportsController {
 
   @Get('employees-reporting-status')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees reporting status' })
   @ApiResponse({ status: 200, description: 'Employees reporting status retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Week number' })
@@ -357,7 +356,7 @@ export class HierarchyReportsController {
 
   @Get('task-completion-trends')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get task completion trends' })
   @ApiResponse({ status: 200, description: 'Task completion trends retrieved successfully' })
   @ApiQuery({ name: 'officeId', required: false, description: 'Office ID' })
@@ -392,7 +391,7 @@ export class HierarchyReportsController {
 
   @Get('incomplete-reasons-hierarchy')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get incomplete reasons hierarchy analysis' })
   @ApiResponse({ status: 200, description: 'Incomplete reasons hierarchy analysis retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Week number' })
@@ -461,7 +460,7 @@ export class HierarchyReportsController {
    */
   @Get('user/:userId/report/:reportId')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get specific report details for admin view' })
   @ApiParam({ name: 'userId', description: 'User ID' })
   @ApiParam({ name: 'reportId', description: 'Report ID' })

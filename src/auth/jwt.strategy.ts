@@ -74,6 +74,18 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
               },
             },
           },
+          roles: {
+            where: { isActive: true },
+            include: {
+              roleDefinition: {
+                select: {
+                  id: true,
+                  code: true,
+                  name: true,
+                },
+              },
+            },
+          },
         },
       });
 

@@ -59,7 +59,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         _count: {
@@ -104,7 +104,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         members: options.includeMembers
@@ -115,7 +115,7 @@ export class GroupService {
                 employeeCode: true,
                 firstName: true,
                 lastName: true,
-                role: true,
+                // role removed
               },
               orderBy: { employeeCode: 'asc' },
             }
@@ -150,7 +150,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
             phone: true,
             email: true,
           },
@@ -162,7 +162,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
             phone: true,
             email: true,
           },
@@ -233,7 +233,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         _count: {
@@ -288,7 +288,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         _count: {
@@ -380,7 +380,7 @@ export class GroupService {
           employeeCode: true,
           firstName: true,
           lastName: true,
-          role: true,
+          // role removed
         },
       });
 
@@ -539,7 +539,7 @@ export class GroupService {
         employeeCode: true,
         firstName: true,
         lastName: true,
-        role: true,
+        // role removed
       },
     });
   }
@@ -665,7 +665,7 @@ export class GroupService {
             employeeCode: true,
             firstName: true,
             lastName: true,
-            role: true,
+            // role removed
           },
         },
         members: {

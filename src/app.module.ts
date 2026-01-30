@@ -7,14 +7,12 @@ import { ReportsModule } from './reports/reports.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { HierarchyReportsModule } from './hierarchy-reports/hierarchy-reports.module';
 import { TaskEvaluationsModule } from './task-evaluations/task-evaluations.module';
-import { EnvironmentConfig } from './config/config.environment';
 import { ConfigModule } from '@nestjs/config'; // ⭐ Ensure correct import
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
-import { CloudflareR2Service } from './common/r2.service';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { WorksheetModule } from './modules/worksheet/worksheet.module';
 import { WebSocketModule } from './modules/websocket/websocket.module';

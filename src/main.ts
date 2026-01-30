@@ -19,9 +19,6 @@ async function bootstrap() {
   try {
     const nodeEnv = process.env.NODE_ENV || 'development';
 
-    console.log('🚀 Starting Weekly Report Backend...');
-    console.log(`📍 Environment: ${nodeEnv}`);
-    
     // Add cron job status logging for Railway
     if (nodeEnv === 'production') {
       console.log('⏰ Cron jobs enabled in production');
@@ -29,12 +26,6 @@ async function bootstrap() {
       console.log('🔧 Cron expression: 0 18 * * 4 (18:00 UTC Thursday)');
     }
 
-    console.log(`🔗 Database URL configured: ${!!process.env.DATABASE_URL}`);
-
-    // Enhanced environment debugging
-    console.log('🔍 Environment configuration:');
-    console.log(`   NODE_ENV: ${process.env.NODE_ENV}`);
-    console.log(`   PORT: ${process.env.PORT || '8080'}`);
 
     // Log database connection info (masked)
     if (process.env.DATABASE_URL) {
@@ -103,8 +94,7 @@ async function bootstrap() {
     app.enableCors({
       origin: (origin, callback) => {
         const allowedOrigins = [
-          'https://weeklyreport-orpin.vercel.app',
-          'https://weeklyreportsystem-mu.vercel.app', 
+          'https://thtxts.vercel.app',
           'http://localhost:3000',
           'http://10.45.2.125:3000',
           'http://127.0.0.1:3000'
@@ -164,14 +154,9 @@ async function bootstrap() {
       preflightContinue: false,
     });
     
-    console.log('✅ CORS configuration applied (production-optimized)');
-    console.log(`🌐 Primary origin: https://weeklyreport-orpin.vercel.app`);
-    console.log(`🍪 Credentials enabled: true`);
-    console.log(`🔒 Cookie settings: secure=${nodeEnv === 'production'}, sameSite=${nodeEnv === 'production' ? 'none' : 'lax'}`);
-
     app.setGlobalPrefix('api', {
       exclude: [
-        { path: '', method: RequestMethod.GET }, // Root path
+        { path: '/', method: RequestMethod.GET }, // Root path
         { path: 'health', method: RequestMethod.GET }, // Health endpoint for Railway
       ],
     });
@@ -180,13 +165,18 @@ async function bootstrap() {
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
-        forbidNonWhitelisted: true,
+        forbidNonWhitelisted: true, // ✅ Bật lại
         transform: true,
         transformOptions: {
           enableImplicitConversion: true,
         },
         exceptionFactory: (errors) => {
-          console.log('Validation errors:', errors);
+          console.error('❌ VALIDATION ERRORS:', JSON.stringify(errors, null, 2));
+          errors.forEach(error => {
+            console.error(`  Field: ${error.property}`);
+            console.error(`  Value: ${error.value}`);
+            console.error(`  Constraints:`, error.constraints);
+          });
           return new BadRequestException(
             errors.map((error) => ({
               property: error.property,
@@ -295,8 +285,7 @@ export default async (req: any, res: any) => {
     const allowedOrigins = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'https://weeklyreportsystem-mu.vercel.app',
-      'https://weeklyreport-orpin.vercel.app',
+      'https://thtxts.vercel.app'
     ];
 
     const origin = req.headers.origin;

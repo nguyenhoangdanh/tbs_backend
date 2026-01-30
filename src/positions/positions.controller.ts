@@ -14,7 +14,6 @@ import { CreatePositionDto } from './dto/create-position.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('positions')
@@ -24,7 +23,7 @@ export class PositionsController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() createPositionDto: CreatePositionDto) {
     return this.positionsService.create(createPositionDto);
@@ -44,7 +43,7 @@ export class PositionsController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete position' })
   @ApiResponse({ status: 200, description: 'Position deleted successfully' })
   remove(@Param('id') id: string) {

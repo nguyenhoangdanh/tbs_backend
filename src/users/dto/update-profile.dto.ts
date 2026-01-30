@@ -8,7 +8,7 @@ import {
   IsDateString,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Role, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
 
 export class UpdateProfileDto {
   @ApiProperty({ description: 'Employee code', required: false })
@@ -81,13 +81,13 @@ export class UpdateProfileDto {
   positionId?: string;
 
   @ApiProperty({
-    description: 'User role',
+    description: 'User role code (deprecated - use RoleDefinition system)',
     required: false,
-    enum: Role,
+    type: String,
   })
   @IsOptional()
-  @IsEnum(Role)
-  role?: Role;
+  @IsString()
+  role?: string;
 
   @ApiProperty({ description: 'Avatar', required: false })
   @IsOptional()

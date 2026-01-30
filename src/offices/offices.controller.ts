@@ -14,7 +14,6 @@ import { CreateOfficeDto } from './dto/create-office.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('offices')
@@ -24,7 +23,7 @@ export class OfficesController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() createOfficeDto: CreateOfficeDto) {
     return this.officesService.create(createOfficeDto);
@@ -44,7 +43,7 @@ export class OfficesController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete office' })
   @ApiResponse({ status: 200, description: 'Office deleted successfully' })
   remove(@Param('id') id: string) {

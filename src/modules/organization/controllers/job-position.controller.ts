@@ -18,7 +18,6 @@ import {
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 import { JobPositionService } from '../services/job-position.service';
 import { CreateJobPositionDto } from '../dto/job-position/create-job-position.dto';
 import { UpdateJobPositionDto } from '../dto/job-position/update-job-position.dto';
@@ -31,7 +30,7 @@ export class JobPositionController {
   constructor(private readonly jobPositionService: JobPositionService) {}
 
   @Post()
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create a new job position' })
   @ApiResponse({
     status: 201,
@@ -70,7 +69,7 @@ export class JobPositionController {
   }
 
   @Patch(':id')
-  @Roles(Role.SUPERADMIN, Role.ADMIN)
+  @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Update job position' })
   @ApiResponse({
     status: 200,
@@ -84,7 +83,7 @@ export class JobPositionController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete job position' })
   @ApiResponse({
     status: 200,

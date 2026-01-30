@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../common/prisma.service';
 import { CloudflareR2Service } from '../common/r2.service';
 import { PermissionsService } from '../common/permissions.service';
-import { Role, Sex } from '@prisma/client';
+import { Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as XLSX from 'xlsx';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -21,7 +21,7 @@ interface GetAllUsersParams {
   search?: string;
   officeId?: string;
   departmentId?: string;
-  role?: Role;
+  role?: string;
   isActive?: boolean;
 }
 
@@ -151,22 +151,17 @@ export class UsersService {
             department: true,
           },
         },
-        customPermissions: {
-          include: {
-            permission: true,
-          },
-        },
       },
     });
 
-    if (!user) {
-      throw new NotFoundException('User not found');
-    }
+if (!user) {
+  throw new NotFoundException('User not found');
+}
 
-    const { password, ...userWithoutPassword } = user;
-    
-    // ⭐ Department ID acts as Line ID for production departments
-    let departmentId: string | null = null;
+const { password, ...userWithoutPassword } = user;
+
+// ⭐ Department ID acts as Line ID for production departments
+let departmentId: string | null = null;
     
     // 1. If user has group, get department from group.team.department
     if (user.group?.team?.department?.id) {
@@ -185,13 +180,6 @@ export class UsersService {
       }
     }
 
-    // Build custom permissions array
-    const customPermissions = user.customPermissions.map(up => ({
-      resource: up.permission.resource,
-      action: up.permission.action,
-      isGranted: up.isGranted,
-    }));
-
     // Get full permissions (role + custom merged)
     const permissions = await this.permissionsService.getUserPermissions(user.id);
     
@@ -199,7 +187,6 @@ export class UsersService {
       ...userWithoutPassword,
       isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
       departmentId, // ⭐ Department ID (= Line ID for production departments)
-      customPermissions, // ⭐ User's custom permissions
       permissions, // ⭐ Full merged permissions (role + custom)
     };
   }
@@ -262,7 +249,7 @@ export class UsersService {
     }
 
     // Check role permission - only SUPERADMIN can change role
-    if (updateProfileDto.role && currentUser.role !== Role.SUPERADMIN) {
+    if (updateProfileDto.role && currentUser.role !== 'SUPERADMIN') {
       throw new ForbiddenException('Only SUPERADMIN can change user roles');
     }
 
@@ -514,7 +501,7 @@ export class UsersService {
 
           // ⭐ Determine role based on Position (CD)
           // CN (Công nhân) = WORKER, others = USER
-          const role = cd.toUpperCase() === 'CN' ? Role.WORKER : Role.USER;
+          const role = cd.toUpperCase() === 'CN' ? 'WORKER' : 'USER';
 
           // Lookup Office by name (Trực thuộc)
           const office = offices.find(

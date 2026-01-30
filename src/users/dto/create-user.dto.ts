@@ -8,7 +8,6 @@ import {
   Length,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { Role } from '@prisma/client';
 
 export class CreateUserDto {
   @ApiProperty({
@@ -56,12 +55,12 @@ export class CreateUserDto {
 
   @ApiProperty({
     example: 'USER',
-    description: 'User role',
-    enum: Role,
+    description: 'User role code (deprecated - use RoleDefinition system)',
+    type: String,
   })
-  @IsEnum(Role)
+  @IsString()
   @IsOptional()
-  role?: Role;
+  role?: string;
 
   @ApiProperty({
     example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',

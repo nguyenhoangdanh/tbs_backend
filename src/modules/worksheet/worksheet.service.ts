@@ -4,7 +4,7 @@ import { CreateWorksheetDto } from './dto/create-worksheet.dto';
 import { UpdateWorksheetDto } from './dto/update-worksheet.dto';
 import { UpdateWorksheetRecordDto } from './dto/update-worksheet-record.dto';
 import { BatchUpdateByHourDto, HourWorkerOutputDto } from './dto/batch-update-by-hour.dto';
-import { Role, ShiftType, WorkSheetStatus, WorkRecordStatus } from '@prisma/client';
+import { ShiftType, WorkSheetStatus, WorkRecordStatus } from '@prisma/client';
 import { WorksheetGateway } from './worksheet.gateway';
 
 @Injectable()
@@ -22,12 +22,12 @@ export class WorksheetService {
    */
   private async canAccessGroup(
     userId: string,
-    userRole: Role,
+    userRole: string,
     groupId: string,
     groupLeaderId?: string | null
   ): Promise<boolean> {
     // SUPERADMIN/ADMIN can access all
-    if (userRole === Role.SUPERADMIN || userRole === Role.ADMIN) {
+    if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
       return true;
     }
 
@@ -37,7 +37,7 @@ export class WorksheetService {
     }
 
     // For USER role, check if they're in the same department as the group
-    if (userRole === Role.USER) {
+    if (userRole === 'USER') {
       const [user, group] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
@@ -610,7 +610,7 @@ export class WorksheetService {
     date?: Date;
     status?: string;
     userId?: string;
-    userRole?: Role;
+    userRole?: string;
   }) {
     const where: any = {};
 
@@ -680,7 +680,7 @@ export class WorksheetService {
     // - WORKER with position "CN": Already filtered by groupId in controller
     // - USER (Nhóm trưởng): Can see all worksheets in their department (via departmentId filter)
     // - Note: departmentId filter is already handled above (lines 577-606)
-    if (filters.userRole === Role.USER && filters.userId && !filters.departmentId) {
+    if (filters.userRole === 'USER' && filters.userId && !filters.departmentId) {
       // If USER role but no departmentId filter provided, fall back to group leader logic
       console.log('[WorksheetService] USER role without departmentId - checking group leadership');
       
@@ -866,8 +866,8 @@ export class WorksheetService {
 
     // Check permissions
     const canAccess = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.createdById === user.id ||
       worksheet.group.leader?.id === user.id ||
       worksheet.workerId === user.id;
@@ -924,8 +924,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.createdById === user.id ||
       worksheet.group.leader?.id === user.id;
 
@@ -1199,8 +1199,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
@@ -1263,7 +1263,7 @@ export class WorksheetService {
     }
 
     // Only admin can delete
-    if (user.role !== Role.SUPERADMIN && user.role !== Role.ADMIN) {
+    if (user.role !== 'SUPERADMIN' && user.role !== 'ADMIN') {
       throw new ForbiddenException('Only admin can delete worksheets');
     }
 
@@ -1287,8 +1287,8 @@ export class WorksheetService {
 
     // Check permissions
     const canComplete = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canComplete) {
@@ -1397,8 +1397,8 @@ export class WorksheetService {
 
     // Check permissions
     const canView = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canView) {
@@ -1564,7 +1564,7 @@ export class WorksheetService {
    */
   async archiveOldWorksheets(beforeDate?: Date, user?: any) {
     // Only admin can archive
-    if (user && user.role !== Role.SUPERADMIN && user.role !== Role.ADMIN) {
+    if (user && user.role !== 'SUPERADMIN' && user.role !== 'ADMIN') {
       throw new ForbiddenException('Only admin can archive worksheets');
     }
 
@@ -1622,8 +1622,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === Role.SUPERADMIN ||
-      user.role === Role.ADMIN ||
+      user.role === 'SUPERADMIN' ||
+      user.role === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
@@ -1984,7 +1984,7 @@ export class WorksheetService {
     officeId?: string;
     date?: Date;
     userId?: string;
-    userRole?: Role;
+    userRole?: string;
   }) {
     const dateObj = filters.date || new Date();
     const startOfDay = new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate());
@@ -2002,7 +2002,7 @@ export class WorksheetService {
     }
 
     // Role-based filtering
-    if (filters.userRole === Role.USER && filters.userId) {
+    if (filters.userRole === 'USER' && filters.userId) {
       const ledGroups = await this.prisma.group.findMany({
         where: { leaderId: filters.userId },
         select: { id: true }
@@ -2188,7 +2188,7 @@ export class WorksheetService {
     teamId?: string;
     groupId?: string;
     userId?: string;
-    userRole?: Role;
+    userRole?: string;
   }) {
     const dateObj = new Date(filters.date);
     
@@ -2228,7 +2228,7 @@ export class WorksheetService {
     }
 
     // Permission check for regular users (group leaders)
-    if (filters.userRole === Role.USER && filters.userId) {
+    if (filters.userRole === 'USER' && filters.userId) {
       const myGroups = await this.prisma.group.findMany({
         where: { leaderId: filters.userId },
         select: { id: true }

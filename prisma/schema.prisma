@@ -94,9 +94,7 @@ model User {
   dateOfBirth        DateTime?                  @db.Date
   address            String?
   sex                Sex?
-  role               Role                       @default(USER) // ⚠️ DEPRECATED: Keep for backward compatibility, will migrate to roles table
-  customPermissions  UserPermission[]           @relation("UserCustomPermissions")
-  roles              UserRole[]                 @relation("UserRoles") // ⭐ NEW: Multiple roles support
+  roles              UserRole[]                 @relation("UserRoles") // Multiple roles support
   jobPositionId      String
   isActive           Boolean                    @default(false)
   officeId           String
@@ -125,7 +123,6 @@ model User {
   @@index([jobPositionId])
   @@index([officeId])
   @@index([isActive])
-  @@index([role])
   @@index([firstName, lastName])
   @@index([groupId])
   @@map("users")
@@ -487,21 +484,50 @@ model GatePassApproval {
 
 // -------------------------------------Medical Management-------------------------------------
 // 1. Quản lý thuốc cơ bản
+// Danh mục y tế (bao gồm: thuốc, vật tư y tế, cấp cứu)
+model MedicineCategory {
+  id          String     @id @default(uuid())
+  code        String     @unique // "I", "II", "IX", "XIII", "XV", "XVI", "XVII"
+  name        String // "NHÓM THUỐC HẠ SỐT...", "CẤP CỨU", "VẬT TƯ Y TẾ"
+  type        MedicalItemType @default(MEDICINE) // Loại: MEDICINE, EMERGENCY_SUPPLY, MEDICAL_EQUIPMENT
+  description String?
+  sortOrder   Int        @default(0) // Thứ tự hiển thị
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  medicines   Medicine[]
+
+  @@index([isActive])
+  @@index([sortOrder])
+  @@map("medicine_categories")
+}
+
 model Medicine {
-  id            String                @id @default(uuid())
-  name          String                @unique
-  strength      String? // Hàm lượng
-  dosage        String? // Liều dùng: ví dụ "2 viên", "1 thìa"
-  frequency     String? // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày"
-  instructions  String? // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
-  units         String? // Đơn vị: "viên", "chai", "lọ"
-  isActive      Boolean               @default(true)
-  createdAt     DateTime              @default(now())
-  updatedAt     DateTime              @updatedAt
-  prescriptions MedicalPrescription[]
+  id           String                @id @default(uuid())
+  name         String // Tên thuốc/vật tư y tế
+  type         MedicalItemType       @default(MEDICINE) // MEDICINE, EMERGENCY_SUPPLY, MEDICAL_EQUIPMENT
+  categoryId   String? // Thuộc nhóm nào (I-XVII)
+  route        String? // Đường dùng: "UỐNG", "NHỎ MẮT", "BÔI", "DÁN" (chỉ cho MEDICINE)
+  strength     String? // Hàm lượng: "500mg", "10ml"
+  manufacturer String? // Nơi sản xuất
+  dosage       String? // Liều dùng: ví dụ "2 viên", "1 thìa" (chỉ cho MEDICINE)
+  frequency    String? // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày" (chỉ cho MEDICINE)
+  instructions String? // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
+  units        String? // Đơn vị tính: "viên", "chai", "lọ", "hộp", "cái", "miếng"
+  isActive     Boolean               @default(true)
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+
+  category            MedicineCategory?     @relation(fields: [categoryId], references: [id])
+  prescriptions       MedicalPrescription[]
+  inventoryBalances   MedicineInventory[] // Tồn kho theo tháng
+  inventoryTransactions InventoryTransaction[] // Lịch sử xuất/nhập
 
   @@index([isActive])
   @@index([name])
+  @@index([type])
+  @@index([categoryId])
+  @@index([type, categoryId])
   @@map("medicines")
 }
 
@@ -555,6 +581,106 @@ model MedicalPrescription {
   @@map("medical_prescriptions")
 }
 
+// 4. Quản lý tồn kho thuốc theo tháng
+model MedicineInventory {
+  id                    String    @id @default(uuid())
+  medicineId            String
+  month                 Int // 1-12
+  year                  Int // 2024, 2025
+  expiryDate            DateTime? @db.Date // Hạn sử dụng
+  
+  // Tồn đầu kỳ
+  openingQuantity       Decimal   @default(0) @db.Decimal(30, 20) // Số lượng
+  openingUnitPrice      Decimal   @default(0) @db.Decimal(30, 20) // Đơn giá
+  openingTotalAmount    Decimal   @default(0) @db.Decimal(30, 20) // Thành tiền
+  
+  // Phát sinh trong tháng - Nhập
+  monthlyImportQuantity   Decimal @default(0) @db.Decimal(30, 20)
+  monthlyImportUnitPrice  Decimal @default(0) @db.Decimal(30, 20)
+  monthlyImportAmount     Decimal @default(0) @db.Decimal(30, 20)
+  
+  // Phát sinh trong tháng - Xuất
+  monthlyExportQuantity   Decimal @default(0) @db.Decimal(30, 20)
+  monthlyExportUnitPrice  Decimal @default(0) @db.Decimal(30, 20)
+  monthlyExportAmount     Decimal @default(0) @db.Decimal(30, 20)
+  
+  // Tồn cuối kỳ
+  closingQuantity       Decimal   @default(0) @db.Decimal(30, 20)
+  closingUnitPrice      Decimal   @default(0) @db.Decimal(30, 20)
+  closingTotalAmount    Decimal   @default(0) @db.Decimal(30, 20)
+  
+  // Lũy kế năm - Nhập
+  yearlyImportQuantity  Decimal   @default(0) @db.Decimal(30, 20)
+  yearlyImportUnitPrice Decimal   @default(0) @db.Decimal(30, 20)
+  yearlyImportAmount    Decimal   @default(0) @db.Decimal(30, 20)
+  
+  // Lũy kế năm - Xuất
+  yearlyExportQuantity  Decimal   @default(0) @db.Decimal(30, 20)
+  yearlyExportUnitPrice Decimal   @default(0) @db.Decimal(30, 20)
+  yearlyExportAmount    Decimal   @default(0) @db.Decimal(30, 20)
+  
+  // Đề nghị mua tháng sau
+  suggestedPurchaseQuantity  Decimal @default(0) @db.Decimal(30, 20)
+  suggestedPurchaseUnitPrice Decimal @default(0) @db.Decimal(30, 20)
+  suggestedPurchaseAmount    Decimal @default(0) @db.Decimal(30, 20)
+  
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+  
+  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  
+  @@unique([medicineId, month, year])
+  @@index([medicineId])
+  @@index([month, year])
+  @@index([year])
+  @@map("medicine_inventories")
+}
+
+// 5. Lịch sử giao dịch xuất/nhập kho
+model InventoryTransaction {
+  id                String              @id @default(uuid())
+  medicineId        String
+  type              InventoryTransactionType // IMPORT, EXPORT, ADJUSTMENT
+  quantity          Decimal             @db.Decimal(30, 20)
+  unitPrice         Decimal             @db.Decimal(30, 20)
+  totalAmount       Decimal             @db.Decimal(30, 20)
+  transactionDate   DateTime            @default(now())
+  
+  // Thông tin liên quan
+  referenceType     String? // "MEDICAL_RECORD", "PURCHASE_ORDER", "MANUAL"
+  referenceId       String? // ID của medical record hoặc purchase order
+  
+  expiryDate        DateTime?           @db.Date // Hạn sử dụng (cho nhập kho)
+  batchNumber       String? // Số lô (cho nhập kho)
+  supplier          String? // Nhà cung cấp (cho nhập kho)
+  
+  notes             String?
+  createdBy         String? // User ID người tạo giao dịch
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  
+  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  
+  @@index([medicineId])
+  @@index([type])
+  @@index([transactionDate])
+  @@index([referenceType, referenceId])
+  @@map("inventory_transactions")
+}
+
+enum MedicalItemType {
+  MEDICINE           // Thuốc (I-XIV, XVII)
+  EMERGENCY_SUPPLY   // Cấp cứu (XV)
+  MEDICAL_EQUIPMENT  // Vật tư y tế (XVI)
+}
+
+enum InventoryTransactionType {
+  IMPORT       // Nhập kho
+  EXPORT       // Xuất kho (kê đơn)
+  ADJUSTMENT   // Điều chỉnh (kiểm kê, hỏng hóc)
+}
+
+
 enum ShiftType {
   NORMAL_8H
   EXTENDED_9_5H
@@ -571,14 +697,6 @@ enum WorkRecordStatus {
   PENDING
   IN_PROGRESS
   COMPLETED
-}
-
-enum Role {
-  SUPERADMIN
-  ADMIN
-  USER
-  WORKER
-  MEDICAL_STAFF
 }
 
 enum Sex {
@@ -719,47 +837,12 @@ model Permission {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  rolePermissions           RolePermission[]           @relation("LegacyRolePermissions") // ⚠️ DEPRECATED: Keep for backward compatibility
-  userPermissions           UserPermission[]
-  roleDefinitionPermissions RoleDefinitionPermission[] // ⭐ NEW
+  roleDefinitionPermissions RoleDefinitionPermission[]
 
   @@unique([resource, action])
   @@index([resource])
   @@index([action])
   @@map("permissions")
-}
-
-model RolePermission {
-  id           String   @id @default(uuid())
-  role         Role
-  permissionId String
-  isGranted    Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  permission Permission @relation("LegacyRolePermissions", fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@unique([role, permissionId])
-  @@index([role])
-  @@index([permissionId])
-  @@map("role_permissions")
-}
-
-model UserPermission {
-  id           String   @id @default(uuid())
-  userId       String
-  permissionId String
-  isGranted    Boolean  @default(true) // true = grant, false = revoke
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  user       User       @relation("UserCustomPermissions", fields: [userId], references: [id], onDelete: Cascade)
-  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, permissionId])
-  @@index([userId])
-  @@index([permissionId])
-  @@map("user_permissions")
 }
 
 // ========== ANONYMOUS FEEDBACK SYSTEM ==========

@@ -30,7 +30,6 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
-import { Role } from '@prisma/client';
 
 @ApiTags('reports')
 @ApiBearerAuth()
@@ -147,7 +146,7 @@ export class ReportsController {
   // Admin endpoints
   @Get('admin/all')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Lấy tất cả báo cáo (Admin)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
@@ -166,7 +165,7 @@ export class ReportsController {
 
   @Get('admin/stats')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Lấy thống kê báo cáo (Admin)' })
   @ApiQuery({ name: 'weekNumber', required: false, type: Number })
   @ApiQuery({ name: 'year', required: false, type: Number })
@@ -179,7 +178,7 @@ export class ReportsController {
 
   @Post('admin/lock-reports/:weekNumber/:year')
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Khóa báo cáo theo tuần (Admin)' })
   @ApiParam({ name: 'weekNumber', type: Number })
   @ApiParam({ name: 'year', type: Number })

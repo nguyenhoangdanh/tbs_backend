@@ -278,7 +278,7 @@ export class ReportsService {
               firstName: true,
               lastName: true,
               email: true,
-              role: true,
+              // role removed
               jobPosition: {
                 include: {
                   department: {

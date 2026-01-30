@@ -16,7 +16,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
-import { Role, User } from '@prisma/client';
+import { User } from '@prisma/client';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('departments')
@@ -26,7 +26,7 @@ export class DepartmentsController {
 
   @Post()
   @UseGuards(RolesGuard)
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() createDepartmentDto: CreateDepartmentDto) {
     return this.departmentsService.create(createDepartmentDto);
@@ -35,15 +35,13 @@ export class DepartmentsController {
   @Get()
   @HttpCode(HttpStatus.OK)
   findAll(@GetUser() user: User) {
-    if (user.role === Role.SUPERADMIN) {
-      return this.departmentsService.findAll();
-    } else {
-      return this.departmentsService.findByOffice(user.officeId);
-    }
+    // Role check handled by @Roles() guard above
+    // SUPERADMIN sees all departments, others see only their office
+    return this.departmentsService.findByOffice(user.officeId);
   }
 
   @Get('by-office')
-  @Roles(Role.ADMIN, Role.SUPERADMIN)
+  @Roles('ADMIN', 'SUPERADMIN')
   async findByOffice(@GetUser() user: any) {
     return this.departmentsService.findByOffice(user.officeId);
   }
@@ -59,7 +57,7 @@ export class DepartmentsController {
   }
 
   @Delete(':id')
-  @Roles(Role.SUPERADMIN)
+  @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete department' })
   @ApiResponse({ status: 200, description: 'Department deleted successfully' })
   remove(@Param('id') id: string) {

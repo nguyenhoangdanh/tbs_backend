@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
-import { group } from 'node:console';
+import { InventoryService } from './inventory.service';
+import { InventoryTransactionTypeDto } from './dto/inventory.dto';
 
 /*
  * HEALTHCARE TERMINOLOGY CLARIFICATION:
@@ -18,7 +19,10 @@ import { group } from 'node:console';
 
 @Injectable()
 export class HealthcareService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private inventoryService: InventoryService
+  ) {}
 
   // Dashboard statistics for healthcare
   async getDashboardStats() {
@@ -292,23 +296,59 @@ export class HealthcareService {
       dispensedBy: data.doctorId
     })) || [];
 
-    return this.prisma.medicalRecord.create({
-      data: {
-        ...recordData,
-        visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
-        prescriptions: prescriptionCreateData.length > 0 ? {
-          create: prescriptionCreateData
-        } : undefined
-      },
-      include: {
-        patient: { select: { firstName: true, lastName: true, employeeCode: true } },
-        doctor: { select: { firstName: true, lastName: true, employeeCode: true } },
-        prescriptions: {
-          include: {
-            medicine: true
+    return this.prisma.$transaction(async (prisma) => {
+      // 1. Tạo medical record
+      const medicalRecord = await prisma.medicalRecord.create({
+        data: {
+          ...recordData,
+          visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
+          prescriptions: prescriptionCreateData.length > 0 ? {
+            create: prescriptionCreateData
+          } : undefined
+        },
+        include: {
+          patient: { select: { firstName: true, lastName: true, employeeCode: true } },
+          doctor: { select: { firstName: true, lastName: true, employeeCode: true } },
+          prescriptions: {
+            include: {
+              medicine: true
+            }
+          }
+        }
+      });
+
+      // 2. Tự động trừ tồn kho cho mỗi prescription
+      if (prescriptions && prescriptions.length > 0) {
+        for (const prescription of prescriptions) {
+          try {
+            // Lấy thông tin tồn kho hiện tại
+            const currentStock = await this.inventoryService.getCurrentStock(prescription.medicineId);
+            
+            if (currentStock.currentStock < prescription.quantity) {
+              console.warn(`Warning: Medicine ${prescription.medicineId} has insufficient stock. Current: ${currentStock.currentStock}, Required: ${prescription.quantity}`);
+              // Có thể throw error hoặc tiếp tục tùy yêu cầu
+              // throw new BadRequestException(`Thuốc không đủ tồn kho. Tồn: ${currentStock.currentStock}, Cần: ${prescription.quantity}`);
+            }
+
+            // Tạo transaction xuất kho
+            await this.inventoryService.createInventoryTransaction({
+              medicineId: prescription.medicineId,
+              type: InventoryTransactionTypeDto.EXPORT,
+              quantity: prescription.quantity,
+              unitPrice: currentStock.unitPrice || 0,
+              referenceType: 'MEDICAL_RECORD',
+              referenceId: medicalRecord.id,
+              notes: `Xuất thuốc theo đơn - BS: ${data.doctorId}`,
+              createdBy: data.doctorId
+            });
+          } catch (error) {
+            console.error(`Error creating inventory transaction for medicine ${prescription.medicineId}:`, error);
+            // Không throw error để không rollback toàn bộ transaction
           }
         }
       }
+
+      return medicalRecord;
     });
   }
 
@@ -455,36 +495,69 @@ export class HealthcareService {
       dispensedBy: data.doctorId
     })) || [];
 
-    return this.prisma.medicalRecord.create({
-      data: {
-        ...recordData,
-        patientId: patient.id,
-        visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
-        prescriptions: prescriptionCreateData.length > 0 ? {
-          create: prescriptionCreateData
-        } : undefined
-      },
-      include: {
-        patient: { 
-          select: { 
-            firstName: true, 
-            lastName: true, 
-            employeeCode: true 
-          } 
+    return this.prisma.$transaction(async (prisma) => {
+      // 1. Tạo medical record
+      const medicalRecord = await prisma.medicalRecord.create({
+        data: {
+          ...recordData,
+          patientId: patient.id,
+          visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
+          prescriptions: prescriptionCreateData.length > 0 ? {
+            create: prescriptionCreateData
+          } : undefined
         },
-        doctor: { 
-          select: { 
-            firstName: true, 
-            lastName: true, 
-            employeeCode: true 
-          } 
-        },
-        prescriptions: {
-          include: {
-            medicine: true
+        include: {
+          patient: { 
+            select: { 
+              firstName: true, 
+              lastName: true, 
+              employeeCode: true 
+            } 
+          },
+          doctor: { 
+            select: { 
+              firstName: true, 
+              lastName: true, 
+              employeeCode: true 
+            } 
+          },
+          prescriptions: {
+            include: {
+              medicine: true
+            }
+          }
+        }
+      });
+
+      // 2. Tự động trừ tồn kho cho mỗi prescription
+      if (prescriptions && prescriptions.length > 0) {
+        for (const prescription of prescriptions) {
+          try {
+            // Lấy thông tin tồn kho hiện tại
+            const currentStock = await this.inventoryService.getCurrentStock(prescription.medicineId);
+            
+            if (currentStock.currentStock < prescription.quantity) {
+              console.warn(`Warning: Medicine ${prescription.medicineId} has insufficient stock. Current: ${currentStock.currentStock}, Required: ${prescription.quantity}`);
+            }
+
+            // Tạo transaction xuất kho
+            await this.inventoryService.createInventoryTransaction({
+              medicineId: prescription.medicineId,
+              type: InventoryTransactionTypeDto.EXPORT,
+              quantity: prescription.quantity,
+              unitPrice: currentStock.unitPrice || 0,
+              referenceType: 'MEDICAL_RECORD',
+              referenceId: medicalRecord.id,
+              notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
+              createdBy: data.doctorId
+            });
+          } catch (error) {
+            console.error(`Error creating inventory transaction for medicine ${prescription.medicineId}:`, error);
           }
         }
       }
+
+      return medicalRecord;
     });
   }
 

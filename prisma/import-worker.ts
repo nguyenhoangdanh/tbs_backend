@@ -1,4 +1,4 @@
-import { PrismaClient, Role, OfficeType, Sex } from '@prisma/client';
+import { PrismaClient, OfficeType, Sex } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import * as XLSX from 'xlsx';
 import * as path from 'path';
@@ -519,6 +519,17 @@ async function createUsers(
 ): Promise<Map<string, any>> { // Return user map for management relations
   console.log('\n👥 Creating users...');
   
+  // Load WORKER role
+  const workerRole = await prisma.roleDefinition.findUnique({
+    where: { code: 'WORKER' }
+  });
+  
+  if (!workerRole) {
+    throw new Error('WORKER role not found. Please run seed:permissions first.');
+  }
+  
+  console.log(`📋 Using role: ${workerRole.code}`);
+  
   const hashedPassword = await bcrypt.hash('123456', 10);
   let successCount = 0;
   let errorCount = 0;
@@ -532,8 +543,6 @@ async function createUsers(
       const employeeCode = userData.msnv;
       const fullName = userData.hoTen;
       const phone = userData.phone || '';
-      
-      const userRole =  Role.WORKER;
 
       // Check if user already exists by employeeCode only
       const existingUser = await prisma.user.findUnique({
@@ -573,7 +582,7 @@ async function createUsers(
         const dateOfBirth = userData.dateOfBirth ? new Date(userData.dateOfBirth) : null;
       const sex = userData.sex || null;
 
-      // Create user with proper email and role
+      // Create user with WORKER role assignment via UserRole table
       const newUser = await prisma.user.create({
         data: {
           employeeCode,
@@ -584,15 +593,19 @@ async function createUsers(
           phone,
           dateOfBirth,
           sex,
-          role: userRole,
           jobPositionId: jobPosition.id,
           officeId: office.id,
+          roles: {
+            create: {
+              roleDefinitionId: workerRole.id
+            }
+          }
         },
       });
 
       userMap.set(employeeCode, newUser); // Store created user
       successCount++;
-      console.log(`   ✅ ${employeeCode} - ${fullName} (${userData.vt}) [${userRole}]`);
+      console.log(`   ✅ ${employeeCode} - ${fullName} (${userData.vt}) [WORKER]`);
 
     } catch (error) {
       console.error(`   ❌ Error creating user ${userData.msnv} - ${userData.hoTen}:`, error.message);
@@ -607,14 +620,8 @@ async function createUsers(
   
   // Show role distribution
   console.log('\n👥 Role Distribution:');
-  const roleStats = await prisma.user.groupBy({
-    by: ['role'],
-    _count: { role: true },
-  });
-  
-  roleStats.forEach(stat => {
-    console.log(`   ${stat.role}: ${stat._count.role} users`);
-  });
+  const workerCount = await prisma.userRole.count({ where: { roleDefinitionId: workerRole.id } });
+  console.log(`   WORKER: ${workerCount} users`);
 
   // Show email examples
   console.log('\n📧 Email Examples:');
