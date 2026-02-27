@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import {
   CreateMedicineCategoryDto,
@@ -13,41 +17,78 @@ import {
 } from './dto/inventory.dto';
 import { Prisma } from '@prisma/client';
 
+/** Convert a value (number | string | Prisma.Decimal | null | undefined) to Prisma.Decimal safely */
+function D(v: unknown): Prisma.Decimal {
+  if (v === null || v === undefined) return new Prisma.Decimal(0);
+  return new Prisma.Decimal(String(v));
+}
+
+/** Serialize one MedicineInventory row for API response:
+ *  - Quantities returned as Number (integers / simple decimals)
+ *  - Unit-prices and amounts returned as STRING to preserve up to 20 d.p.
+ */
+function serializeInventoryRow(inv: any) {
+  return {
+    ...inv,
+    openingQuantity: Number(inv.openingQuantity),
+    openingUnitPrice: D(inv.openingUnitPrice).toFixed(),
+    openingTotalAmount: D(inv.openingTotalAmount).toFixed(),
+    monthlyImportQuantity: Number(inv.monthlyImportQuantity),
+    monthlyImportUnitPrice: D(inv.monthlyImportUnitPrice).toFixed(),
+    monthlyImportAmount: D(inv.monthlyImportAmount).toFixed(),
+    monthlyExportQuantity: Number(inv.monthlyExportQuantity),
+    monthlyExportUnitPrice: D(inv.monthlyExportUnitPrice).toFixed(),
+    monthlyExportAmount: D(inv.monthlyExportAmount).toFixed(),
+    closingQuantity: Number(inv.closingQuantity),
+    closingUnitPrice: D(inv.closingUnitPrice).toFixed(),
+    closingTotalAmount: D(inv.closingTotalAmount).toFixed(),
+    yearlyImportQuantity: Number(inv.yearlyImportQuantity),
+    yearlyImportUnitPrice: D(inv.yearlyImportUnitPrice).toFixed(),
+    yearlyImportAmount: D(inv.yearlyImportAmount).toFixed(),
+    yearlyExportQuantity: Number(inv.yearlyExportQuantity),
+    yearlyExportUnitPrice: D(inv.yearlyExportUnitPrice).toFixed(),
+    yearlyExportAmount: D(inv.yearlyExportAmount).toFixed(),
+    suggestedPurchaseQuantity: Number(inv.suggestedPurchaseQuantity),
+    suggestedPurchaseUnitPrice: D(inv.suggestedPurchaseUnitPrice).toFixed(),
+    suggestedPurchaseAmount: D(inv.suggestedPurchaseAmount).toFixed(),
+  };
+}
+
 @Injectable()
 export class InventoryService {
   constructor(private prisma: PrismaService) {}
 
   // ==================== MEDICINE CATEGORY MANAGEMENT ====================
-  
+
   async getMedicineCategories() {
     return this.prisma.medicineCategory.findMany({
       where: { isActive: true },
       orderBy: { sortOrder: 'asc' },
       include: {
         _count: {
-          select: { medicines: true }
-        }
-      }
+          select: { medicines: true },
+        },
+      },
     });
   }
 
   async createMedicineCategory(data: CreateMedicineCategoryDto) {
     return this.prisma.medicineCategory.create({
-      data
+      data,
     });
   }
 
   async updateMedicineCategory(id: string, data: UpdateMedicineCategoryDto) {
     return this.prisma.medicineCategory.update({
       where: { id },
-      data
+      data,
     });
   }
 
   async deleteMedicineCategory(id: string) {
     return this.prisma.medicineCategory.update({
       where: { id },
-      data: { isActive: false }
+      data: { isActive: false },
     });
   }
 
@@ -58,21 +99,26 @@ export class InventoryService {
    * Tự động cập nhật MedicineInventory theo tháng/năm
    */
   async createInventoryTransaction(data: CreateInventoryTransactionDto) {
-    const unitPrice = data.unitPrice ?? 0; // Default to 0 if not provided
-    const totalAmount = Number(data.quantity) * Number(unitPrice);
-    const transactionDate = data.transactionDate ? new Date(data.transactionDate) : new Date();
+    // Dùng Decimal để giữ toàn bộ độ chính xác unitPrice (string, đến 20 d.p.)
+    const dPrice = D(data.unitPrice ?? 0);
+    const dQty = D(data.quantity);
+    const dAmount = dQty.times(dPrice);
+
+    const transactionDate = data.transactionDate
+      ? new Date(data.transactionDate)
+      : new Date();
     const month = transactionDate.getMonth() + 1;
     const year = transactionDate.getFullYear();
 
     return this.prisma.$transaction(async (prisma) => {
-      // 1. Tạo transaction record
+      // 1. Tạo transaction record – lưu amount dạng string Decimal
       const transaction = await prisma.inventoryTransaction.create({
         data: {
           medicineId: data.medicineId,
           type: data.type,
-          quantity: data.quantity,
-          unitPrice: unitPrice,
-          totalAmount,
+          quantity: dQty.toFixed(),
+          unitPrice: dPrice.toFixed(),
+          totalAmount: dAmount.toFixed(),
           transactionDate,
           expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
           batchNumber: data.batchNumber,
@@ -82,20 +128,18 @@ export class InventoryService {
           notes: data.notes,
           createdBy: data.createdBy,
         },
-        include: {
-          medicine: true
-        }
+        include: { medicine: true },
       });
 
-      // 2. Cập nhật MedicineInventory cho tháng hiện tại
+      // 2. Cập nhật MedicineInventory – truyền string để giữ độ chính xác
       await this.updateInventoryBalance(
         data.medicineId,
         month,
         year,
         data.type,
-        Number(data.quantity),
-        Number(unitPrice),
-        data.expiryDate ? new Date(data.expiryDate) : undefined
+        dQty.toFixed(),
+        dPrice.toFixed(),
+        data.expiryDate ? new Date(data.expiryDate) : undefined,
       );
 
       return transaction;
@@ -104,7 +148,7 @@ export class InventoryService {
 
   /**
    * Cập nhật tồn kho theo tháng/năm
-   * Logic: 
+   * Logic:
    * - Tồn cuối kỳ = Tồn đầu kỳ + Nhập - Xuất
    * - Lũy kế năm tự động cộng dồn
    */
@@ -113,34 +157,27 @@ export class InventoryService {
     month: number,
     year: number,
     transactionType: InventoryTransactionTypeDto,
-    quantity: number,
-    unitPrice: number,
-    expiryDate?: Date
+    quantity: number | string,
+    unitPrice: number | string,
+    expiryDate?: Date,
   ) {
-    // Tìm hoặc tạo inventory record cho tháng này
+    // ── Tìm hoặc tạo inventory record cho tháng này ──────────────────────────
     let inventory = await this.prisma.medicineInventory.findUnique({
-      where: {
-        medicineId_month_year: {
-          medicineId,
-          month,
-          year
-        }
-      }
+      where: { medicineId_month_year: { medicineId, month, year } },
     });
 
     if (!inventory) {
-      // Lấy tồn cuối kỳ tháng trước làm tồn đầu kỳ
       const previousMonth = month === 1 ? 12 : month - 1;
       const previousYear = month === 1 ? year - 1 : year;
-      
-      const previousInventory = await this.prisma.medicineInventory.findUnique({
+
+      const prev = await this.prisma.medicineInventory.findUnique({
         where: {
           medicineId_month_year: {
             medicineId,
             month: previousMonth,
-            year: previousYear
-          }
-        }
+            year: previousYear,
+          },
+        },
       });
 
       inventory = await this.prisma.medicineInventory.create({
@@ -149,114 +186,177 @@ export class InventoryService {
           month,
           year,
           expiryDate,
-          openingQuantity: previousInventory?.closingQuantity || 0,
-          openingUnitPrice: previousInventory?.closingUnitPrice || 0,
-          openingTotalAmount: previousInventory?.closingTotalAmount || 0,
-        }
+          // Kế thừa tồn cuối kỳ tháng trước
+          openingQuantity: prev?.closingQuantity ?? 0,
+          openingUnitPrice: prev?.closingUnitPrice ?? 0,
+          openingTotalAmount: prev?.closingTotalAmount ?? 0,
+          // Kế thừa lũy kế năm từ tháng trước (chỉ khi cùng năm, tức month > 1)
+          // Nếu month = 1 (tháng Giêng) thì lũy kế năm reset về 0
+          yearlyImportQuantity:
+            month > 1 ? (prev?.yearlyImportQuantity ?? 0) : 0,
+          yearlyImportUnitPrice:
+            month > 1 ? (prev?.yearlyImportUnitPrice ?? 0) : 0,
+          yearlyImportAmount: month > 1 ? (prev?.yearlyImportAmount ?? 0) : 0,
+          yearlyExportQuantity:
+            month > 1 ? (prev?.yearlyExportQuantity ?? 0) : 0,
+          yearlyExportUnitPrice:
+            month > 1 ? (prev?.yearlyExportUnitPrice ?? 0) : 0,
+          yearlyExportAmount: month > 1 ? (prev?.yearlyExportAmount ?? 0) : 0,
+        },
       });
     }
 
-    // Cập nhật số liệu theo loại giao dịch
-    const amount = quantity * unitPrice;
-    
+    // ── Tất cả arithmetic dùng Prisma.Decimal để giữ đủ 20 chữ số thập phân ──
+    const dQty = D(quantity);
+    const dPrice = D(unitPrice);
+    const dAmount = dQty.times(dPrice);
+
     let updateData: Prisma.MedicineInventoryUpdateInput = {};
 
     if (transactionType === InventoryTransactionTypeDto.IMPORT) {
-      // Nhập kho
-      const newMonthlyImportQty = Number(inventory.monthlyImportQuantity) + quantity;
-      const newMonthlyImportAmount = Number(inventory.monthlyImportAmount) + amount;
-      const newMonthlyImportUnitPrice = newMonthlyImportAmount / newMonthlyImportQty;
+      const newMonthImportQty = D(inventory.monthlyImportQuantity).plus(dQty);
+      const newMonthImportAmount = D(inventory.monthlyImportAmount).plus(
+        dAmount,
+      );
+      const newMonthImportPrice = newMonthImportQty.gt(0)
+        ? newMonthImportAmount.div(newMonthImportQty)
+        : dPrice;
 
-      const newYearlyImportQty = Number(inventory.yearlyImportQuantity) + quantity;
-      const newYearlyImportAmount = Number(inventory.yearlyImportAmount) + amount;
-      const newYearlyImportUnitPrice = newYearlyImportAmount / newYearlyImportQty;
+      const newYearImportQty = D(inventory.yearlyImportQuantity).plus(dQty);
+      const newYearImportAmount = D(inventory.yearlyImportAmount).plus(dAmount);
+      const newYearImportPrice = newYearImportQty.gt(0)
+        ? newYearImportAmount.div(newYearImportQty)
+        : dPrice;
 
       updateData = {
-        monthlyImportQuantity: newMonthlyImportQty,
-        monthlyImportUnitPrice: newMonthlyImportUnitPrice,
-        monthlyImportAmount: newMonthlyImportAmount,
-        yearlyImportQuantity: newYearlyImportQty,
-        yearlyImportUnitPrice: newYearlyImportUnitPrice,
-        yearlyImportAmount: newYearlyImportAmount,
+        monthlyImportQuantity: newMonthImportQty.toFixed(),
+        monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+        monthlyImportAmount: newMonthImportAmount.toFixed(),
+        yearlyImportQuantity: newYearImportQty.toFixed(),
+        yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+        yearlyImportAmount: newYearImportAmount.toFixed(),
+        ...(expiryDate ? { expiryDate } : {}),
       };
-
-      if (expiryDate) {
-        updateData.expiryDate = expiryDate;
-      }
     } else if (transactionType === InventoryTransactionTypeDto.EXPORT) {
-      // Xuất kho
-      const newMonthlyExportQty = Number(inventory.monthlyExportQuantity) + quantity;
-      const newMonthlyExportAmount = Number(inventory.monthlyExportAmount) + amount;
-      const newMonthlyExportUnitPrice = newMonthlyExportAmount / newMonthlyExportQty;
+      const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
+      const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(
+        dAmount,
+      );
+      const newMonthExportPrice = newMonthExportQty.gt(0)
+        ? newMonthExportAmount.div(newMonthExportQty)
+        : dPrice;
 
-      const newYearlyExportQty = Number(inventory.yearlyExportQuantity) + quantity;
-      const newYearlyExportAmount = Number(inventory.yearlyExportAmount) + amount;
-      const newYearlyExportUnitPrice = newYearlyExportAmount / newYearlyExportQty;
+      const newYearExportQty = D(inventory.yearlyExportQuantity).plus(dQty);
+      const newYearExportAmount = D(inventory.yearlyExportAmount).plus(dAmount);
+      const newYearExportPrice = newYearExportQty.gt(0)
+        ? newYearExportAmount.div(newYearExportQty)
+        : dPrice;
 
       updateData = {
-        monthlyExportQuantity: newMonthlyExportQty,
-        monthlyExportUnitPrice: newMonthlyExportUnitPrice,
-        monthlyExportAmount: newMonthlyExportAmount,
-        yearlyExportQuantity: newYearlyExportQty,
-        yearlyExportUnitPrice: newYearlyExportUnitPrice,
-        yearlyExportAmount: newYearlyExportAmount,
+        monthlyExportQuantity: newMonthExportQty.toFixed(),
+        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportAmount: newMonthExportAmount.toFixed(),
+        yearlyExportQuantity: newYearExportQty.toFixed(),
+        yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+        yearlyExportAmount: newYearExportAmount.toFixed(),
       };
     } else if (transactionType === InventoryTransactionTypeDto.ADJUSTMENT) {
-      // Điều chỉnh - có thể + hoặc -
-      // Xử lý giống như import/export tùy số âm dương
-      if (quantity > 0) {
-        const newMonthlyImportQty = Number(inventory.monthlyImportQuantity) + quantity;
-        const newMonthlyImportAmount = Number(inventory.monthlyImportAmount) + amount;
-        const newMonthlyImportUnitPrice = newMonthlyImportAmount / newMonthlyImportQty;
+      // ADJUSTMENT: quantity > 0 → nhập thêm; quantity < 0 → xuất bớt
+      // ĐÃ SỬA: cập nhật cả lũy kế năm (trước đây bỏ sót)
+      if (dQty.gt(0)) {
+        const newMonthImportQty = D(inventory.monthlyImportQuantity).plus(dQty);
+        const newMonthImportAmount = D(inventory.monthlyImportAmount).plus(
+          dAmount,
+        );
+        const newMonthImportPrice = newMonthImportQty.gt(0)
+          ? newMonthImportAmount.div(newMonthImportQty)
+          : dPrice;
+
+        const newYearImportQty = D(inventory.yearlyImportQuantity).plus(dQty);
+        const newYearImportAmount = D(inventory.yearlyImportAmount).plus(
+          dAmount,
+        );
+        const newYearImportPrice = newYearImportQty.gt(0)
+          ? newYearImportAmount.div(newYearImportQty)
+          : dPrice;
 
         updateData = {
-          monthlyImportQuantity: newMonthlyImportQty,
-          monthlyImportUnitPrice: newMonthlyImportUnitPrice,
-          monthlyImportAmount: newMonthlyImportAmount,
+          monthlyImportQuantity: newMonthImportQty.toFixed(),
+          monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+          monthlyImportAmount: newMonthImportAmount.toFixed(),
+          yearlyImportQuantity: newYearImportQty.toFixed(),
+          yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+          yearlyImportAmount: newYearImportAmount.toFixed(),
         };
       } else {
-        const adjustQty = Math.abs(quantity);
-        const adjustAmount = Math.abs(amount);
-        const newMonthlyExportQty = Number(inventory.monthlyExportQuantity) + adjustQty;
-        const newMonthlyExportAmount = Number(inventory.monthlyExportAmount) + adjustAmount;
-        const newMonthlyExportUnitPrice = newMonthlyExportAmount / newMonthlyExportQty;
+        const adjQty = dQty.abs();
+        const adjAmount = dAmount.abs();
+
+        const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(
+          adjQty,
+        );
+        const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(
+          adjAmount,
+        );
+        const newMonthExportPrice = newMonthExportQty.gt(0)
+          ? newMonthExportAmount.div(newMonthExportQty)
+          : dPrice.abs();
+
+        const newYearExportQty = D(inventory.yearlyExportQuantity).plus(adjQty);
+        const newYearExportAmount = D(inventory.yearlyExportAmount).plus(
+          adjAmount,
+        );
+        const newYearExportPrice = newYearExportQty.gt(0)
+          ? newYearExportAmount.div(newYearExportQty)
+          : dPrice.abs();
 
         updateData = {
-          monthlyExportQuantity: newMonthlyExportQty,
-          monthlyExportUnitPrice: newMonthlyExportUnitPrice,
-          monthlyExportAmount: newMonthlyExportAmount,
+          monthlyExportQuantity: newMonthExportQty.toFixed(),
+          monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+          monthlyExportAmount: newMonthExportAmount.toFixed(),
+          yearlyExportQuantity: newYearExportQty.toFixed(),
+          yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+          yearlyExportAmount: newYearExportAmount.toFixed(),
         };
       }
     }
 
-    // Tính toán tồn cuối kỳ
-    const closingQuantity = 
-      Number(inventory.openingQuantity) + 
-      Number(updateData.monthlyImportQuantity || inventory.monthlyImportQuantity) - 
-      Number(updateData.monthlyExportQuantity || inventory.monthlyExportQuantity);
+    // ── Tính tồn cuối kỳ (bình quân gia quyền, dùng Decimal) ─────────────────
+    const finalImportQty = D(
+      updateData.monthlyImportQuantity ?? inventory.monthlyImportQuantity,
+    );
+    const finalImportAmount = D(
+      updateData.monthlyImportAmount ?? inventory.monthlyImportAmount,
+    );
+    const finalExportQty = D(
+      updateData.monthlyExportQuantity ?? inventory.monthlyExportQuantity,
+    );
+    const finalExportAmount = D(
+      updateData.monthlyExportAmount ?? inventory.monthlyExportAmount,
+    );
 
-    // Tính đơn giá bình quân
-    const totalValue = 
-      (Number(inventory.openingQuantity) * Number(inventory.openingUnitPrice)) +
-      Number(updateData.monthlyImportAmount || inventory.monthlyImportAmount) -
-      Number(updateData.monthlyExportAmount || inventory.monthlyExportAmount);
-    
-    const closingUnitPrice = closingQuantity > 0 ? totalValue / closingQuantity : 0;
-    const closingTotalAmount = closingQuantity * closingUnitPrice;
+    const closingQty = D(inventory.openingQuantity)
+      .plus(finalImportQty)
+      .minus(finalExportQty);
 
-    updateData.closingQuantity = closingQuantity;
-    updateData.closingUnitPrice = closingUnitPrice;
-    updateData.closingTotalAmount = closingTotalAmount;
+    // Giá trị tổng = (Tồn đầu × ĐG đầu) + Nhập - Xuất
+    const totalValue = D(inventory.openingQuantity)
+      .times(D(inventory.openingUnitPrice))
+      .plus(finalImportAmount)
+      .minus(finalExportAmount);
+
+    const closingPrice = closingQty.gt(0)
+      ? totalValue.div(closingQty)
+      : new Prisma.Decimal(0);
+    const closingAmount = closingQty.times(closingPrice);
+
+    updateData.closingQuantity = closingQty.toFixed();
+    updateData.closingUnitPrice = closingPrice.toFixed();
+    updateData.closingTotalAmount = closingAmount.toFixed();
 
     return this.prisma.medicineInventory.update({
-      where: {
-        medicineId_month_year: {
-          medicineId,
-          month,
-          year
-        }
-      },
-      data: updateData
+      where: { medicineId_month_year: { medicineId, month, year } },
+      data: updateData,
     });
   }
 
@@ -267,7 +367,7 @@ export class InventoryService {
     medicineId?: string,
     type?: InventoryTransactionTypeDto,
     startDate?: string,
-    endDate?: string
+    endDate?: string,
   ) {
     const where: Prisma.InventoryTransactionWhereInput = {};
 
@@ -294,13 +394,13 @@ export class InventoryService {
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
+            category: true,
+          },
+        },
       },
       orderBy: {
-        transactionDate: 'desc'
-      }
+        transactionDate: 'desc',
+      },
     });
   }
 
@@ -314,12 +414,12 @@ export class InventoryService {
     console.log('🔧 [InventoryService] Starting bulk import...');
     console.log(`📅 Target: ${data.month}/${data.year}`);
     console.log(`📦 Medicines to import: ${data.medicines.length}`);
-    
+
     const { month, year, medicines } = data;
     const results = {
       imported: 0,
       updated: 0,
-      errors: [] as any[]
+      errors: [] as any[],
     };
 
     for (const medicineData of medicines) {
@@ -329,15 +429,15 @@ export class InventoryService {
           openingQty: medicineData.openingQuantity,
           openingPrice: medicineData.openingUnitPrice,
           openingAmount: medicineData.openingTotalAmount,
-          hasAmount: medicineData.openingTotalAmount !== undefined
+          hasAmount: medicineData.openingTotalAmount !== undefined,
         });
-        
+
         await this.prisma.$transaction(async (prisma) => {
           // 1. Tạo/tìm category nếu có
           let categoryId: string | undefined;
           if (medicineData.categoryCode) {
             let category = await prisma.medicineCategory.findUnique({
-              where: { code: medicineData.categoryCode }
+              where: { code: medicineData.categoryCode },
             });
 
             if (!category) {
@@ -346,8 +446,11 @@ export class InventoryService {
                 data: {
                   code: medicineData.categoryCode,
                   name: `Category ${medicineData.categoryCode}`,
-                  sortOrder: parseInt(medicineData.categoryCode.replace(/[^0-9]/g, '')) || 0
-                }
+                  sortOrder:
+                    parseInt(
+                      medicineData.categoryCode.replace(/[^0-9]/g, ''),
+                    ) || 0,
+                },
               });
             }
             categoryId = category.id;
@@ -355,10 +458,10 @@ export class InventoryService {
 
           // 2. Tạo hoặc cập nhật medicine
           let medicine = await prisma.medicine.findFirst({
-            where: { 
+            where: {
               name: medicineData.name,
-              isActive: true
-            }
+              isActive: true,
+            },
           });
 
           if (!medicine) {
@@ -370,7 +473,7 @@ export class InventoryService {
                 strength: medicineData.strength,
                 manufacturer: medicineData.manufacturer,
                 units: medicineData.units,
-              }
+              },
             });
             results.imported++;
           } else {
@@ -381,69 +484,96 @@ export class InventoryService {
                 categoryId: categoryId || medicine.categoryId,
                 route: medicineData.route || medicine.route,
                 strength: medicineData.strength || medicine.strength,
-                manufacturer: medicineData.manufacturer || medicine.manufacturer,
+                manufacturer:
+                  medicineData.manufacturer || medicine.manufacturer,
                 units: medicineData.units || medicine.units,
-              }
+              },
             });
             results.updated++;
           }
 
           // 3. Tạo/cập nhật inventory balance cho tháng này
-          // ✅ NHẬN TRỰC TIẾP GIÁ TRỊ TỪ EXCEL - KHÔNG TÍNH LẠI để giữ nguyên độ chính xác
-          // Sử dụng Number() để chuyển đổi an toàn mà vẫn giữ độ chính xác thập phân
+          // ✅ D() helper đảm bảo giữ đủ 20 số thập phân, .toFixed() trả về string chính xác
           const openingQty = Number(medicineData.openingQuantity) || 0;
-          const openingPrice = Number(medicineData.openingUnitPrice) || 0;
-          // Ưu tiên dùng amount từ Excel, nếu không có mới tính
-          const openingAmount = medicineData.openingTotalAmount !== undefined 
-            ? Number(medicineData.openingTotalAmount)
-            : openingQty * openingPrice;
+          const openingPrice = D(medicineData.openingUnitPrice).toFixed();
+          const openingAmount =
+            medicineData.openingTotalAmount !== undefined
+              ? D(medicineData.openingTotalAmount).toFixed()
+              : D(openingQty).times(D(openingPrice)).toFixed();
 
-          const monthlyImportQty = Number(medicineData.monthlyImportQuantity) || 0;
-          const monthlyImportPrice = Number(medicineData.monthlyImportUnitPrice) || 0;
-          const monthlyImportAmount = medicineData.monthlyImportAmount !== undefined
-            ? Number(medicineData.monthlyImportAmount)
-            : monthlyImportQty * monthlyImportPrice;
+          const monthlyImportQty =
+            Number(medicineData.monthlyImportQuantity) || 0;
+          const monthlyImportPrice = D(
+            medicineData.monthlyImportUnitPrice,
+          ).toFixed();
+          const monthlyImportAmount =
+            medicineData.monthlyImportAmount !== undefined
+              ? D(medicineData.monthlyImportAmount).toFixed()
+              : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
-          const monthlyExportQty = Number(medicineData.monthlyExportQuantity) || 0;
-          const monthlyExportPrice = Number(medicineData.monthlyExportUnitPrice) || 0;
-          const monthlyExportAmount = medicineData.monthlyExportAmount !== undefined
-            ? Number(medicineData.monthlyExportAmount)
-            : monthlyExportQty * monthlyExportPrice;
+          const monthlyExportQty =
+            Number(medicineData.monthlyExportQuantity) || 0;
+          const monthlyExportPrice = D(
+            medicineData.monthlyExportUnitPrice,
+          ).toFixed();
+          const monthlyExportAmount =
+            medicineData.monthlyExportAmount !== undefined
+              ? D(medicineData.monthlyExportAmount).toFixed()
+              : D(monthlyExportQty).times(D(monthlyExportPrice)).toFixed();
 
-          const closingQty = medicineData.closingQuantity ? Number(medicineData.closingQuantity) : (openingQty + monthlyImportQty - monthlyExportQty);
-          const closingPrice = medicineData.closingUnitPrice ? Number(medicineData.closingUnitPrice) : openingPrice;
-          const closingAmount = medicineData.closingTotalAmount !== undefined
-            ? Number(medicineData.closingTotalAmount)
-            : closingQty * closingPrice;
+          const closingQty = medicineData.closingQuantity
+            ? Number(medicineData.closingQuantity)
+            : openingQty + monthlyImportQty - monthlyExportQty;
+          const closingPrice = D(
+            medicineData.closingUnitPrice ?? medicineData.openingUnitPrice,
+          ).toFixed();
+          const closingAmount =
+            medicineData.closingTotalAmount !== undefined
+              ? D(medicineData.closingTotalAmount).toFixed()
+              : D(closingQty).times(D(closingPrice)).toFixed();
 
-          const yearlyImportQty = Number(medicineData.yearlyImportQuantity) || 0;
-          const yearlyImportPrice = Number(medicineData.yearlyImportUnitPrice) || 0;
-          const yearlyImportAmount = medicineData.yearlyImportAmount !== undefined
-            ? Number(medicineData.yearlyImportAmount)
-            : yearlyImportQty * yearlyImportPrice;
+          const yearlyImportQty =
+            Number(medicineData.yearlyImportQuantity) || 0;
+          const yearlyImportPrice = D(
+            medicineData.yearlyImportUnitPrice,
+          ).toFixed();
+          const yearlyImportAmount =
+            medicineData.yearlyImportAmount !== undefined
+              ? D(medicineData.yearlyImportAmount).toFixed()
+              : D(yearlyImportQty).times(D(yearlyImportPrice)).toFixed();
 
-          const yearlyExportQty = Number(medicineData.yearlyExportQuantity) || 0;
-          const yearlyExportPrice = Number(medicineData.yearlyExportUnitPrice) || 0;
-          const yearlyExportAmount = medicineData.yearlyExportAmount !== undefined
-            ? Number(medicineData.yearlyExportAmount)
-            : yearlyExportQty * yearlyExportPrice;
+          const yearlyExportQty =
+            Number(medicineData.yearlyExportQuantity) || 0;
+          const yearlyExportPrice = D(
+            medicineData.yearlyExportUnitPrice,
+          ).toFixed();
+          const yearlyExportAmount =
+            medicineData.yearlyExportAmount !== undefined
+              ? D(medicineData.yearlyExportAmount).toFixed()
+              : D(yearlyExportQty).times(D(yearlyExportPrice)).toFixed();
 
-          const suggestedQty = Number(medicineData.suggestedPurchaseQuantity) || 0;
-          const suggestedPrice = Number(medicineData.suggestedPurchaseUnitPrice) || 0;
-          const suggestedAmount = medicineData.suggestedPurchaseAmount !== undefined
-            ? Number(medicineData.suggestedPurchaseAmount)
-            : suggestedQty * suggestedPrice;
+          const suggestedQty =
+            Number(medicineData.suggestedPurchaseQuantity) || 0;
+          const suggestedPrice = D(
+            medicineData.suggestedPurchaseUnitPrice,
+          ).toFixed();
+          const suggestedAmount =
+            medicineData.suggestedPurchaseAmount !== undefined
+              ? D(medicineData.suggestedPurchaseAmount).toFixed()
+              : D(suggestedQty).times(D(suggestedPrice)).toFixed();
 
           await prisma.medicineInventory.upsert({
             where: {
               medicineId_month_year: {
                 medicineId: medicine.id,
                 month,
-                year
-              }
+                year,
+              },
             },
             update: {
-              expiryDate: medicineData.expiryDate ? new Date(medicineData.expiryDate) : null,
+              expiryDate: medicineData.expiryDate
+                ? new Date(medicineData.expiryDate)
+                : null,
               openingQuantity: openingQty,
               openingUnitPrice: openingPrice,
               openingTotalAmount: openingAmount,
@@ -470,7 +600,9 @@ export class InventoryService {
               medicineId: medicine.id,
               month,
               year,
-              expiryDate: medicineData.expiryDate ? new Date(medicineData.expiryDate) : null,
+              expiryDate: medicineData.expiryDate
+                ? new Date(medicineData.expiryDate)
+                : null,
               openingQuantity: openingQty,
               openingUnitPrice: openingPrice,
               openingTotalAmount: openingAmount,
@@ -492,13 +624,13 @@ export class InventoryService {
               suggestedPurchaseQuantity: suggestedQty,
               suggestedPurchaseUnitPrice: suggestedPrice,
               suggestedPurchaseAmount: suggestedAmount,
-            }
+            },
           });
         });
       } catch (error) {
         results.errors.push({
           medicine: medicineData.name,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -515,12 +647,12 @@ export class InventoryService {
     console.log('🔧 [InventoryService] Starting simplified bulk import...');
     console.log(`📅 Target: ${data.month}/${data.year}`);
     console.log(`📦 Medicines to import: ${data.medicines.length}`);
-    
+
     const { month, year, medicines } = data;
     const results = {
       imported: 0,
       updated: 0,
-      errors: [] as any[]
+      errors: [] as any[],
     };
 
     // Calculate previous month for opening balance
@@ -529,81 +661,91 @@ export class InventoryService {
 
     // Helper to parse expiry date strings (accepts ISO or DD/MM/YYYY)
     function parseDateString(input?: string | null) {
-      if (!input) return null
-      const s = String(input).trim()
-      if (!s) return null
+      if (!input) return null;
+      const s = String(input).trim();
+      if (!s) return null;
 
       // Try native Date first (ISO or other recognized formats)
-      const d1 = new Date(s)
-      if (!Number.isNaN(d1.getTime())) return d1
+      const d1 = new Date(s);
+      if (!Number.isNaN(d1.getTime())) return d1;
 
       // Try DD/MM/YYYY or D/M/YYYY
-      const parts = s.split(/[\/\.-]/).map(p => p.trim())
+      const parts = s.split(/[\/\.-]/).map((p) => p.trim());
       if (parts.length === 3) {
-        const day = Number(parts[0])
-        const month = Number(parts[1])
-        const year = Number(parts[2])
+        const day = Number(parts[0]);
+        const month = Number(parts[1]);
+        const year = Number(parts[2]);
         if (!Number.isNaN(day) && !Number.isNaN(month) && !Number.isNaN(year)) {
-          const d2 = new Date(year, month - 1, day)
-          if (!Number.isNaN(d2.getTime())) return d2
+          const d2 = new Date(year, month - 1, day);
+          if (!Number.isNaN(d2.getTime())) return d2;
         }
       }
 
-      return null
+      return null;
     }
 
     for (const medicineData of medicines) {
       try {
         // Support both medicineId (for updates) and name (for new imports)
         let medicine;
-        
+
         if (medicineData.medicineId) {
           // Update existing medicine using medicineId
           medicine = await this.prisma.medicine.findUnique({
-            where: { id: medicineData.medicineId }
+            where: { id: medicineData.medicineId },
           });
-          
+
           if (!medicine) {
-            console.warn(`⚠️ Medicine ID not found: ${medicineData.medicineId}, will try to create if name provided`);
+            console.warn(
+              `⚠️ Medicine ID not found: ${medicineData.medicineId}, will try to create if name provided`,
+            );
             // Don't continue - try to create below if name is provided
           } else {
-            console.log(`\n🔄 Processing existing medicine: ${medicine.name} (ID: ${medicine.id})`);
+            console.log(
+              `\n🔄 Processing existing medicine: ${medicine.name} (ID: ${medicine.id})`,
+            );
           }
         }
-        
+
         // If no medicine found by ID, try to find or create by name
         if (!medicine) {
           if (!medicineData.name) {
             console.error(`❌ Missing both valid medicineId and name`);
             results.errors.push({
               medicine: medicineData.medicineId || 'unknown',
-              error: 'Missing both valid medicineId and name'
+              error: 'Missing both valid medicineId and name',
             });
             continue;
           }
-          
+
           // Try to find existing medicine by name
-          console.log(`\n🔍 Searching for medicine by name: ${medicineData.name}`);
+          console.log(
+            `\n🔍 Searching for medicine by name: ${medicineData.name}`,
+          );
           medicine = await this.prisma.medicine.findFirst({
-            where: { 
+            where: {
               name: medicineData.name,
-              isActive: true
-            }
+              isActive: true,
+            },
           });
-          
+
           if (medicine) {
-            console.log(`✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`);
+            console.log(
+              `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
+            );
           } else {
-            console.log(`🆕 Medicine not found, will create new: ${medicineData.name}`);
+            console.log(
+              `🆕 Medicine not found, will create new: ${medicineData.name}`,
+            );
           }
         }
-        
+
         await this.prisma.$transaction(async (prisma) => {
           // 1. Tạo/tìm category nếu có
           let categoryId: string | undefined;
           if (medicineData.categoryCode) {
             let category = await prisma.medicineCategory.findUnique({
-              where: { code: medicineData.categoryCode }
+              where: { code: medicineData.categoryCode },
             });
 
             if (!category) {
@@ -611,8 +753,11 @@ export class InventoryService {
                 data: {
                   code: medicineData.categoryCode,
                   name: `Category ${medicineData.categoryCode}`,
-                  sortOrder: parseInt(medicineData.categoryCode.replace(/[^0-9]/g, '')) || 0
-                }
+                  sortOrder:
+                    parseInt(
+                      medicineData.categoryCode.replace(/[^0-9]/g, ''),
+                    ) || 0,
+                },
               });
             }
             categoryId = category.id;
@@ -622,9 +767,11 @@ export class InventoryService {
           if (!medicine) {
             // Create new medicine with all provided details
             if (!medicineData.name) {
-              throw new Error('Medicine name is required for creating new medicine');
+              throw new Error(
+                'Medicine name is required for creating new medicine',
+              );
             }
-            
+
             console.log(`🆕 Creating new medicine: ${medicineData.name}`);
             medicine = await prisma.medicine.create({
               data: {
@@ -636,9 +783,11 @@ export class InventoryService {
                 units: medicineData.units || 'viên',
                 type: 'MEDICINE', // Default to MEDICINE
                 isActive: true,
-              }
+              },
             });
-            console.log(`✅ Created medicine: ${medicine.name} (ID: ${medicine.id})`);
+            console.log(
+              `✅ Created medicine: ${medicine.name} (ID: ${medicine.id})`,
+            );
             results.imported++;
           } else if (medicineData.medicineId) {
             // Only update if it was explicitly referenced by ID (not auto-matched by name)
@@ -649,43 +798,50 @@ export class InventoryService {
                 categoryId: categoryId || medicine.categoryId,
                 route: medicineData.route || medicine.route,
                 strength: medicineData.strength || medicine.strength,
-                manufacturer: medicineData.manufacturer || medicine.manufacturer,
+                manufacturer:
+                  medicineData.manufacturer || medicine.manufacturer,
                 units: medicineData.units || medicine.units,
-              }
+              },
             });
             results.updated++;
           } else {
             // Found by name match - just use it without updating
-            console.log(`📌 Using existing medicine: ${medicine.name} (matched by name)`);
+            console.log(
+              `📌 Using existing medicine: ${medicine.name} (matched by name)`,
+            );
             results.updated++;
           }
 
           // 3. Tính toán inventory balance
-          
+
           // 3.1. Kiểm tra xem đã có inventory record cho tháng này chưa
           const existingInventory = await prisma.medicineInventory.findUnique({
             where: {
               medicineId_month_year: {
                 medicineId: medicine.id,
                 month,
-                year
-              }
-            }
+                year,
+              },
+            },
           });
 
           // 3.2. Nhập phát sinh (từ Excel template - LUÔN CẬP NHẬT)
           const importQty = Number(medicineData.monthlyImportQuantity) || 0;
           const importPrice = Number(medicineData.monthlyImportUnitPrice) || 0;
-          const importAmount = medicineData.monthlyImportAmount !== undefined 
-            ? Number(medicineData.monthlyImportAmount)
-            : importQty * importPrice;
+          const importAmount =
+            medicineData.monthlyImportAmount !== undefined
+              ? Number(medicineData.monthlyImportAmount)
+              : importQty * importPrice;
 
           // 3.3. Đề nghị mua (từ Excel template - LUÔN CẬP NHẬT)
-          const suggestedQty = Number(medicineData.suggestedPurchaseQuantity) || 0;
-          const suggestedPrice = Number(medicineData.suggestedPurchaseUnitPrice) || 0;
-          const suggestedAmount = medicineData.suggestedPurchaseAmount !== undefined
-            ? Number(medicineData.suggestedPurchaseAmount)
-            : suggestedQty * suggestedPrice;
+          const suggestedQty =
+            Number(medicineData.suggestedPurchaseQuantity) || 0;
+          const suggestedPrice =
+            Number(medicineData.suggestedPurchaseUnitPrice) || 0;
+          const suggestedAmount =
+            medicineData.suggestedPurchaseAmount !== undefined
+              ? Number(medicineData.suggestedPurchaseAmount)
+              : suggestedQty * suggestedPrice;
 
           // Parse expiry date once for all uses
           const parsedExpiry = parseDateString(medicineData.expiryDate);
@@ -698,14 +854,19 @@ export class InventoryService {
                 medicineId_month_year: {
                   medicineId: medicine.id,
                   month: prevMonth,
-                  year: prevYear
-                }
-              }
+                  year: prevYear,
+                },
+              },
             });
 
-            const openingQty = Number(prevInventory?.closingQuantity || 0);
-            const openingPrice = Number(prevInventory?.closingUnitPrice || 0);
-            const openingAmount = openingQty * openingPrice;
+            // ── Dùng Decimal để giữ toàn bộ chữ số thập phân ──
+            const dOpenQty = D(prevInventory?.closingQuantity);
+            const dOpenPrice = D(prevInventory?.closingUnitPrice);
+            const dOpenAmt = dOpenQty.times(dOpenPrice);
+
+            const dImportQty = D(importQty);
+            const dImportPrice = D(importPrice);
+            const dImportAmt = D(importAmount);
 
             // Xuất trong tháng (tính từ MedicalPrescription)
             const exportData = await prisma.medicalPrescription.aggregate({
@@ -714,23 +875,27 @@ export class InventoryService {
                 medicalRecord: {
                   visitDate: {
                     gte: new Date(year, month - 1, 1),
-                    lt: new Date(year, month, 1)
-                  }
-                }
+                    lt: new Date(year, month, 1),
+                  },
+                },
               },
-              _sum: {
-                quantity: true
-              }
+              _sum: { quantity: true },
             });
 
-            const exportQty = Number(exportData._sum.quantity || 0);
-            const exportPrice = openingPrice || importPrice;
-            const exportAmount = exportQty * exportPrice;
+            const dExportQty = D(exportData._sum.quantity);
+            const dExportPrice = dOpenPrice.gt(0) ? dOpenPrice : dImportPrice;
+            const dExportAmt = dExportQty.times(dExportPrice);
 
             // Tồn cuối kỳ = Tồn đầu + Nhập - Xuất
-            const closingQty = openingQty + importQty - exportQty;
-            const closingPrice = importPrice || openingPrice;
-            const closingAmount = closingQty * closingPrice;
+            const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
+            // Giá bình quân gia quyền
+            const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+            const dClosingPrice = dClosingQty.gt(0)
+              ? totalVal.div(dClosingQty)
+              : dImportPrice.gt(0)
+                ? dImportPrice
+                : dOpenPrice;
+            const dClosingAmt = dClosingQty.times(dClosingPrice);
 
             // Tạo mới inventory record
             await prisma.medicineInventory.create({
@@ -739,34 +904,48 @@ export class InventoryService {
                 month,
                 year,
                 expiryDate: parsedExpiry ?? null,
-                openingQuantity: openingQty,
-                openingUnitPrice: openingPrice,
-                openingTotalAmount: openingAmount,
-                monthlyImportQuantity: importQty,
-                monthlyImportUnitPrice: importPrice,
-                monthlyImportAmount: importAmount,
-                monthlyExportQuantity: exportQty,
-                monthlyExportUnitPrice: exportPrice,
-                monthlyExportAmount: exportAmount,
-                closingQuantity: closingQty,
-                closingUnitPrice: closingPrice,
-                closingTotalAmount: closingAmount,
-                suggestedPurchaseQuantity: suggestedQty,
-                suggestedPurchaseUnitPrice: suggestedPrice,
-                suggestedPurchaseAmount: suggestedAmount,
-              }
+                openingQuantity: dOpenQty.toFixed(),
+                openingUnitPrice: dOpenPrice.toFixed(),
+                openingTotalAmount: dOpenAmt.toFixed(),
+                monthlyImportQuantity: dImportQty.toFixed(),
+                monthlyImportUnitPrice: dImportPrice.toFixed(),
+                monthlyImportAmount: dImportAmt.toFixed(),
+                monthlyExportQuantity: dExportQty.toFixed(),
+                monthlyExportUnitPrice: dExportPrice.toFixed(),
+                monthlyExportAmount: dExportAmt.toFixed(),
+                closingQuantity: dClosingQty.toFixed(),
+                closingUnitPrice: dClosingPrice.toFixed(),
+                closingTotalAmount: dClosingAmt.toFixed(),
+                suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
+                suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
+                suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
+              },
             });
           } else {
-            // 3.5. Nếu đã có record, CHỈ CẬP NHẬT import và suggested từ template
-            // Tính lại closing dựa trên opening và export hiện tại
-            const currentOpening = Number(existingInventory.openingQuantity || 0);
-            const currentExport = Number(existingInventory.monthlyExportQuantity || 0);
-            const currentExportPrice = Number(existingInventory.monthlyExportUnitPrice || 0);
-            
-            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại
-            const newClosingQty = currentOpening + importQty - currentExport;
-            const newClosingPrice = importPrice || Number(existingInventory.openingUnitPrice || 0);
-            const newClosingAmount = newClosingQty * newClosingPrice;
+            // 3.5. Nếu đã có record: CẬP NHẬT import + suggested, tái tính closing bằng Decimal
+            const dCurrOpen = D(existingInventory.openingQuantity);
+            const dCurrOpenPr = D(existingInventory.openingUnitPrice);
+            const dCurrOpenAm = D(existingInventory.openingTotalAmount);
+            const dCurrExport = D(existingInventory.monthlyExportQuantity);
+            const dCurrExpAmt = D(existingInventory.monthlyExportAmount);
+
+            const dNewImportQty = D(importQty);
+            const dNewImportPr = D(importPrice);
+            const dNewImportAmt = D(importAmount);
+
+            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (bằng Decimal)
+            const dNewClosingQty = dCurrOpen
+              .plus(dNewImportQty)
+              .minus(dCurrExport);
+            const totalValNew = dCurrOpenAm
+              .plus(dNewImportAmt)
+              .minus(dCurrExpAmt);
+            const dNewClosingPr = dNewClosingQty.gt(0)
+              ? totalValNew.div(dNewClosingQty)
+              : dNewImportPr.gt(0)
+                ? dNewImportPr
+                : dCurrOpenPr;
+            const dNewClosingAmt = dNewClosingQty.times(dNewClosingPr);
 
             // Cập nhật CHỈ các field từ template + recalculate closing
             await prisma.medicineInventory.update({
@@ -774,52 +953,71 @@ export class InventoryService {
                 medicineId_month_year: {
                   medicineId: medicine.id,
                   month,
-                  year
-                }
+                  year,
+                },
               },
               data: {
                 // Only update expiryDate if parsed successfully
                 ...(parsedExpiry ? { expiryDate: parsedExpiry } : {}),
-                // CHỈ CẬP NHẬT: Nhập phát sinh (từ user input)
-                monthlyImportQuantity: importQty,
-                monthlyImportUnitPrice: importPrice,
-                monthlyImportAmount: importAmount,
+                // CHỈ CẬP NHẬT: Nhập phát sinh (từ user input) - lưu dạng string Decimal
+                monthlyImportQuantity: dNewImportQty.toFixed(),
+                monthlyImportUnitPrice: dNewImportPr.toFixed(),
+                monthlyImportAmount: dNewImportAmt.toFixed(),
                 // CHỈ CẬP NHẬT: Đề nghị mua (từ user input)
-                suggestedPurchaseQuantity: suggestedQty,
-                suggestedPurchaseUnitPrice: suggestedPrice,
-                suggestedPurchaseAmount: suggestedAmount,
-                // TÁI TÍNH: Tồn cuối kỳ dựa trên opening hiện tại + import mới - export hiện tại
-                closingQuantity: newClosingQty,
-                closingUnitPrice: newClosingPrice,
-                closingTotalAmount: newClosingAmount,
+                suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
+                suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
+                suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
+                // TÁI TÍNH: Tồn cuối kỳ bằng Decimal
+                closingQuantity: dNewClosingQty.toFixed(),
+                closingUnitPrice: dNewClosingPr.toFixed(),
+                closingTotalAmount: dNewClosingAmt.toFixed(),
                 // KHÔNG CẬP NHẬT: openingQuantity, monthlyExportQuantity (giữ nguyên)
-              }
+              },
             });
           }
 
-          // 5. Tạo transaction IMPORT nếu có nhập phát sinh VÀ chưa tồn tại
-          // CHỈ tạo transaction khi tạo mới record (không phải update)
-          if (importQty > 0 && !existingInventory) {
-            await prisma.inventoryTransaction.create({
-              data: {
-                medicine: {
-                  connect: { id: medicine.id }
-                },
+          // 5. Upsert transaction IMPORT (cả tạo mới lẫn cập nhật)
+          // Dùng upsert để tránh duplicate khi re-import cùng tháng
+          if (D(importQty).gt(0)) {
+            // Tìm transaction IMPORT đầu tiên của tháng này cho thuốc này
+            const existingTx = await prisma.inventoryTransaction.findFirst({
+              where: {
+                medicineId: medicine.id,
                 type: 'IMPORT',
-                quantity: importQty,
-                unitPrice: importPrice,
-                totalAmount: importAmount,
-                notes: `Nhập phát sinh tháng ${month}/${year} từ Excel`,
-                expiryDate: parsedExpiry ?? null,
-              }
+                transactionDate: {
+                  gte: new Date(year, month - 1, 1),
+                  lt: new Date(year, month, 1),
+                },
+                notes: { contains: 'từ Excel' },
+              },
             });
+
+            const txPayload = {
+              medicineId: medicine.id,
+              type: 'IMPORT' as const,
+              quantity: D(importQty).toFixed(),
+              unitPrice: D(importPrice).toFixed(),
+              totalAmount: D(importAmount).toFixed(),
+              notes: `Nhập phát sinh tháng ${month}/${year} từ Excel`,
+              expiryDate: parsedExpiry ?? null,
+              transactionDate: new Date(year, month - 1, 1),
+            };
+
+            if (existingTx) {
+              await prisma.inventoryTransaction.update({
+                where: { id: existingTx.id },
+                data: txPayload,
+              });
+            } else {
+              await prisma.inventoryTransaction.create({ data: txPayload });
+            }
           }
         });
       } catch (error) {
         console.error(`❌ Error processing ${medicineData.name}:`, error);
         results.errors.push({
           medicine: medicineData.name,
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -852,7 +1050,7 @@ export class InventoryService {
       if (search) {
         where.medicine.name = {
           contains: search,
-          mode: 'insensitive'
+          mode: 'insensitive',
         };
       }
     }
@@ -862,67 +1060,59 @@ export class InventoryService {
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
+            category: true,
+          },
+        },
       },
       orderBy: [
         { medicine: { category: { sortOrder: 'asc' } } },
-        { medicine: { name: 'asc' } }
-      ]
+        { medicine: { name: 'asc' } },
+      ],
     });
 
-    // Convert Decimal fields to Number for JSON serialization
-    const convertedInventories = inventories.map(inv => ({
-      ...inv,
-      openingQuantity: Number(inv.openingQuantity),
-      openingUnitPrice: Number(inv.openingUnitPrice),
-      openingTotalAmount: Number(inv.openingTotalAmount),
-      monthlyImportQuantity: Number(inv.monthlyImportQuantity),
-      monthlyImportUnitPrice: Number(inv.monthlyImportUnitPrice),
-      monthlyImportAmount: Number(inv.monthlyImportAmount),
-      monthlyExportQuantity: Number(inv.monthlyExportQuantity),
-      monthlyExportUnitPrice: Number(inv.monthlyExportUnitPrice),
-      monthlyExportAmount: Number(inv.monthlyExportAmount),
-      closingQuantity: Number(inv.closingQuantity),
-      closingUnitPrice: Number(inv.closingUnitPrice),
-      closingTotalAmount: Number(inv.closingTotalAmount),
-      yearlyImportQuantity: Number(inv.yearlyImportQuantity),
-      yearlyImportUnitPrice: Number(inv.yearlyImportUnitPrice),
-      yearlyImportAmount: Number(inv.yearlyImportAmount),
-      yearlyExportQuantity: Number(inv.yearlyExportQuantity),
-      yearlyExportUnitPrice: Number(inv.yearlyExportUnitPrice),
-      yearlyExportAmount: Number(inv.yearlyExportAmount),
-      suggestedPurchaseQuantity: Number(inv.suggestedPurchaseQuantity),
-      suggestedPurchaseUnitPrice: Number(inv.suggestedPurchaseUnitPrice),
-      suggestedPurchaseAmount: Number(inv.suggestedPurchaseAmount),
-    }));
+    // Sử dụng serializeInventoryRow: giữ đủ độ chính xác đơn giá (đến 20 số thập phân)
+    const convertedInventories = inventories.map(serializeInventoryRow);
 
-    // Tính tổng hợp
-    const summary = convertedInventories.reduce((acc, inv) => {
-      return {
-        totalOpeningAmount: acc.totalOpeningAmount + inv.openingTotalAmount,
-        totalImportAmount: acc.totalImportAmount + inv.monthlyImportAmount,
-        totalExportAmount: acc.totalExportAmount + inv.monthlyExportAmount,
-        totalClosingAmount: acc.totalClosingAmount + inv.closingTotalAmount,
-        totalSuggestedAmount: acc.totalSuggestedAmount + inv.suggestedPurchaseAmount,
-      };
-    }, {
-      totalOpeningAmount: 0,
-      totalImportAmount: 0,
-      totalExportAmount: 0,
-      totalClosingAmount: 0,
-      totalSuggestedAmount: 0,
-    });
+    // Tính tổng hợp bằng Decimal để không cộng tròn
+    const summaryD = inventories.reduce(
+      (acc, inv) => ({
+        totalOpeningAmount: acc.totalOpeningAmount.plus(
+          D(inv.openingTotalAmount),
+        ),
+        totalImportAmount: acc.totalImportAmount.plus(
+          D(inv.monthlyImportAmount),
+        ),
+        totalExportAmount: acc.totalExportAmount.plus(
+          D(inv.monthlyExportAmount),
+        ),
+        totalClosingAmount: acc.totalClosingAmount.plus(
+          D(inv.closingTotalAmount),
+        ),
+        totalSuggestedAmount: acc.totalSuggestedAmount.plus(
+          D(inv.suggestedPurchaseAmount),
+        ),
+      }),
+      {
+        totalOpeningAmount: new Prisma.Decimal(0),
+        totalImportAmount: new Prisma.Decimal(0),
+        totalExportAmount: new Prisma.Decimal(0),
+        totalClosingAmount: new Prisma.Decimal(0),
+        totalSuggestedAmount: new Prisma.Decimal(0),
+      },
+    );
 
     return {
       month: targetMonth,
       year: targetYear,
-      items: convertedInventories, // Changed from 'inventories' to 'items' to match frontend type
+      items: convertedInventories,
       summary: {
         totalMedicines: convertedInventories.length,
-        ...summary
-      }
+        totalOpeningAmount: summaryD.totalOpeningAmount.toFixed(),
+        totalImportAmount: summaryD.totalImportAmount.toFixed(),
+        totalExportAmount: summaryD.totalExportAmount.toFixed(),
+        totalClosingAmount: summaryD.totalClosingAmount.toFixed(),
+        totalSuggestedAmount: summaryD.totalSuggestedAmount.toFixed(),
+      },
     };
   }
 
@@ -936,7 +1126,7 @@ export class InventoryService {
 
     if (categoryId) {
       where.medicine = {
-        categoryId
+        categoryId,
       };
     }
 
@@ -945,18 +1135,18 @@ export class InventoryService {
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
+            category: true,
+          },
+        },
       },
       orderBy: [
         { month: 'asc' },
         { medicine: { category: { sortOrder: 'asc' } } },
-        { medicine: { name: 'asc' } }
-      ]
+        { medicine: { name: 'asc' } },
+      ],
     });
 
-    // Group by month
+    // Group by month - dùng Decimal cho subtotals
     const monthlyData = inventories.reduce((acc, inv) => {
       const monthKey = `${inv.month}`;
       if (!acc[monthKey]) {
@@ -964,26 +1154,42 @@ export class InventoryService {
           month: inv.month,
           inventories: [],
           summary: {
-            totalOpeningAmount: 0,
-            totalImportAmount: 0,
-            totalExportAmount: 0,
-            totalClosingAmount: 0,
-          }
+            totalOpeningAmount: new Prisma.Decimal(0),
+            totalImportAmount: new Prisma.Decimal(0),
+            totalExportAmount: new Prisma.Decimal(0),
+            totalClosingAmount: new Prisma.Decimal(0),
+          },
         };
       }
 
-      acc[monthKey].inventories.push(inv);
-      acc[monthKey].summary.totalOpeningAmount += Number(inv.openingTotalAmount);
-      acc[monthKey].summary.totalImportAmount += Number(inv.monthlyImportAmount);
-      acc[monthKey].summary.totalExportAmount += Number(inv.monthlyExportAmount);
-      acc[monthKey].summary.totalClosingAmount += Number(inv.closingTotalAmount);
+      acc[monthKey].inventories.push(serializeInventoryRow(inv));
+      acc[monthKey].summary.totalOpeningAmount = acc[
+        monthKey
+      ].summary.totalOpeningAmount.plus(D(inv.openingTotalAmount));
+      acc[monthKey].summary.totalImportAmount = acc[
+        monthKey
+      ].summary.totalImportAmount.plus(D(inv.monthlyImportAmount));
+      acc[monthKey].summary.totalExportAmount = acc[
+        monthKey
+      ].summary.totalExportAmount.plus(D(inv.monthlyExportAmount));
+      acc[monthKey].summary.totalClosingAmount = acc[
+        monthKey
+      ].summary.totalClosingAmount.plus(D(inv.closingTotalAmount));
 
       return acc;
     }, {} as any);
 
+    // Chuyển Decimal sang string
+    Object.values(monthlyData).forEach((m: any) => {
+      m.summary.totalOpeningAmount = m.summary.totalOpeningAmount.toFixed();
+      m.summary.totalImportAmount = m.summary.totalImportAmount.toFixed();
+      m.summary.totalExportAmount = m.summary.totalExportAmount.toFixed();
+      m.summary.totalClosingAmount = m.summary.totalClosingAmount.toFixed();
+    });
+
     return {
       year,
-      months: Object.values(monthlyData)
+      months: Object.values(monthlyData),
     };
   }
 
@@ -1007,16 +1213,16 @@ export class InventoryService {
         year: currentYear,
         closingQuantity: {
           lt: minThreshold,
-          gt: 0
-        }
+          gt: 0,
+        },
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
-      }
+            category: true,
+          },
+        },
+      },
     });
 
     // Tìm thuốc sắp hết hạn
@@ -1026,19 +1232,19 @@ export class InventoryService {
         year: currentYear,
         expiryDate: {
           lte: expiryThreshold,
-          gte: currentDate
+          gte: currentDate,
         },
         closingQuantity: {
-          gt: 0
-        }
+          gt: 0,
+        },
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
-      }
+            category: true,
+          },
+        },
+      },
     });
 
     return {
@@ -1046,8 +1252,8 @@ export class InventoryService {
       expiringItems,
       summary: {
         lowStockCount: lowStockItems.length,
-        expiringCount: expiringItems.length
-      }
+        expiringCount: expiringItems.length,
+      },
     };
   }
 
@@ -1072,156 +1278,178 @@ export class InventoryService {
             inventoryBalances: {
               where: {
                 month: currentMonth,
-                year: currentYear
-              }
-            }
-          }
-        }
-      }
+                year: currentYear,
+              },
+            },
+          },
+        },
+      },
     });
 
     // Format data theo category groups
-    const result = categories.map(category => {
-      const items = category.medicines.map(medicine => {
+    const result = categories.map((category) => {
+      const items = category.medicines.map((medicine) => {
         const inventory = medicine.inventoryBalances[0];
 
         if (!inventory) {
-          // Nếu chưa có inventory, trả về dữ liệu empty
+          // Nếu chưa có inventory, trả về dữ liệu empty (amounts là string '0' để nhất quán)
           return {
             id: `temp-${medicine.id}`,
             medicineId: medicine.id,
-            medicine: {
-              ...medicine,
-              category
-            },
+            medicine: { ...medicine, category },
             month: currentMonth,
             year: currentYear,
             expiryDate: null,
             openingQuantity: 0,
-            openingUnitPrice: 0,
-            openingTotalAmount: 0,
+            openingUnitPrice: '0',
+            openingTotalAmount: '0',
             monthlyImportQuantity: 0,
-            monthlyImportUnitPrice: 0,
-            monthlyImportAmount: 0,
+            monthlyImportUnitPrice: '0',
+            monthlyImportAmount: '0',
             monthlyExportQuantity: 0,
-            monthlyExportUnitPrice: 0,
-            monthlyExportAmount: 0,
+            monthlyExportUnitPrice: '0',
+            monthlyExportAmount: '0',
             closingQuantity: 0,
-            closingUnitPrice: 0,
-            closingTotalAmount: 0,
+            closingUnitPrice: '0',
+            closingTotalAmount: '0',
             yearlyImportQuantity: 0,
-            yearlyImportUnitPrice: 0,
-            yearlyImportAmount: 0,
+            yearlyImportUnitPrice: '0',
+            yearlyImportAmount: '0',
             yearlyExportQuantity: 0,
-            yearlyExportUnitPrice: 0,
-            yearlyExportAmount: 0,
+            yearlyExportUnitPrice: '0',
+            yearlyExportAmount: '0',
             suggestedPurchaseQuantity: 0,
-            suggestedPurchaseUnitPrice: 0,
-            suggestedPurchaseAmount: 0,
+            suggestedPurchaseUnitPrice: '0',
+            suggestedPurchaseAmount: '0',
             createdAt: new Date(),
-            updatedAt: new Date()
+            updatedAt: new Date(),
           };
         }
 
         return {
-          ...inventory,
-          medicine: {
-            ...medicine,
-            category
-          }
+          ...serializeInventoryRow(inventory),
+          medicine: { ...medicine, category },
         };
       });
 
-      // Tính subtotal cho category
-      const subtotal = items.reduce((acc, item) => ({
-        openingQuantity: acc.openingQuantity + Number(item.openingQuantity || 0),
-        openingTotalAmount: acc.openingTotalAmount + Number(item.openingTotalAmount || 0),
-        monthlyImportQuantity: acc.monthlyImportQuantity + Number(item.monthlyImportQuantity || 0),
-        monthlyImportAmount: acc.monthlyImportAmount + Number(item.monthlyImportAmount || 0),
-        monthlyExportQuantity: acc.monthlyExportQuantity + Number(item.monthlyExportQuantity || 0),
-        monthlyExportAmount: acc.monthlyExportAmount + Number(item.monthlyExportAmount || 0),
-        closingQuantity: acc.closingQuantity + Number(item.closingQuantity || 0),
-        closingTotalAmount: acc.closingTotalAmount + Number(item.closingTotalAmount || 0),
-        yearlyImportQuantity: acc.yearlyImportQuantity + Number(item.yearlyImportQuantity || 0),
-        yearlyImportAmount: acc.yearlyImportAmount + Number(item.yearlyImportAmount || 0),
-        yearlyExportQuantity: acc.yearlyExportQuantity + Number(item.yearlyExportQuantity || 0),
-        yearlyExportAmount: acc.yearlyExportAmount + Number(item.yearlyExportAmount || 0),
-        suggestedPurchaseQuantity: acc.suggestedPurchaseQuantity + Number(item.suggestedPurchaseQuantity || 0),
-        suggestedPurchaseAmount: acc.suggestedPurchaseAmount + Number(item.suggestedPurchaseAmount || 0),
-      }), {
-        openingQuantity: 0,
-        openingTotalAmount: 0,
-        monthlyImportQuantity: 0,
-        monthlyImportAmount: 0,
-        monthlyExportQuantity: 0,
-        monthlyExportAmount: 0,
-        closingQuantity: 0,
-        closingTotalAmount: 0,
-        yearlyImportQuantity: 0,
-        yearlyImportAmount: 0,
-        yearlyExportQuantity: 0,
-        yearlyExportAmount: 0,
-        suggestedPurchaseQuantity: 0,
-        suggestedPurchaseAmount: 0,
-      });
+      // Tính subtotal cho category bằng Decimal
+      const ST = (key: string) =>
+        items.reduce(
+          (acc, item) => acc.plus(D(item[key])),
+          new Prisma.Decimal(0),
+        );
+
+      const subtotal = {
+        openingQuantity: items.reduce(
+          (s, i) => s + Number(i.openingQuantity || 0),
+          0,
+        ),
+        openingTotalAmount: ST('openingTotalAmount').toFixed(),
+        monthlyImportQuantity: items.reduce(
+          (s, i) => s + Number(i.monthlyImportQuantity || 0),
+          0,
+        ),
+        monthlyImportAmount: ST('monthlyImportAmount').toFixed(),
+        monthlyExportQuantity: items.reduce(
+          (s, i) => s + Number(i.monthlyExportQuantity || 0),
+          0,
+        ),
+        monthlyExportAmount: ST('monthlyExportAmount').toFixed(),
+        closingQuantity: items.reduce(
+          (s, i) => s + Number(i.closingQuantity || 0),
+          0,
+        ),
+        closingTotalAmount: ST('closingTotalAmount').toFixed(),
+        yearlyImportQuantity: items.reduce(
+          (s, i) => s + Number(i.yearlyImportQuantity || 0),
+          0,
+        ),
+        yearlyImportAmount: ST('yearlyImportAmount').toFixed(),
+        yearlyExportQuantity: items.reduce(
+          (s, i) => s + Number(i.yearlyExportQuantity || 0),
+          0,
+        ),
+        yearlyExportAmount: ST('yearlyExportAmount').toFixed(),
+        suggestedPurchaseQuantity: items.reduce(
+          (s, i) => s + Number(i.suggestedPurchaseQuantity || 0),
+          0,
+        ),
+        suggestedPurchaseAmount: ST('suggestedPurchaseAmount').toFixed(),
+      };
 
       return {
         category: {
           id: category.id,
           code: category.code,
           name: category.name,
-          sortOrder: category.sortOrder
+          sortOrder: category.sortOrder,
         },
         items,
-        subtotal
+        subtotal,
       };
     });
 
-    // Tính grand total
-    const grandTotal = result.reduce((acc, group) => ({
-      openingQuantity: acc.openingQuantity + group.subtotal.openingQuantity,
-      openingTotalAmount: acc.openingTotalAmount + group.subtotal.openingTotalAmount,
-      monthlyImportQuantity: acc.monthlyImportQuantity + group.subtotal.monthlyImportQuantity,
-      monthlyImportAmount: acc.monthlyImportAmount + group.subtotal.monthlyImportAmount,
-      monthlyExportQuantity: acc.monthlyExportQuantity + group.subtotal.monthlyExportQuantity,
-      monthlyExportAmount: acc.monthlyExportAmount + group.subtotal.monthlyExportAmount,
-      closingQuantity: acc.closingQuantity + group.subtotal.closingQuantity,
-      closingTotalAmount: acc.closingTotalAmount + group.subtotal.closingTotalAmount,
-      yearlyImportQuantity: acc.yearlyImportQuantity + group.subtotal.yearlyImportQuantity,
-      yearlyImportAmount: acc.yearlyImportAmount + group.subtotal.yearlyImportAmount,
-      yearlyExportQuantity: acc.yearlyExportQuantity + group.subtotal.yearlyExportQuantity,
-      yearlyExportAmount: acc.yearlyExportAmount + group.subtotal.yearlyExportAmount,
-      suggestedPurchaseQuantity: acc.suggestedPurchaseQuantity + group.subtotal.suggestedPurchaseQuantity,
-      suggestedPurchaseAmount: acc.suggestedPurchaseAmount + group.subtotal.suggestedPurchaseAmount,
-    }), {
-      openingQuantity: 0,
-      openingTotalAmount: 0,
-      monthlyImportQuantity: 0,
-      monthlyImportAmount: 0,
-      monthlyExportQuantity: 0,
-      monthlyExportAmount: 0,
-      closingQuantity: 0,
-      closingTotalAmount: 0,
-      yearlyImportQuantity: 0,
-      yearlyImportAmount: 0,
-      yearlyExportQuantity: 0,
-      yearlyExportAmount: 0,
-      suggestedPurchaseQuantity: 0,
-      suggestedPurchaseAmount: 0,
-    });
+    // Grand total bằng Decimal
+    const GT = (key: string) =>
+      result.reduce(
+        (acc, g) => acc.plus(D(g.subtotal[key])),
+        new Prisma.Decimal(0),
+      );
+
+    const grandTotal = {
+      openingQuantity: result.reduce(
+        (s, g) => s + g.subtotal.openingQuantity,
+        0,
+      ),
+      openingTotalAmount: GT('openingTotalAmount').toFixed(),
+      monthlyImportQuantity: result.reduce(
+        (s, g) => s + g.subtotal.monthlyImportQuantity,
+        0,
+      ),
+      monthlyImportAmount: GT('monthlyImportAmount').toFixed(),
+      monthlyExportQuantity: result.reduce(
+        (s, g) => s + g.subtotal.monthlyExportQuantity,
+        0,
+      ),
+      monthlyExportAmount: GT('monthlyExportAmount').toFixed(),
+      closingQuantity: result.reduce(
+        (s, g) => s + g.subtotal.closingQuantity,
+        0,
+      ),
+      closingTotalAmount: GT('closingTotalAmount').toFixed(),
+      yearlyImportQuantity: result.reduce(
+        (s, g) => s + g.subtotal.yearlyImportQuantity,
+        0,
+      ),
+      yearlyImportAmount: GT('yearlyImportAmount').toFixed(),
+      yearlyExportQuantity: result.reduce(
+        (s, g) => s + g.subtotal.yearlyExportQuantity,
+        0,
+      ),
+      yearlyExportAmount: GT('yearlyExportAmount').toFixed(),
+      suggestedPurchaseQuantity: result.reduce(
+        (s, g) => s + g.subtotal.suggestedPurchaseQuantity,
+        0,
+      ),
+      suggestedPurchaseAmount: GT('suggestedPurchaseAmount').toFixed(),
+    };
 
     return {
       month: currentMonth,
       year: currentYear,
       groups: result,
-      grandTotal
+      grandTotal,
     };
   }
 
   /**
    * Lấy dữ liệu inventory chi tiết theo năm với breakdown từng tháng
    */
-  async getDetailedYearlyInventory(params: { month: number; year: number; categoryId?: string }) {
+  async getDetailedYearlyInventory(params: {
+    month: number;
+    year: number;
+    categoryId?: string;
+  }) {
     const { month, year, categoryId } = params;
 
     // Lấy tất cả inventories của năm đó
@@ -1230,22 +1458,22 @@ export class InventoryService {
         year,
         ...(categoryId && {
           medicine: {
-            categoryId
-          }
-        })
+            categoryId,
+          },
+        }),
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
+            category: true,
+          },
+        },
       },
       orderBy: [
         { medicine: { category: { sortOrder: 'asc' } } },
         { medicine: { name: 'asc' } },
-        { month: 'asc' }
-      ]
+        { month: 'asc' },
+      ],
     });
 
     // Lấy tồn cuối năm trước (tháng 12 của năm trước)
@@ -1255,54 +1483,56 @@ export class InventoryService {
         year: year - 1,
         ...(categoryId && {
           medicine: {
-            categoryId
-          }
-        })
+            categoryId,
+          },
+        }),
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
-      }
+            category: true,
+          },
+        },
+      },
     });
 
     // Group by medicine
     const medicineGroups = new Map();
-    
-    inventories.forEach(inv => {
+
+    inventories.forEach((inv) => {
       if (!medicineGroups.has(inv.medicineId)) {
         medicineGroups.set(inv.medicineId, {
           medicine: inv.medicine,
-          months: Array(12).fill(null).map(() => ({
-            importQuantity: 0,
-            importUnitPrice: 0,
-            importAmount: 0,
-            exportQuantity: 0,
-            exportUnitPrice: 0,
-            exportAmount: 0
-          })),
+          months: Array(12)
+            .fill(null)
+            .map(() => ({
+              importQuantity: 0,
+              importUnitPrice: 0,
+              importAmount: 0,
+              exportQuantity: 0,
+              exportUnitPrice: 0,
+              exportAmount: 0,
+            })),
           previousYearClosing: {
             quantity: 0,
             unitPrice: 0,
-            totalAmount: 0
+            totalAmount: 0,
           },
-          currentMonthData: null
+          currentMonthData: null,
         });
       }
 
       const data = medicineGroups.get(inv.medicineId);
       const monthIndex = inv.month - 1;
-      
-      // Store monthly data
+
+      // Store monthly data - lưu dưới dạng chuỗi để giữ độ chính xác đơn giá
       data.months[monthIndex] = {
         importQuantity: Number(inv.monthlyImportQuantity || 0),
-        importUnitPrice: Number(inv.monthlyImportUnitPrice || 0),
-        importAmount: Number(inv.monthlyImportAmount || 0),
+        importUnitPrice: D(inv.monthlyImportUnitPrice).toFixed(),
+        importAmount: D(inv.monthlyImportAmount).toFixed(),
         exportQuantity: Number(inv.monthlyExportQuantity || 0),
-        exportUnitPrice: Number(inv.monthlyExportUnitPrice || 0),
-        exportAmount: Number(inv.monthlyExportAmount || 0)
+        exportUnitPrice: D(inv.monthlyExportUnitPrice).toFixed(),
+        exportAmount: D(inv.monthlyExportAmount).toFixed(),
       };
 
       // Store current month full data
@@ -1312,59 +1542,116 @@ export class InventoryService {
     });
 
     // Add previous year closing
-    previousYearClosing.forEach(inv => {
+    previousYearClosing.forEach((inv) => {
       if (medicineGroups.has(inv.medicineId)) {
         const data = medicineGroups.get(inv.medicineId);
         data.previousYearClosing = {
           quantity: Number(inv.closingQuantity || 0),
-          unitPrice: Number(inv.closingUnitPrice || 0),
-          totalAmount: Number(inv.closingTotalAmount || 0)
+          unitPrice: D(inv.closingUnitPrice).toFixed(),
+          totalAmount: D(inv.closingTotalAmount).toFixed(),
         };
       }
     });
 
     // Group by category
     const categoryGroups = new Map();
-    
+
     medicineGroups.forEach((data, medicineId) => {
       const categoryId = data.medicine.categoryId;
       if (!categoryGroups.has(categoryId)) {
         categoryGroups.set(categoryId, {
           category: data.medicine.category,
           items: [],
-          subtotal: this.createEmptyTotals()
+          subtotal: this.createEmptyTotals(),
         });
       }
 
       const group = categoryGroups.get(categoryId);
-      
-      // Calculate totals
-      const totalImport = data.months.reduce((sum, m) => ({
-        quantity: sum.quantity + m.importQuantity,
-        amount: sum.amount + m.importAmount
-      }), { quantity: 0, amount: 0 });
 
-      const totalExport = data.months.reduce((sum, m) => ({
-        quantity: sum.quantity + m.exportQuantity,
-        amount: sum.amount + m.exportAmount
-      }), { quantity: 0, amount: 0 });
+      // Calculate totals – dùng Decimal để tránh string-concatenation bug
+      const _totImp = data.months.reduce(
+        (sum, m) => ({
+          quantity: sum.quantity + m.importQuantity,
+          amount: D(sum.amount).plus(D(m.importAmount)).toFixed(),
+        }),
+        { quantity: 0, amount: '0' },
+      );
+      const totalImport = {
+        ..._totImp,
+        // Đơn giá bình quân = Thành tiền ÷ Số lượng
+        unitPrice:
+          _totImp.quantity > 0
+            ? D(_totImp.amount).div(D(_totImp.quantity)).toFixed()
+            : '0',
+      };
+
+      const _totExp = data.months.reduce(
+        (sum, m) => ({
+          quantity: sum.quantity + m.exportQuantity,
+          amount: D(sum.amount).plus(D(m.exportAmount)).toFixed(),
+        }),
+        { quantity: 0, amount: '0' },
+      );
+      const totalExport = {
+        ..._totExp,
+        unitPrice:
+          _totExp.quantity > 0
+            ? D(_totExp.amount).div(D(_totExp.quantity)).toFixed()
+            : '0',
+      };
+
+      // ── Lũy kế năm (Jan → params.month): tính từ monthly data đã load ──────
+      // Bypass DB's yearlyImportQuantity (bị reset về 0 mỗi tháng – bug cũ)
+      const _ytdImp = data.months.slice(0, month).reduce(
+        (sum, m) => ({
+          quantity: sum.quantity + m.importQuantity,
+          amount: D(sum.amount).plus(D(m.importAmount)).toFixed(),
+        }),
+        { quantity: 0, amount: '0' },
+      );
+      const yearlyImport = {
+        quantity: _ytdImp.quantity,
+        unitPrice:
+          _ytdImp.quantity > 0
+            ? D(_ytdImp.amount).div(D(_ytdImp.quantity)).toFixed()
+            : '0',
+        amount: _ytdImp.amount,
+      };
+
+      const _ytdExp = data.months.slice(0, month).reduce(
+        (sum, m) => ({
+          quantity: sum.quantity + m.exportQuantity,
+          amount: D(sum.amount).plus(D(m.exportAmount)).toFixed(),
+        }),
+        { quantity: 0, amount: '0' },
+      );
+      const yearlyExport = {
+        quantity: _ytdExp.quantity,
+        unitPrice:
+          _ytdExp.quantity > 0
+            ? D(_ytdExp.amount).div(D(_ytdExp.quantity)).toFixed()
+            : '0',
+        amount: _ytdExp.amount,
+      };
 
       const item = {
         medicine: data.medicine,
         currentMonthData: data.currentMonthData,
         previousYearClosing: data.previousYearClosing,
-        monthlyImport: data.months.map(m => ({
+        monthlyImport: data.months.map((m) => ({
           quantity: m.importQuantity,
           unitPrice: m.importUnitPrice,
-          amount: m.importAmount
+          amount: m.importAmount,
         })),
-        monthlyExport: data.months.map(m => ({
+        monthlyExport: data.months.map((m) => ({
           quantity: m.exportQuantity,
           unitPrice: m.exportUnitPrice,
-          amount: m.exportAmount
+          amount: m.exportAmount,
         })),
+        yearlyImport,
+        yearlyExport,
         totalImport,
-        totalExport
+        totalExport,
       };
 
       group.items.push(item);
@@ -1376,141 +1663,323 @@ export class InventoryService {
     // Calculate grand total
     const grandTotal = this.createEmptyTotals();
     const groups = Array.from(categoryGroups.values());
-    
-    groups.forEach(group => {
+
+    groups.forEach((group) => {
+      // Recalc unit prices for group subtotals BEFORE folding into grand total
+      this.recalcUnitPrices(group.subtotal);
       this.addToTotals(grandTotal, { subtotal: group.subtotal });
     });
+    // Recalc grand total unit prices after all groups are accumulated
+    this.recalcUnitPrices(grandTotal);
 
     return {
       month,
       year,
       groups,
-      grandTotal
+      grandTotal,
     };
+  }
+
+  /**
+   * Tính lại đơn giá bình quân gia quyền cho toàn bộ trường price/unitPrice
+   * trong một đối tượng totals (subtotal hoặc grandTotal).
+   *
+   * Phải gọi SAU KHI đã tích luỹ đủ quantity + amount, vì:
+   *   unitPrice = totalAmount ÷ totalQuantity
+   */
+  private recalcUnitPrices(totals: any): void {
+    // Helper: tính đơn giá, trả về '0' nếu qty = 0
+    const qp = (qty: unknown, amt: unknown): string => {
+      const q = D(qty);
+      return q.gt(0) ? D(amt).div(q).toFixed() : '0';
+    };
+
+    // Tồn đầu năm trước
+    totals.previousYearClosing.unitPrice = qp(
+      totals.previousYearClosing.quantity,
+      totals.previousYearClosing.totalAmount,
+    );
+
+    // Tổng nhập / Tổng xuất
+    totals.totalImport.unitPrice = qp(
+      totals.totalImport.quantity,
+      totals.totalImport.amount,
+    );
+    totals.totalExport.unitPrice = qp(
+      totals.totalExport.quantity,
+      totals.totalExport.amount,
+    );
+
+    // Lũy kế năm nhập / xuất
+    totals.yearlyImport.unitPrice = qp(
+      totals.yearlyImport.quantity,
+      totals.yearlyImport.amount,
+    );
+    totals.yearlyExport.unitPrice = qp(
+      totals.yearlyExport.quantity,
+      totals.yearlyExport.amount,
+    );
+
+    // Nhập/Xuất từng tháng
+    (totals.monthlyImport as any[]).forEach((m: any) => {
+      m.unitPrice = qp(m.quantity, m.amount);
+    });
+    (totals.monthlyExport as any[]).forEach((m: any) => {
+      m.unitPrice = qp(m.quantity, m.amount);
+    });
+
+    // Dữ liệu tháng hiện tại (tồn đầu, nhập, xuất, tồn cuối, lũy kế, đề nghị)
+    const cm = totals.currentMonth;
+    cm.openingUnitPrice = qp(cm.openingQuantity, cm.openingTotalAmount);
+    cm.monthlyImportUnitPrice = qp(
+      cm.monthlyImportQuantity,
+      cm.monthlyImportAmount,
+    );
+    cm.monthlyExportUnitPrice = qp(
+      cm.monthlyExportQuantity,
+      cm.monthlyExportAmount,
+    );
+    cm.closingUnitPrice = qp(cm.closingQuantity, cm.closingTotalAmount);
+    cm.suggestedPurchaseUnitPrice = qp(
+      cm.suggestedPurchaseQuantity,
+      cm.suggestedPurchaseAmount,
+    );
   }
 
   private createEmptyTotals() {
     return {
-      previousYearClosing: { quantity: 0, unitPrice: 0, totalAmount: 0 },
-      monthlyImport: Array(12).fill(null).map(() => ({ quantity: 0, unitPrice: 0, amount: 0 })),
-      monthlyExport: Array(12).fill(null).map(() => ({ quantity: 0, unitPrice: 0, amount: 0 })),
-      totalImport: { quantity: 0, amount: 0 },
-      totalExport: { quantity: 0, amount: 0 },
+      previousYearClosing: { quantity: 0, unitPrice: '0', totalAmount: '0' },
+      monthlyImport: Array(12)
+        .fill(null)
+        .map(() => ({ quantity: 0, unitPrice: '0', amount: '0' })),
+      monthlyExport: Array(12)
+        .fill(null)
+        .map(() => ({ quantity: 0, unitPrice: '0', amount: '0' })),
+      totalImport: { quantity: 0, unitPrice: '0', amount: '0' },
+      totalExport: { quantity: 0, unitPrice: '0', amount: '0' },
+      yearlyImport: { quantity: 0, unitPrice: '0', amount: '0' },
+      yearlyExport: { quantity: 0, unitPrice: '0', amount: '0' },
       currentMonth: {
         openingQuantity: 0,
-        openingUnitPrice: 0,
-        openingTotalAmount: 0,
+        openingUnitPrice: '0',
+        openingTotalAmount: '0',
         monthlyImportQuantity: 0,
-        monthlyImportUnitPrice: 0,
-        monthlyImportAmount: 0,
+        monthlyImportUnitPrice: '0',
+        monthlyImportAmount: '0',
         monthlyExportQuantity: 0,
-        monthlyExportUnitPrice: 0,
-        monthlyExportAmount: 0,
+        monthlyExportUnitPrice: '0',
+        monthlyExportAmount: '0',
         closingQuantity: 0,
-        closingUnitPrice: 0,
-        closingTotalAmount: 0,
+        closingUnitPrice: '0',
+        closingTotalAmount: '0',
         yearlyImportQuantity: 0,
-        yearlyImportUnitPrice: 0,
-        yearlyImportAmount: 0,
+        yearlyImportUnitPrice: '0',
+        yearlyImportAmount: '0',
         yearlyExportQuantity: 0,
-        yearlyExportUnitPrice: 0,
-        yearlyExportAmount: 0,
+        yearlyExportUnitPrice: '0',
+        yearlyExportAmount: '0',
         suggestedPurchaseQuantity: 0,
-        suggestedPurchaseUnitPrice: 0,
-        suggestedPurchaseAmount: 0
-      }
+        suggestedPurchaseUnitPrice: '0',
+        suggestedPurchaseAmount: '0',
+      },
     };
   }
 
   private addToTotals(totals: any, item: any) {
-    // Add from individual item
+    // ── Helper: Decimal string addition ──────────────────────────────────
+    const dAdd = (a: unknown, b: unknown) => D(a).plus(D(b)).toFixed();
+
+    // ── From individual item ─────────────────────────────────────────────
     if (item.previousYearClosing) {
-      totals.previousYearClosing.quantity += item.previousYearClosing.quantity;
-      totals.previousYearClosing.totalAmount += item.previousYearClosing.totalAmount;
+      totals.previousYearClosing.quantity += Number(
+        item.previousYearClosing.quantity || 0,
+      );
+      totals.previousYearClosing.totalAmount = dAdd(
+        totals.previousYearClosing.totalAmount,
+        item.previousYearClosing.totalAmount,
+      );
     }
-    
+
     if (item.totalImport) {
-      totals.totalImport.quantity += item.totalImport.quantity;
-      totals.totalImport.amount += item.totalImport.amount;
+      totals.totalImport.quantity += Number(item.totalImport.quantity || 0);
+      totals.totalImport.amount = dAdd(
+        totals.totalImport.amount,
+        item.totalImport.amount,
+      );
     }
-    
+
     if (item.totalExport) {
-      totals.totalExport.quantity += item.totalExport.quantity;
-      totals.totalExport.amount += item.totalExport.amount;
+      totals.totalExport.quantity += Number(item.totalExport.quantity || 0);
+      totals.totalExport.amount = dAdd(
+        totals.totalExport.amount,
+        item.totalExport.amount,
+      );
     }
 
     if (item.monthlyImport) {
       item.monthlyImport.forEach((m: any, i: number) => {
-        totals.monthlyImport[i].quantity += m.quantity;
-        totals.monthlyImport[i].amount += m.amount;
+        totals.monthlyImport[i].quantity += Number(m.quantity || 0);
+        totals.monthlyImport[i].amount = dAdd(
+          totals.monthlyImport[i].amount,
+          m.amount,
+        );
       });
     }
 
     if (item.monthlyExport) {
       item.monthlyExport.forEach((m: any, i: number) => {
-        totals.monthlyExport[i].quantity += m.quantity;
-        totals.monthlyExport[i].amount += m.amount;
+        totals.monthlyExport[i].quantity += Number(m.quantity || 0);
+        totals.monthlyExport[i].amount = dAdd(
+          totals.monthlyExport[i].amount,
+          m.amount,
+        );
       });
     }
 
-    // Add current month data
+    // ── Lũy kế năm (computed from monthly data) ──────────────────────────
+    if (item.yearlyImport) {
+      totals.yearlyImport.quantity += Number(item.yearlyImport.quantity || 0);
+      totals.yearlyImport.amount = dAdd(
+        totals.yearlyImport.amount,
+        item.yearlyImport.amount,
+      );
+    }
+    if (item.yearlyExport) {
+      totals.yearlyExport.quantity += Number(item.yearlyExport.quantity || 0);
+      totals.yearlyExport.amount = dAdd(
+        totals.yearlyExport.amount,
+        item.yearlyExport.amount,
+      );
+    }
+
+    // ── From current month data (individual item path) ───────────────────
     if (item.currentMonthData) {
       const cm = item.currentMonthData;
       totals.currentMonth.openingQuantity += Number(cm.openingQuantity || 0);
-      totals.currentMonth.openingTotalAmount += Number(cm.openingTotalAmount || 0);
-      totals.currentMonth.monthlyImportQuantity += Number(cm.monthlyImportQuantity || 0);
-      totals.currentMonth.monthlyImportAmount += Number(cm.monthlyImportAmount || 0);
-      totals.currentMonth.monthlyExportQuantity += Number(cm.monthlyExportQuantity || 0);
-      totals.currentMonth.monthlyExportAmount += Number(cm.monthlyExportAmount || 0);
+      totals.currentMonth.openingTotalAmount = dAdd(
+        totals.currentMonth.openingTotalAmount,
+        cm.openingTotalAmount,
+      );
+      totals.currentMonth.monthlyImportQuantity += Number(
+        cm.monthlyImportQuantity || 0,
+      );
+      totals.currentMonth.monthlyImportAmount = dAdd(
+        totals.currentMonth.monthlyImportAmount,
+        cm.monthlyImportAmount,
+      );
+      totals.currentMonth.monthlyExportQuantity += Number(
+        cm.monthlyExportQuantity || 0,
+      );
+      totals.currentMonth.monthlyExportAmount = dAdd(
+        totals.currentMonth.monthlyExportAmount,
+        cm.monthlyExportAmount,
+      );
       totals.currentMonth.closingQuantity += Number(cm.closingQuantity || 0);
-      totals.currentMonth.closingTotalAmount += Number(cm.closingTotalAmount || 0);
-      totals.currentMonth.yearlyImportQuantity += Number(cm.yearlyImportQuantity || 0);
-      totals.currentMonth.yearlyImportAmount += Number(cm.yearlyImportAmount || 0);
-      totals.currentMonth.yearlyExportQuantity += Number(cm.yearlyExportQuantity || 0);
-      totals.currentMonth.yearlyExportAmount += Number(cm.yearlyExportAmount || 0);
-      totals.currentMonth.suggestedPurchaseQuantity += Number(cm.suggestedPurchaseQuantity || 0);
-      totals.currentMonth.suggestedPurchaseAmount += Number(cm.suggestedPurchaseAmount || 0);
+      totals.currentMonth.closingTotalAmount = dAdd(
+        totals.currentMonth.closingTotalAmount,
+        cm.closingTotalAmount,
+      );
+      totals.currentMonth.suggestedPurchaseQuantity += Number(
+        cm.suggestedPurchaseQuantity || 0,
+      );
+      totals.currentMonth.suggestedPurchaseAmount = dAdd(
+        totals.currentMonth.suggestedPurchaseAmount,
+        cm.suggestedPurchaseAmount,
+      );
     }
 
-    // Add from subtotal (for grandTotal calculation)
+    // ── From subtotal (grandTotal accumulation path) ─────────────────────
     if (item.subtotal) {
       const sub = item.subtotal;
-      
-      totals.previousYearClosing.quantity += sub.previousYearClosing.quantity;
-      totals.previousYearClosing.totalAmount += sub.previousYearClosing.totalAmount;
-      
-      totals.totalImport.quantity += sub.totalImport.quantity;
-      totals.totalImport.amount += sub.totalImport.amount;
-      
-      totals.totalExport.quantity += sub.totalExport.quantity;
-      totals.totalExport.amount += sub.totalExport.amount;
-      
+
+      totals.previousYearClosing.quantity += Number(
+        sub.previousYearClosing.quantity || 0,
+      );
+      totals.previousYearClosing.totalAmount = dAdd(
+        totals.previousYearClosing.totalAmount,
+        sub.previousYearClosing.totalAmount,
+      );
+
+      totals.totalImport.quantity += Number(sub.totalImport.quantity || 0);
+      totals.totalImport.amount = dAdd(
+        totals.totalImport.amount,
+        sub.totalImport.amount,
+      );
+
+      totals.totalExport.quantity += Number(sub.totalExport.quantity || 0);
+      totals.totalExport.amount = dAdd(
+        totals.totalExport.amount,
+        sub.totalExport.amount,
+      );
+
       sub.monthlyImport.forEach((m: any, i: number) => {
-        totals.monthlyImport[i].quantity += m.quantity;
-        totals.monthlyImport[i].amount += m.amount;
+        totals.monthlyImport[i].quantity += Number(m.quantity || 0);
+        totals.monthlyImport[i].amount = dAdd(
+          totals.monthlyImport[i].amount,
+          m.amount,
+        );
       });
-      
+
       sub.monthlyExport.forEach((m: any, i: number) => {
-        totals.monthlyExport[i].quantity += m.quantity;
-        totals.monthlyExport[i].amount += m.amount;
+        totals.monthlyExport[i].quantity += Number(m.quantity || 0);
+        totals.monthlyExport[i].amount = dAdd(
+          totals.monthlyExport[i].amount,
+          m.amount,
+        );
       });
-      
-      // Add current month from subtotal
+
+      // Lũy kế năm (subtotal path)
+      if (sub.yearlyImport) {
+        totals.yearlyImport.quantity += Number(sub.yearlyImport.quantity || 0);
+        totals.yearlyImport.amount = dAdd(
+          totals.yearlyImport.amount,
+          sub.yearlyImport.amount,
+        );
+      }
+      if (sub.yearlyExport) {
+        totals.yearlyExport.quantity += Number(sub.yearlyExport.quantity || 0);
+        totals.yearlyExport.amount = dAdd(
+          totals.yearlyExport.amount,
+          sub.yearlyExport.amount,
+        );
+      }
+
       if (sub.currentMonth) {
-        totals.currentMonth.openingQuantity += sub.currentMonth.openingQuantity;
-        totals.currentMonth.openingTotalAmount += sub.currentMonth.openingTotalAmount;
-        totals.currentMonth.monthlyImportQuantity += sub.currentMonth.monthlyImportQuantity;
-        totals.currentMonth.monthlyImportAmount += sub.currentMonth.monthlyImportAmount;
-        totals.currentMonth.monthlyExportQuantity += sub.currentMonth.monthlyExportQuantity;
-        totals.currentMonth.monthlyExportAmount += sub.currentMonth.monthlyExportAmount;
-        totals.currentMonth.closingQuantity += sub.currentMonth.closingQuantity;
-        totals.currentMonth.closingTotalAmount += sub.currentMonth.closingTotalAmount;
-        totals.currentMonth.yearlyImportQuantity += sub.currentMonth.yearlyImportQuantity;
-        totals.currentMonth.yearlyImportAmount += sub.currentMonth.yearlyImportAmount;
-        totals.currentMonth.yearlyExportQuantity += sub.currentMonth.yearlyExportQuantity;
-        totals.currentMonth.yearlyExportAmount += sub.currentMonth.yearlyExportAmount;
-        totals.currentMonth.suggestedPurchaseQuantity += sub.currentMonth.suggestedPurchaseQuantity;
-        totals.currentMonth.suggestedPurchaseAmount += sub.currentMonth.suggestedPurchaseAmount;
+        totals.currentMonth.openingQuantity += Number(
+          sub.currentMonth.openingQuantity || 0,
+        );
+        totals.currentMonth.openingTotalAmount = dAdd(
+          totals.currentMonth.openingTotalAmount,
+          sub.currentMonth.openingTotalAmount,
+        );
+        totals.currentMonth.monthlyImportQuantity += Number(
+          sub.currentMonth.monthlyImportQuantity || 0,
+        );
+        totals.currentMonth.monthlyImportAmount = dAdd(
+          totals.currentMonth.monthlyImportAmount,
+          sub.currentMonth.monthlyImportAmount,
+        );
+        totals.currentMonth.monthlyExportQuantity += Number(
+          sub.currentMonth.monthlyExportQuantity || 0,
+        );
+        totals.currentMonth.monthlyExportAmount = dAdd(
+          totals.currentMonth.monthlyExportAmount,
+          sub.currentMonth.monthlyExportAmount,
+        );
+        totals.currentMonth.closingQuantity += Number(
+          sub.currentMonth.closingQuantity || 0,
+        );
+        totals.currentMonth.closingTotalAmount = dAdd(
+          totals.currentMonth.closingTotalAmount,
+          sub.currentMonth.closingTotalAmount,
+        );
+        totals.currentMonth.suggestedPurchaseQuantity += Number(
+          sub.currentMonth.suggestedPurchaseQuantity || 0,
+        );
+        totals.currentMonth.suggestedPurchaseAmount = dAdd(
+          totals.currentMonth.suggestedPurchaseAmount,
+          sub.currentMonth.suggestedPurchaseAmount,
+        );
       }
     }
   }
@@ -1528,23 +1997,23 @@ export class InventoryService {
         medicineId_month_year: {
           medicineId,
           month: currentMonth,
-          year: currentYear
-        }
+          year: currentYear,
+        },
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
-      }
+            category: true,
+          },
+        },
+      },
     });
 
     if (!inventory) {
       // Nếu chưa có inventory cho tháng này, trả về 0
       const medicine = await this.prisma.medicine.findUnique({
         where: { id: medicineId },
-        include: { category: true }
+        include: { category: true },
       });
 
       if (!medicine) {
@@ -1556,17 +2025,115 @@ export class InventoryService {
         currentStock: 0,
         unitPrice: 0,
         totalValue: 0,
-        expiryDate: null
+        expiryDate: null,
       };
     }
 
     return {
       medicine: inventory.medicine,
       currentStock: Number(inventory.closingQuantity),
-      unitPrice: Number(inventory.closingUnitPrice),
-      totalValue: Number(inventory.closingTotalAmount),
-      expiryDate: inventory.expiryDate
+      unitPrice: D(inventory.closingUnitPrice).toFixed(),
+      totalValue: D(inventory.closingTotalAmount).toFixed(),
+      expiryDate: inventory.expiryDate,
     };
+  }
+
+  /**
+   * Đảo ngược (hoàn tác) các giao dịch XUẤT KHO đã tạo cho một medical record.
+   *
+   * Dùng khi BÁC SĨ CHỈNH SỬA đơn thuốc:
+   *  1. Xóa bản ghi InventoryTransaction cũ (EXPORT) khỏi log
+   *  2. Trừ số lượng xuất ra khỏi MedicineInventory (monthly + yearly export qty/amount)
+   *  3. Cập nhật lại closingQuantity/Price/Amount
+   *
+   * Cách tiếp cận này giữ báo cáo xuất sạch sẽ (không tạo thêm IMPORT giả).
+   */
+  async reverseExportTransaction(
+    medicineId: string,
+    referenceId: string,
+  ): Promise<void> {
+    // 1. Tìm tất cả EXPORT transactions cho medicineId + referenceId này
+    const oldTx = await this.prisma.inventoryTransaction.findMany({
+      where: { medicineId, referenceId, type: 'EXPORT' },
+    });
+
+    if (oldTx.length === 0) return; // Không có gì để đảo ngược
+
+    // 2. Tổng qty + amount cần hoàn trả
+    const totalQty = oldTx.reduce(
+      (s, t) => D(s).plus(D(t.quantity)).toFixed(),
+      '0',
+    );
+    const totalAmount = oldTx.reduce(
+      (s, t) => D(s).plus(D(t.totalAmount)).toFixed(),
+      '0',
+    );
+
+    // 3. Xóa các transaction records cũ
+    await this.prisma.inventoryTransaction.deleteMany({
+      where: { medicineId, referenceId, type: 'EXPORT' },
+    });
+
+    // 4. Xác định month/year từ transaction đầu tiên
+    const txDate = oldTx[0].transactionDate;
+    const month = txDate.getMonth() + 1;
+    const year = txDate.getFullYear();
+
+    // 5. Đọc inventory record của tháng đó
+    const inv = await this.prisma.medicineInventory.findUnique({
+      where: { medicineId_month_year: { medicineId, month, year } },
+    });
+
+    if (!inv) return; // Không có tồn kho tháng đó → không cần cập nhật
+
+    // 6. Tính lại export quantities (trừ đi lượng đã hoàn tác)
+    const safeQty = (base: unknown, sub: string) => {
+      const r = D(base).minus(D(sub));
+      return r.gte(0) ? r : new Prisma.Decimal(0);
+    };
+
+    const newMonthExportQty = safeQty(inv.monthlyExportQuantity, totalQty);
+    const newMonthExportAmount = safeQty(inv.monthlyExportAmount, totalAmount);
+    const newMonthExportPrice = newMonthExportQty.gt(0)
+      ? newMonthExportAmount.div(newMonthExportQty)
+      : new Prisma.Decimal(0);
+
+    const newYearExportQty = safeQty(inv.yearlyExportQuantity, totalQty);
+    const newYearExportAmount = safeQty(inv.yearlyExportAmount, totalAmount);
+    const newYearExportPrice = newYearExportQty.gt(0)
+      ? newYearExportAmount.div(newYearExportQty)
+      : new Prisma.Decimal(0);
+
+    // 7. Tính lại tồn cuối kỳ
+    const closingQty = D(inv.openingQuantity)
+      .plus(D(inv.monthlyImportQuantity))
+      .minus(newMonthExportQty);
+
+    const totalValue = D(inv.openingQuantity)
+      .times(D(inv.openingUnitPrice))
+      .plus(D(inv.monthlyImportAmount))
+      .minus(newMonthExportAmount);
+
+    const closingPrice = closingQty.gt(0)
+      ? totalValue.div(closingQty)
+      : new Prisma.Decimal(0);
+    const closingAmount = closingQty.times(closingPrice);
+
+    // 8. Cập nhật MedicineInventory
+    await this.prisma.medicineInventory.update({
+      where: { medicineId_month_year: { medicineId, month, year } },
+      data: {
+        monthlyExportQuantity: newMonthExportQty.toFixed(),
+        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportAmount: newMonthExportAmount.toFixed(),
+        yearlyExportQuantity: newYearExportQty.toFixed(),
+        yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+        yearlyExportAmount: newYearExportAmount.toFixed(),
+        closingQuantity: closingQty.toFixed(),
+        closingUnitPrice: closingPrice.toFixed(),
+        closingTotalAmount: closingAmount.toFixed(),
+      },
+    });
   }
 
   /**
@@ -1575,22 +2142,29 @@ export class InventoryService {
   async updateInventoryBalanceManual(data: UpdateInventoryBalanceDto) {
     const { medicineId, month, year, ...updateFields } = data;
 
-    // Tính toán các giá trị
-    const openingAmount = updateFields.openingQuantity && updateFields.openingUnitPrice
-      ? updateFields.openingQuantity * updateFields.openingUnitPrice
-      : undefined;
+    // Tính toán opening amount và suggested amount bằng Decimal
+    const openingAmount =
+      updateFields.openingQuantity && updateFields.openingUnitPrice
+        ? D(updateFields.openingQuantity)
+            .times(D(updateFields.openingUnitPrice))
+            .toFixed()
+        : undefined;
 
-    const suggestedAmount = updateFields.suggestedPurchaseQuantity && updateFields.suggestedPurchaseUnitPrice
-      ? updateFields.suggestedPurchaseQuantity * updateFields.suggestedPurchaseUnitPrice
-      : undefined;
+    const suggestedAmount =
+      updateFields.suggestedPurchaseQuantity &&
+      updateFields.suggestedPurchaseUnitPrice
+        ? D(updateFields.suggestedPurchaseQuantity)
+            .times(D(updateFields.suggestedPurchaseUnitPrice))
+            .toFixed()
+        : undefined;
 
     return this.prisma.medicineInventory.upsert({
       where: {
         medicineId_month_year: {
           medicineId,
           month,
-          year
-        }
+          year,
+        },
       },
       update: {
         ...updateFields,
@@ -1607,16 +2181,17 @@ export class InventoryService {
         openingUnitPrice: updateFields.openingUnitPrice || 0,
         openingTotalAmount: openingAmount || 0,
         suggestedPurchaseQuantity: updateFields.suggestedPurchaseQuantity || 0,
-        suggestedPurchaseUnitPrice: updateFields.suggestedPurchaseUnitPrice || 0,
+        suggestedPurchaseUnitPrice:
+          updateFields.suggestedPurchaseUnitPrice || 0,
         suggestedPurchaseAmount: suggestedAmount || 0,
       },
       include: {
         medicine: {
           include: {
-            category: true
-          }
-        }
-      }
+            category: true,
+          },
+        },
+      },
     });
   }
 
@@ -1638,11 +2213,18 @@ export class InventoryService {
     console.log(`🔍 Normalized title: ${normalizedTitle}`);
 
     // Pattern: QT THUỐC THÁNG XX NĂM YYYY (flexible spacing)
-    const currentMatch = normalizedTitle.match(/QT\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/);
-    const suggestedMatch = normalizedTitle.match(/[DĐ][EỀ]\s+NGH[IỊ]\s+MUA\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/);
+    const currentMatch = normalizedTitle.match(
+      /QT\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/,
+    );
+    const suggestedMatch = normalizedTitle.match(
+      /[DĐ][EỀ]\s+NGH[IỊ]\s+MUA\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/,
+    );
 
     if (!currentMatch) {
-      console.warn('⚠️ Could not extract current month/year from title:', normalizedTitle);
+      console.warn(
+        '⚠️ Could not extract current month/year from title:',
+        normalizedTitle,
+      );
       console.warn('⚠️ Expected format: "QT THUỐC THÁNG XX NĂM YYYY"');
       return null;
     }
@@ -1664,13 +2246,15 @@ export class InventoryService {
       }
     }
 
-    console.log(`📅 Detected from title: Current ${currentMonth}/${currentYear}, Suggested ${suggestedMonth}/${suggestedYear}`);
+    console.log(
+      `📅 Detected from title: Current ${currentMonth}/${currentYear}, Suggested ${suggestedMonth}/${suggestedYear}`,
+    );
 
     return {
       currentMonth,
       currentYear,
       suggestedMonth,
-      suggestedYear
+      suggestedYear,
     };
   }
 
@@ -1689,12 +2273,12 @@ export class InventoryService {
     console.log(`📖 Reading Excel file from buffer`);
 
     const XLSX = await import('xlsx');
-    
+
     // Read file from buffer
     const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
-    
+
     console.log(`📋 Sheet name: ${sheetName}`);
 
     // Read title row (row 1) - search in cells A1, B1, C1, etc. for merged cells
@@ -1710,13 +2294,15 @@ export class InventoryService {
         }
       }
     }
-    
+
     console.log(`📋 Title found: ${title}`);
 
     // Extract month/year from title
     const dateInfo = this.extractMonthYearFromTitle(title);
     if (!dateInfo) {
-      throw new Error('Không thể xác định tháng/năm từ tiêu đề Excel. Format yêu cầu: "QT THUỐC THÁNG XX NĂM YYYY _ ĐỀ NGHỊ MUA THUỐC THÁNG YY NĂM YYYY"');
+      throw new Error(
+        'Không thể xác định tháng/năm từ tiêu đề Excel. Format yêu cầu: "QT THUỐC THÁNG XX NĂM YYYY _ ĐỀ NGHỊ MUA THUỐC THÁNG YY NĂM YYYY"',
+      );
     }
 
     const { currentMonth: month, currentYear: year } = dateInfo;
@@ -1724,7 +2310,7 @@ export class InventoryService {
     // Convert to array format, starting from row 9 (0-indexed: 8)
     const data = XLSX.utils.sheet_to_json(worksheet, {
       header: 1,
-      range: 8
+      range: 8,
     }) as any[][];
 
     console.log(`📊 Found ${data.length} rows`);
@@ -1747,8 +2333,10 @@ export class InventoryService {
         // Check if this is a category header row
         const firstCell = row[0]?.toString() || '';
         const secondCell = row[1]?.toString() || '';
-        
-        const categoryMatch = firstCell.match(/^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII)\s*-/);
+
+        const categoryMatch = firstCell.match(
+          /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII)\s*-/,
+        );
         if (categoryMatch) {
           currentCategory = categoryMatch[1];
           console.log(`\n📁 Category: ${currentCategory} - ${firstCell}`);
@@ -1757,21 +2345,33 @@ export class InventoryService {
 
         // Skip total rows, signature section, and date rows
         const skipPatterns = [
-          'TỔNG CỘNG', 'Tổng cộng',
-          'Ngày', 'NGÀY', 'ngày',
-          'TGĐ', 'TỔNG HỢP', 'Tổng hợp',
-          'KẾ TOÁN', 'Kế toán',
-          'Giám đốc', 'GIÁM ĐỐC',
-          'LÊ THANH', 'PHAN THỊ',
-          'CHỮ KÝ', 'chữ ký'
+          'TỔNG CỘNG',
+          'Tổng cộng',
+          'Ngày',
+          'NGÀY',
+          'ngày',
+          'TGĐ',
+          'TỔNG HỢP',
+          'Tổng hợp',
+          'KẾ TOÁN',
+          'Kế toán',
+          'Giám đốc',
+          'GIÁM ĐỐC',
+          'LÊ THANH',
+          'PHAN THỊ',
+          'CHỮ KÝ',
+          'chữ ký',
         ];
-        
-        const shouldSkip = skipPatterns.some(pattern => 
-          firstCell.includes(pattern) || secondCell.includes(pattern)
+
+        const shouldSkip = skipPatterns.some(
+          (pattern) =>
+            firstCell.includes(pattern) || secondCell.includes(pattern),
         );
-        
+
         if (shouldSkip) {
-          console.log(`⊘ Skipping signature/date row: ${firstCell} | ${secondCell}`);
+          console.log(
+            `⊘ Skipping signature/date row: ${firstCell} | ${secondCell}`,
+          );
           skipped++;
           continue;
         }
@@ -1788,14 +2388,20 @@ export class InventoryService {
 
         // Skip invalid names
         const invalidPatterns = ['TGD', 'THANH', 'LỄ', 'CHỮ KÝ', 'GIÁM ĐỐC'];
-        if (invalidPatterns.some(pattern => medicineName.toUpperCase().includes(pattern))) {
+        if (
+          invalidPatterns.some((pattern) =>
+            medicineName.toUpperCase().includes(pattern),
+          )
+        ) {
           skipped++;
           continue;
         }
 
         // Progress indicator
-        if ((imported + updated) % 10 === 0 && (imported + updated) > 0) {
-          process.stdout.write(`\r⏳ Processing... ${imported + updated} medicines`);
+        if ((imported + updated) % 10 === 0 && imported + updated > 0) {
+          process.stdout.write(
+            `\r⏳ Processing... ${imported + updated} medicines`,
+          );
         }
 
         // Parse data from row
@@ -1840,7 +2446,7 @@ export class InventoryService {
 
         if (currentCategory) {
           let category = await this.prisma.medicineCategory.findUnique({
-            where: { code: currentCategory }
+            where: { code: currentCategory },
           });
 
           if (category) {
@@ -1853,8 +2459,8 @@ export class InventoryService {
         let medicine = await this.prisma.medicine.findFirst({
           where: {
             name: medicineName,
-            isActive: true
-          }
+            isActive: true,
+          },
         });
 
         if (!medicine) {
@@ -1867,7 +2473,7 @@ export class InventoryService {
               strength,
               manufacturer,
               units,
-            }
+            },
           });
           imported++;
         } else {
@@ -1875,12 +2481,13 @@ export class InventoryService {
             where: { id: medicine.id },
             data: {
               type: itemType,
-              categoryId: categoryId !== undefined ? categoryId : medicine.categoryId,
+              categoryId:
+                categoryId !== undefined ? categoryId : medicine.categoryId,
               route: route || medicine.route,
               strength: strength || medicine.strength,
               manufacturer: manufacturer || medicine.manufacturer,
               units: units || medicine.units,
-            }
+            },
           });
           updated++;
         }
@@ -1909,13 +2516,22 @@ export class InventoryService {
                   month = part2;
                 }
 
-                if (day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900 && year <= 2100) {
+                if (
+                  day >= 1 &&
+                  day <= 31 &&
+                  month >= 1 &&
+                  month <= 12 &&
+                  year >= 1900 &&
+                  year <= 2100
+                ) {
                   const isoDateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
                   const testDate = new Date(isoDateStr);
 
-                  if (testDate.getFullYear() === year &&
-                      testDate.getMonth() + 1 === month &&
-                      testDate.getDate() === day) {
+                  if (
+                    testDate.getFullYear() === year &&
+                    testDate.getMonth() + 1 === month &&
+                    testDate.getDate() === day
+                  ) {
                     expiryDate = testDate;
                   }
                 }
@@ -1933,7 +2549,9 @@ export class InventoryService {
                   days = days - 1;
                 }
                 const year1900 = new Date(Date.UTC(1900, 0, 1));
-                expiryDate = new Date(year1900.getTime() + (days - 1) * 24 * 60 * 60 * 1000);
+                expiryDate = new Date(
+                  year1900.getTime() + (days - 1) * 24 * 60 * 60 * 1000,
+                );
 
                 if (isNaN(expiryDate.getTime())) {
                   expiryDate = null;
@@ -1941,7 +2559,10 @@ export class InventoryService {
               }
             }
           } catch (e: any) {
-            console.warn(`⚠️ Error parsing expiry date: ${expiryStr}`, e.message);
+            console.warn(
+              `⚠️ Error parsing expiry date: ${expiryStr}`,
+              e.message,
+            );
             expiryDate = null;
           }
         }
@@ -1952,8 +2573,8 @@ export class InventoryService {
             medicineId_month_year: {
               medicineId: medicine.id,
               month,
-              year
-            }
+              year,
+            },
           },
           update: {
             expiryDate,
@@ -2005,13 +2626,13 @@ export class InventoryService {
             suggestedPurchaseQuantity: suggestedQty,
             suggestedPurchaseUnitPrice: suggestedPrice,
             suggestedPurchaseAmount: suggestedAmount,
-          }
+          },
         });
       } catch (error) {
         errors.push({
           row: row[0],
           medicine: row[1],
-          error: error.message
+          error: error.message,
         });
       }
     }
@@ -2030,7 +2651,7 @@ export class InventoryService {
       skipped,
       errors,
       month,
-      year
+      year,
     };
   }
 }

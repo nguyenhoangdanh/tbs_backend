@@ -1,5 +1,16 @@
-import { IsString, IsNumber, IsOptional, IsArray, ValidateNested, IsEnum, IsDateString, IsInt, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsArray,
+  ValidateNested,
+  IsEnum,
+  IsDateString,
+  IsInt,
+  Min,
+  Max,
+} from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // ========== MEDICINE CATEGORY DTOs ==========
@@ -8,7 +19,10 @@ export class CreateMedicineCategoryDto {
   @IsString()
   code: string;
 
-  @ApiProperty({ description: 'Category name', example: 'NHÓM THUỐC HẠ SỐT, GIẢM ĐAU, CHỐNG VIÊM KHÔNG STEROID' })
+  @ApiProperty({
+    description: 'Category name',
+    example: 'NHÓM THUỐC HẠ SỐT, GIẢM ĐAU, CHỐNG VIÊM KHÔNG STEROID',
+  })
   @IsString()
   name: string;
 
@@ -57,7 +71,10 @@ export class CreateInventoryTransactionDto {
   @IsString()
   medicineId: string;
 
-  @ApiProperty({ enum: InventoryTransactionTypeDto, description: 'Transaction type' })
+  @ApiProperty({
+    enum: InventoryTransactionTypeDto,
+    description: 'Transaction type',
+  })
   @IsEnum(InventoryTransactionTypeDto)
   type: InventoryTransactionTypeDto;
 
@@ -65,10 +82,17 @@ export class CreateInventoryTransactionDto {
   @IsNumber()
   quantity: number;
 
-  @ApiPropertyOptional({ description: 'Unit price (defaults to 0 if not provided)', example: 5000 })
+  @ApiPropertyOptional({
+    description:
+      'Unit price – gửi dưới dạng string để giữ đủ đủ 20 số thập phân. Cũng chấp nhận số thầy đổi sang string tự động.',
+    example: '5000.12345678901234567890',
+  })
   @IsOptional()
-  @IsNumber()
-  unitPrice?: number;
+  @Transform(({ value }) =>
+    value !== undefined && value !== null ? String(value) : value,
+  )
+  @IsString()
+  unitPrice?: string;
 
   @ApiPropertyOptional({ description: 'Transaction date - defaults to now' })
   @IsOptional()
@@ -90,7 +114,10 @@ export class CreateInventoryTransactionDto {
   @IsString()
   supplier?: string;
 
-  @ApiPropertyOptional({ description: 'Reference type', example: 'PURCHASE_ORDER' })
+  @ApiPropertyOptional({
+    description: 'Reference type',
+    example: 'PURCHASE_ORDER',
+  })
   @IsOptional()
   @IsString()
   referenceType?: string;
@@ -258,14 +285,21 @@ export class ImportMedicineFromExcelDto {
   @IsNumber()
   suggestedPurchaseUnitPrice?: number;
 
-  @ApiPropertyOptional({ description: 'Suggested purchase amount (from Excel)' })
+  @ApiPropertyOptional({
+    description: 'Suggested purchase amount (from Excel)',
+  })
   @IsOptional()
   @IsNumber()
   suggestedPurchaseAmount?: number;
 }
 
 export class BulkImportInventoryDto {
-  @ApiProperty({ description: 'Month (1-12)', example: 1, minimum: 1, maximum: 12 })
+  @ApiProperty({
+    description: 'Month (1-12)',
+    example: 1,
+    minimum: 1,
+    maximum: 12,
+  })
   @IsInt()
   @Min(1)
   @Max(12)
@@ -275,7 +309,10 @@ export class BulkImportInventoryDto {
   @IsInt()
   year: number;
 
-  @ApiProperty({ description: 'Array of medicines to import', type: [ImportMedicineFromExcelDto] })
+  @ApiProperty({
+    description: 'Array of medicines to import',
+    type: [ImportMedicineFromExcelDto],
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ImportMedicineFromExcelDto)
@@ -289,7 +326,9 @@ export class BulkImportInventoryDto {
  * Hệ thống tự tính: Tồn đầu kỳ, Xuất, Tồn cuối kỳ
  */
 export class SimplifiedImportMedicineDto {
-  @ApiPropertyOptional({ description: 'Medicine ID (for updating existing records)' })
+  @ApiPropertyOptional({
+    description: 'Medicine ID (for updating existing records)',
+  })
   @IsOptional()
   @IsString()
   medicineId?: string;
@@ -299,7 +338,9 @@ export class SimplifiedImportMedicineDto {
   @IsNumber()
   stt?: number;
 
-  @ApiPropertyOptional({ description: 'Medicine name (required for creating new records)' })
+  @ApiPropertyOptional({
+    description: 'Medicine name (required for creating new records)',
+  })
   @IsOptional()
   @IsString()
   name?: string;
@@ -330,45 +371,71 @@ export class SimplifiedImportMedicineDto {
   units?: string;
 
   // ===== NHẬP PHÁT SINH TRONG THÁNG =====
-  @ApiPropertyOptional({ description: 'Import quantity (Số lượng nhập)', example: 100 })
+  @ApiPropertyOptional({
+    description: 'Import quantity (Số lượng nhập)',
+    example: 100,
+  })
   @IsOptional()
   @IsNumber()
   monthlyImportQuantity?: number;
 
-  @ApiPropertyOptional({ description: 'Import unit price (Đơn giá nhập)', example: 5000 })
+  @ApiPropertyOptional({
+    description: 'Import unit price (Đơn giá nhập)',
+    example: 5000,
+  })
   @IsOptional()
   @IsNumber()
   monthlyImportUnitPrice?: number;
 
-  @ApiPropertyOptional({ description: 'Import amount (Thành tiền nhập = SL × ĐG)', example: 500000 })
+  @ApiPropertyOptional({
+    description: 'Import amount (Thành tiền nhập = SL × ĐG)',
+    example: 500000,
+  })
   @IsOptional()
   @IsNumber()
   monthlyImportAmount?: number;
 
-  @ApiPropertyOptional({ description: 'Expiry date (Hạn sử dụng)', example: '2025-12-31' })
+  @ApiPropertyOptional({
+    description: 'Expiry date (Hạn sử dụng)',
+    example: '2025-12-31',
+  })
   @IsOptional()
   @IsDateString()
   expiryDate?: string;
 
   // ===== ĐỀ NGHỊ MUA THÁNG TIẾP THEO =====
-  @ApiPropertyOptional({ description: 'Suggested quantity (Số lượng đề nghị)', example: 50 })
+  @ApiPropertyOptional({
+    description: 'Suggested quantity (Số lượng đề nghị)',
+    example: 50,
+  })
   @IsOptional()
   @IsNumber()
   suggestedPurchaseQuantity?: number;
 
-  @ApiPropertyOptional({ description: 'Suggested unit price (Đơn giá đề nghị)', example: 5500 })
+  @ApiPropertyOptional({
+    description: 'Suggested unit price (Đơn giá đề nghị)',
+    example: 5500,
+  })
   @IsOptional()
   @IsNumber()
   suggestedPurchaseUnitPrice?: number;
 
-  @ApiPropertyOptional({ description: 'Suggested amount (Thành tiền đề nghị = SL × ĐG)', example: 275000 })
+  @ApiPropertyOptional({
+    description: 'Suggested amount (Thành tiền đề nghị = SL × ĐG)',
+    example: 275000,
+  })
   @IsOptional()
   @IsNumber()
   suggestedPurchaseAmount?: number;
 }
 
 export class SimplifiedBulkImportDto {
-  @ApiProperty({ description: 'Month (1-12)', example: 1, minimum: 1, maximum: 12 })
+  @ApiProperty({
+    description: 'Month (1-12)',
+    example: 1,
+    minimum: 1,
+    maximum: 12,
+  })
   @IsInt()
   @Min(1)
   @Max(12)
@@ -378,7 +445,10 @@ export class SimplifiedBulkImportDto {
   @IsInt()
   year: number;
 
-  @ApiProperty({ description: 'Array of medicines to import', type: [SimplifiedImportMedicineDto] })
+  @ApiProperty({
+    description: 'Array of medicines to import',
+    type: [SimplifiedImportMedicineDto],
+  })
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => SimplifiedImportMedicineDto)
@@ -437,10 +507,16 @@ export class UpdateInventoryBalanceDto {
   @IsNumber()
   openingQuantity?: number;
 
-  @ApiPropertyOptional({ description: 'Opening unit price' })
+  @ApiPropertyOptional({
+    description: 'Opening unit price – gửi string để giữ đủ 20 số thập phân',
+    example: '5000.12345678901234567890',
+  })
   @IsOptional()
-  @IsNumber()
-  openingUnitPrice?: number;
+  @Transform(({ value }) =>
+    value !== undefined && value !== null ? String(value) : value,
+  )
+  @IsString()
+  openingUnitPrice?: string;
 
   // Đề nghị mua
   @ApiPropertyOptional({ description: 'Suggested purchase quantity' })
@@ -448,10 +524,17 @@ export class UpdateInventoryBalanceDto {
   @IsNumber()
   suggestedPurchaseQuantity?: number;
 
-  @ApiPropertyOptional({ description: 'Suggested purchase unit price' })
+  @ApiPropertyOptional({
+    description:
+      'Suggested purchase unit price – gửi string để giữ đủ 20 số thập phân',
+    example: '5500.12345678901234567890',
+  })
   @IsOptional()
-  @IsNumber()
-  suggestedPurchaseUnitPrice?: number;
+  @Transform(({ value }) =>
+    value !== undefined && value !== null ? String(value) : value,
+  )
+  @IsString()
+  suggestedPurchaseUnitPrice?: string;
 }
 
 // ========== STOCK ALERT DTOs ==========

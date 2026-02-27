@@ -531,21 +531,34 @@ const medicines = [
 ];
 
 async function main() {
+  let created = 0;
+  let updated = 0;
+
   for (const med of medicines) {
-    await prisma.medicine.upsert({
+    const existing = await prisma.medicine.findFirst({
       where: { name: med.name },
-      update: {
-        strength: med.strength,
-        frequency: med.frequency,
-        instructions: med.instructions,
-        units: med.units,
-        isActive: true,
-      },
-      create: med,
     });
+
+    if (existing) {
+      await prisma.medicine.update({
+        where: { id: existing.id },
+        data: {
+          strength: med.strength,
+          frequency: med.frequency,
+          instructions: med.instructions,
+          units: med.units,
+          isActive: true,
+        },
+      });
+      updated++;
+    } else {
+      await prisma.medicine.create({ data: med });
+      created++;
+    }
   }
+
   console.log(
-    `✅ Seeded ${medicines.length} medicines (frequency & instructions set to "" where unknown).`,
+    `✅ Seeded ${medicines.length} medicines — created: ${created}, updated: ${updated}.`,
   );
 }
 
