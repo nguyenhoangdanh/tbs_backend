@@ -846,6 +846,33 @@ export class InventoryService {
           // Parse expiry date once for all uses
           const parsedExpiry = parseDateString(medicineData.expiryDate);
 
+          // ── Lũy kế năm: tổng nhập/xuất từ các tháng trước trong năm ──────────
+          const prevYearMonths = await prisma.medicineInventory.findMany({
+            where: { medicineId: medicine.id, year, month: { lt: month } },
+            select: {
+              monthlyImportQuantity: true,
+              monthlyImportAmount: true,
+              monthlyExportQuantity: true,
+              monthlyExportAmount: true,
+            },
+          });
+          const dPrevYtdImportQty = prevYearMonths.reduce(
+            (s, i) => s.plus(D(i.monthlyImportQuantity)),
+            new Prisma.Decimal(0),
+          );
+          const dPrevYtdImportAmt = prevYearMonths.reduce(
+            (s, i) => s.plus(D(i.monthlyImportAmount)),
+            new Prisma.Decimal(0),
+          );
+          const dPrevYtdExportQty = prevYearMonths.reduce(
+            (s, i) => s.plus(D(i.monthlyExportQuantity)),
+            new Prisma.Decimal(0),
+          );
+          const dPrevYtdExportAmt = prevYearMonths.reduce(
+            (s, i) => s.plus(D(i.monthlyExportAmount)),
+            new Prisma.Decimal(0),
+          );
+
           // 3.4. Nếu chưa có record, tính toán đầy đủ
           if (!existingInventory) {
             // Lấy tồn cuối kỳ tháng trước làm tồn đầu kỳ tháng này
@@ -897,6 +924,18 @@ export class InventoryService {
                 : dOpenPrice;
             const dClosingAmt = dClosingQty.times(dClosingPrice);
 
+            // Lũy kế năm = tháng trước + tháng này
+            const dYtdImportQty = dPrevYtdImportQty.plus(dImportQty);
+            const dYtdImportAmt = dPrevYtdImportAmt.plus(dImportAmt);
+            const dYtdImportPr = dYtdImportQty.gt(0)
+              ? dYtdImportAmt.div(dYtdImportQty)
+              : dImportPrice;
+            const dYtdExportQty = dPrevYtdExportQty.plus(dExportQty);
+            const dYtdExportAmt = dPrevYtdExportAmt.plus(dExportAmt);
+            const dYtdExportPr = dYtdExportQty.gt(0)
+              ? dYtdExportAmt.div(dYtdExportQty)
+              : new Prisma.Decimal(0);
+
             // Tạo mới inventory record
             await prisma.medicineInventory.create({
               data: {
@@ -916,6 +955,12 @@ export class InventoryService {
                 closingQuantity: dClosingQty.toFixed(),
                 closingUnitPrice: dClosingPrice.toFixed(),
                 closingTotalAmount: dClosingAmt.toFixed(),
+                yearlyImportQuantity: dYtdImportQty.toFixed(),
+                yearlyImportUnitPrice: dYtdImportPr.toFixed(),
+                yearlyImportAmount: dYtdImportAmt.toFixed(),
+                yearlyExportQuantity: dYtdExportQty.toFixed(),
+                yearlyExportUnitPrice: dYtdExportPr.toFixed(),
+                yearlyExportAmount: dYtdExportAmt.toFixed(),
                 suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
                 suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
                 suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
@@ -947,7 +992,19 @@ export class InventoryService {
                 : dCurrOpenPr;
             const dNewClosingAmt = dNewClosingQty.times(dNewClosingPr);
 
-            // Cập nhật CHỈ các field từ template + recalculate closing
+            // Lũy kế năm = tháng trước + tháng này (export giữ nguyên từ DB)
+            const dNewYtdImportQty = dPrevYtdImportQty.plus(dNewImportQty);
+            const dNewYtdImportAmt = dPrevYtdImportAmt.plus(dNewImportAmt);
+            const dNewYtdImportPr = dNewYtdImportQty.gt(0)
+              ? dNewYtdImportAmt.div(dNewYtdImportQty)
+              : dNewImportPr;
+            const dNewYtdExportQty = dPrevYtdExportQty.plus(dCurrExport);
+            const dNewYtdExportAmt = dPrevYtdExportAmt.plus(dCurrExpAmt);
+            const dNewYtdExportPr = dNewYtdExportQty.gt(0)
+              ? dNewYtdExportAmt.div(dNewYtdExportQty)
+              : new Prisma.Decimal(0);
+
+            // Cập nhật CHỈ các field từ template + recalculate closing + yearly
             await prisma.medicineInventory.update({
               where: {
                 medicineId_month_year: {
@@ -971,6 +1028,13 @@ export class InventoryService {
                 closingQuantity: dNewClosingQty.toFixed(),
                 closingUnitPrice: dNewClosingPr.toFixed(),
                 closingTotalAmount: dNewClosingAmt.toFixed(),
+                // CẬP NHẬT: Lũy kế năm (tái tính từ monthly data để đảm bảo chính xác)
+                yearlyImportQuantity: dNewYtdImportQty.toFixed(),
+                yearlyImportUnitPrice: dNewYtdImportPr.toFixed(),
+                yearlyImportAmount: dNewYtdImportAmt.toFixed(),
+                yearlyExportQuantity: dNewYtdExportQty.toFixed(),
+                yearlyExportUnitPrice: dNewYtdExportPr.toFixed(),
+                yearlyExportAmount: dNewYtdExportAmt.toFixed(),
                 // KHÔNG CẬP NHẬT: openingQuantity, monthlyExportQuantity (giữ nguyên)
               },
             });
@@ -1248,8 +1312,8 @@ export class InventoryService {
     });
 
     return {
-      lowStockItems,
-      expiringItems,
+      lowStockItems: lowStockItems.map(serializeInventoryRow),
+      expiringItems: expiringItems.map(serializeInventoryRow),
       summary: {
         lowStockCount: lowStockItems.length,
         expiringCount: expiringItems.length,
@@ -2140,23 +2204,35 @@ export class InventoryService {
    * Cập nhật thông tin inventory balance thủ công
    */
   async updateInventoryBalanceManual(data: UpdateInventoryBalanceDto) {
-    const { medicineId, month, year, ...updateFields } = data;
+    const { medicineId, month, year } = data;
 
-    // Tính toán opening amount và suggested amount bằng Decimal
-    const openingAmount =
-      updateFields.openingQuantity && updateFields.openingUnitPrice
-        ? D(updateFields.openingQuantity)
-            .times(D(updateFields.openingUnitPrice))
-            .toFixed()
-        : undefined;
+    // Đọc record hiện tại để lấy monthly import/export (giữ nguyên khi cập nhật opening)
+    const existing = await this.prisma.medicineInventory.findUnique({
+      where: { medicineId_month_year: { medicineId, month, year } },
+    });
 
-    const suggestedAmount =
-      updateFields.suggestedPurchaseQuantity &&
-      updateFields.suggestedPurchaseUnitPrice
-        ? D(updateFields.suggestedPurchaseQuantity)
-            .times(D(updateFields.suggestedPurchaseUnitPrice))
-            .toFixed()
-        : undefined;
+    // Tính opening bằng Decimal (ưu tiên giá trị mới, fallback về existing)
+    const openingQty = D(data.openingQuantity ?? existing?.openingQuantity ?? 0);
+    const openingPrice = D(data.openingUnitPrice ?? existing?.openingUnitPrice ?? 0);
+    const openingAmount = openingQty.times(openingPrice);
+
+    // Tính suggested bằng Decimal
+    const suggestedQty = D(data.suggestedPurchaseQuantity ?? existing?.suggestedPurchaseQuantity ?? 0);
+    const suggestedPrice = D(data.suggestedPurchaseUnitPrice ?? existing?.suggestedPurchaseUnitPrice ?? 0);
+    const suggestedAmount = suggestedQty.times(suggestedPrice);
+
+    // Tái tính tồn cuối kỳ dựa trên opening mới + monthly import/export hiện tại
+    const importQty = D(existing?.monthlyImportQuantity ?? 0);
+    const importAmount = D(existing?.monthlyImportAmount ?? 0);
+    const exportQty = D(existing?.monthlyExportQuantity ?? 0);
+    const exportAmount = D(existing?.monthlyExportAmount ?? 0);
+
+    const closingQty = openingQty.plus(importQty).minus(exportQty);
+    const totalValue = openingAmount.plus(importAmount).minus(exportAmount);
+    const closingPrice = closingQty.gt(0)
+      ? totalValue.div(closingQty)
+      : new Prisma.Decimal(0);
+    const closingAmount = closingQty.times(closingPrice);
 
     return this.prisma.medicineInventory.upsert({
       where: {
@@ -2167,23 +2243,31 @@ export class InventoryService {
         },
       },
       update: {
-        ...updateFields,
-        openingTotalAmount: openingAmount,
-        suggestedPurchaseAmount: suggestedAmount,
-        expiryDate: data.expiryDate ? new Date(data.expiryDate) : undefined,
+        openingQuantity: openingQty.toFixed(),
+        openingUnitPrice: openingPrice.toFixed(),
+        openingTotalAmount: openingAmount.toFixed(),
+        suggestedPurchaseQuantity: suggestedQty.toFixed(),
+        suggestedPurchaseUnitPrice: suggestedPrice.toFixed(),
+        suggestedPurchaseAmount: suggestedAmount.toFixed(),
+        closingQuantity: closingQty.toFixed(),
+        closingUnitPrice: closingPrice.toFixed(),
+        closingTotalAmount: closingAmount.toFixed(),
+        ...(data.expiryDate ? { expiryDate: new Date(data.expiryDate) } : {}),
       },
       create: {
         medicineId,
         month,
         year,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
-        openingQuantity: updateFields.openingQuantity || 0,
-        openingUnitPrice: updateFields.openingUnitPrice || 0,
-        openingTotalAmount: openingAmount || 0,
-        suggestedPurchaseQuantity: updateFields.suggestedPurchaseQuantity || 0,
-        suggestedPurchaseUnitPrice:
-          updateFields.suggestedPurchaseUnitPrice || 0,
-        suggestedPurchaseAmount: suggestedAmount || 0,
+        openingQuantity: openingQty.toFixed(),
+        openingUnitPrice: openingPrice.toFixed(),
+        openingTotalAmount: openingAmount.toFixed(),
+        suggestedPurchaseQuantity: suggestedQty.toFixed(),
+        suggestedPurchaseUnitPrice: suggestedPrice.toFixed(),
+        suggestedPurchaseAmount: suggestedAmount.toFixed(),
+        closingQuantity: closingQty.toFixed(),
+        closingUnitPrice: closingPrice.toFixed(),
+        closingTotalAmount: closingAmount.toFixed(),
       },
       include: {
         medicine: {
