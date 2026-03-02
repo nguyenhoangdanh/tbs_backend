@@ -2212,13 +2212,25 @@ export class InventoryService {
     });
 
     // Tính opening bằng Decimal (ưu tiên giá trị mới, fallback về existing)
-    const openingQty = D(data.openingQuantity ?? existing?.openingQuantity ?? 0);
-    const openingPrice = D(data.openingUnitPrice ?? existing?.openingUnitPrice ?? 0);
+    const openingQty = D(
+      data.openingQuantity ?? existing?.openingQuantity ?? 0,
+    );
+    const openingPrice = D(
+      data.openingUnitPrice ?? existing?.openingUnitPrice ?? 0,
+    );
     const openingAmount = openingQty.times(openingPrice);
 
     // Tính suggested bằng Decimal
-    const suggestedQty = D(data.suggestedPurchaseQuantity ?? existing?.suggestedPurchaseQuantity ?? 0);
-    const suggestedPrice = D(data.suggestedPurchaseUnitPrice ?? existing?.suggestedPurchaseUnitPrice ?? 0);
+    const suggestedQty = D(
+      data.suggestedPurchaseQuantity ??
+        existing?.suggestedPurchaseQuantity ??
+        0,
+    );
+    const suggestedPrice = D(
+      data.suggestedPurchaseUnitPrice ??
+        existing?.suggestedPurchaseUnitPrice ??
+        0,
+    );
     const suggestedAmount = suggestedQty.times(suggestedPrice);
 
     // Tái tính tồn cuối kỳ dựa trên opening mới + monthly import/export hiện tại
