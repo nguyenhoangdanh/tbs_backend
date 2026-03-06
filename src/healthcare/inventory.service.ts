@@ -2763,6 +2763,116 @@ export class InventoryService {
     };
   }
 
+  // ==================== ADMIN RECALCULATION ====================
+
+  /**
+   * Tính lại toàn bộ chuỗi tồn kho cho tất cả thuốc từ bản ghi đầu tiên.
+   * Dùng để sửa dữ liệu lịch sử bị sai sau khi upgrade logic cascade.
+   * Invariant: closing[M] = opening[M] + import[M] - export[M]; opening[M+1] = closing[M]
+   */
+  async recalculateAllBalances(): Promise<{ medicines: number; records: number }> {
+    // Lấy danh sách tất cả medicineId có trong inventory
+    const distinct = await this.prisma.medicineInventory.findMany({
+      distinct: ['medicineId'],
+      select: { medicineId: true },
+    });
+
+    let totalRecords = 0;
+
+    for (const { medicineId } of distinct) {
+      // Lấy tất cả bản ghi của thuốc này, sắp xếp theo thời gian tăng dần
+      const records = await this.prisma.medicineInventory.findMany({
+        where: { medicineId },
+        orderBy: [{ year: 'asc' }, { month: 'asc' }],
+      });
+
+      if (records.length === 0) continue;
+
+      // Xử lý bản ghi đầu tiên: recompute closing từ opening+import-export
+      // (opening của bản ghi đầu tiên là dữ liệu gốc, giữ nguyên)
+      let prevYear = records[0].year;
+      let ytdImportQty = new Prisma.Decimal(0);
+      let ytdImportAmt = new Prisma.Decimal(0);
+      let ytdExportQty = new Prisma.Decimal(0);
+      let ytdExportAmt = new Prisma.Decimal(0);
+
+      for (let i = 0; i < records.length; i++) {
+        const rec = records[i];
+
+        // Reset YTD khi sang năm mới
+        if (rec.year !== prevYear) {
+          ytdImportQty = new Prisma.Decimal(0);
+          ytdImportAmt = new Prisma.Decimal(0);
+          ytdExportQty = new Prisma.Decimal(0);
+          ytdExportAmt = new Prisma.Decimal(0);
+          prevYear = rec.year;
+        }
+
+        const dOpenQty   = i === 0 ? D(rec.openingQuantity)   : D(records[i - 1].closingQuantity ?? 0);
+        const dOpenPrice = i === 0 ? D(rec.openingUnitPrice)   : D(records[i - 1].closingUnitPrice ?? 0);
+
+        // Khi sang năm mới nhưng không phải bản ghi đầu tiên: opening = closing tháng trước (giữ nguyên)
+        // Tức là với i>0, ta đã gán đúng từ records[i-1].closing ở bước trên
+        // Với i=0 thì giữ nguyên opening gốc từ DB
+
+        const dOpenAmt   = dOpenQty.times(dOpenPrice);
+        const dImportQty = D(rec.monthlyImportQuantity);
+        const dImportAmt = D(rec.monthlyImportAmount);
+        const dExportQty = D(rec.monthlyExportQuantity);
+        const dExportAmt = D(rec.monthlyExportAmount);
+
+        const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
+        const totalVal    = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+        const dClosingPrice = dClosingQty.gt(0)
+          ? totalVal.div(dClosingQty)
+          : dOpenPrice;
+        const dClosingAmt = dClosingQty.times(dClosingPrice);
+
+        // YTD tích lũy
+        ytdImportQty = ytdImportQty.plus(dImportQty);
+        ytdImportAmt = ytdImportAmt.plus(dImportAmt);
+        ytdExportQty = ytdExportQty.plus(dExportQty);
+        ytdExportAmt = ytdExportAmt.plus(dExportAmt);
+
+        const ytdImportPr = ytdImportQty.gt(0)
+          ? ytdImportAmt.div(ytdImportQty)
+          : dOpenPrice;
+        const ytdExportPr = ytdExportQty.gt(0)
+          ? ytdExportAmt.div(ytdExportQty)
+          : new Prisma.Decimal(0);
+
+        // Cập nhật bản ghi với dữ liệu tính toán lại
+        await this.prisma.medicineInventory.update({
+          where: {
+            medicineId_month_year: { medicineId, month: rec.month, year: rec.year },
+          },
+          data: {
+            openingQuantity:      dOpenQty.toFixed(),
+            openingUnitPrice:     dOpenPrice.toFixed(),
+            openingTotalAmount:   dOpenAmt.toFixed(),
+            closingQuantity:      dClosingQty.toFixed(),
+            closingUnitPrice:     dClosingPrice.toFixed(),
+            closingTotalAmount:   dClosingAmt.toFixed(),
+            yearlyImportQuantity: ytdImportQty.toFixed(),
+            yearlyImportUnitPrice: ytdImportPr.toFixed(),
+            yearlyImportAmount:   ytdImportAmt.toFixed(),
+            yearlyExportQuantity: ytdExportQty.toFixed(),
+            yearlyExportUnitPrice: ytdExportPr.toFixed(),
+            yearlyExportAmount:   ytdExportAmt.toFixed(),
+          },
+        });
+
+        // Ghi ngược closing đã tính lại vào mảng để bản ghi kế tiếp dùng đúng
+        (records[i] as any).closingQuantity  = dClosingQty.toFixed();
+        (records[i] as any).closingUnitPrice = dClosingPrice.toFixed();
+
+        totalRecords++;
+      }
+    }
+
+    return { medicines: distinct.length, records: totalRecords };
+  }
+
   // ==================== CUMULATIVE BALANCE HELPERS ====================
 
   /**

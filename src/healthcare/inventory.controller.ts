@@ -15,7 +15,14 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+  ApiConsumes,
+  ApiBody,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -44,7 +51,10 @@ export class InventoryController {
   @Get('categories')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get all medicine categories' })
-  @ApiResponse({ status: 200, description: 'Categories retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Categories retrieved successfully',
+  })
   async getCategories() {
     return this.inventoryService.getMedicineCategories();
   }
@@ -63,7 +73,7 @@ export class InventoryController {
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async updateCategory(
     @Param('id') id: string,
-    @Body() data: UpdateMedicineCategoryDto
+    @Body() data: UpdateMedicineCategoryDto,
   ) {
     return this.inventoryService.updateMedicineCategory(id, data);
   }
@@ -79,8 +89,13 @@ export class InventoryController {
 
   @Post('transactions')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({ summary: 'Create inventory transaction (import/export/adjustment)' })
-  @ApiResponse({ status: 201, description: 'Transaction created and inventory updated' })
+  @ApiOperation({
+    summary: 'Create inventory transaction (import/export/adjustment)',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Transaction created and inventory updated',
+  })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async createTransaction(@Body() data: CreateInventoryTransactionDto) {
     return this.inventoryService.createInventoryTransaction(data);
@@ -89,7 +104,10 @@ export class InventoryController {
   @Get('transactions')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get inventory transaction history' })
-  @ApiResponse({ status: 200, description: 'Transactions retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Transactions retrieved successfully',
+  })
   async getTransactions(
     @Query('medicineId') medicineId?: string,
     @Query('type') type?: InventoryTransactionTypeDto,
@@ -100,7 +118,7 @@ export class InventoryController {
       medicineId,
       type,
       startDate,
-      endDate
+      endDate,
     );
   }
 
@@ -108,9 +126,10 @@ export class InventoryController {
 
   @Post('bulk-import')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Bulk import inventory data from Excel',
-    description: 'Import medicine inventory data parsed from Excel file. Frontend should parse Excel using ExcelJS first.'
+    description:
+      'Import medicine inventory data parsed from Excel file. Frontend should parse Excel using ExcelJS first.',
   })
   @ApiResponse({ status: 201, description: 'Bulk import completed' })
   // ❌ TẮT ValidationPipe để tránh làm tròn số thập phân
@@ -121,24 +140,30 @@ export class InventoryController {
       month: data.month,
       year: data.year,
       medicinesCount: data.medicines?.length || 0,
-      sampleMedicine: data.medicines?.[3] ? {
-        name: data.medicines[3].name,
-        openingTotalAmount: data.medicines[3].openingTotalAmount,
-        closingTotalAmount: data.medicines[3].closingTotalAmount,
-        monthlyImportAmount: data.medicines[3].monthlyImportAmount,
-        monthlyExportAmount: data.medicines[3].monthlyExportAmount,
-        openingAmountType: typeof data.medicines[3].openingTotalAmount,
-        closingAmountType: typeof data.medicines[3].closingTotalAmount,
-        hasOpeningAmount: data.medicines[3].openingTotalAmount !== undefined,
-        hasClosingAmount: data.medicines[3].closingTotalAmount !== undefined,
-      } : null
+      sampleMedicine: data.medicines?.[3]
+        ? {
+            name: data.medicines[3].name,
+            openingTotalAmount: data.medicines[3].openingTotalAmount,
+            closingTotalAmount: data.medicines[3].closingTotalAmount,
+            monthlyImportAmount: data.medicines[3].monthlyImportAmount,
+            monthlyExportAmount: data.medicines[3].monthlyExportAmount,
+            openingAmountType: typeof data.medicines[3].openingTotalAmount,
+            closingAmountType: typeof data.medicines[3].closingTotalAmount,
+            hasOpeningAmount:
+              data.medicines[3].openingTotalAmount !== undefined,
+            hasClosingAmount:
+              data.medicines[3].closingTotalAmount !== undefined,
+          }
+        : null,
     });
-    
+
     // Manual validation
     if (!data.month || !data.year || !Array.isArray(data.medicines)) {
-      throw new Error('Invalid request: month, year, and medicines array are required');
+      throw new Error(
+        'Invalid request: month, year, and medicines array are required',
+      );
     }
-    
+
     try {
       const result = await this.inventoryService.bulkImportInventory(data);
       console.log('✅ Bulk import completed successfully');
@@ -152,21 +177,23 @@ export class InventoryController {
 
   @Post('simplified-import')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Simplified bulk import (13-column template)',
     description: `
       Import medicine inventory using simplified 13-column template.
       User only inputs: Medicine info + Import transactions + Suggested purchases.
       System auto-calculates: Opening balance, Export, Closing balance based on prescription data.
-    `
+    `,
   })
   @ApiResponse({ status: 201, description: 'Simplified import completed' })
   async simplifiedImport(@Body() data: any) {
     // Manual validation
     if (!data.month || !data.year || !Array.isArray(data.medicines)) {
-      throw new Error('Invalid request: month, year, and medicines array are required');
+      throw new Error(
+        'Invalid request: month, year, and medicines array are required',
+      );
     }
-    
+
     try {
       const result = await this.inventoryService.simplifiedBulkImport(data);
       return result;
@@ -182,7 +209,10 @@ export class InventoryController {
   @Get('reports/monthly')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get monthly inventory report' })
-  @ApiResponse({ status: 200, description: 'Monthly report retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Monthly report retrieved successfully',
+  })
   async getMonthlyReport(@Query() params: GetInventoryReportDto) {
     return this.inventoryService.getInventoryReport(params);
   }
@@ -190,29 +220,38 @@ export class InventoryController {
   @Get('reports/yearly/:year')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get yearly inventory report (all months)' })
-  @ApiResponse({ status: 200, description: 'Yearly report retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Yearly report retrieved successfully',
+  })
   async getYearlyReport(
     @Param('year') year: string,
-    @Query('categoryId') categoryId?: string
+    @Query('categoryId') categoryId?: string,
   ) {
     return this.inventoryService.getYearlyInventoryReport(
       parseInt(year),
-      categoryId
+      categoryId,
     );
   }
 
   @Get('reports/detailed-yearly')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Get detailed yearly inventory with month-by-month breakdown',
-    description: 'Returns inventory data with previous year closing, monthly import/export breakdown (1-12), and totals'
+    description:
+      'Returns inventory data with previous year closing, monthly import/export breakdown (1-12), and totals',
   })
-  @ApiResponse({ status: 200, description: 'Detailed yearly inventory retrieved successfully' })
-  async getDetailedYearlyInventory(@Query() params: { month: string; year: string; categoryId?: string }) {
+  @ApiResponse({
+    status: 200,
+    description: 'Detailed yearly inventory retrieved successfully',
+  })
+  async getDetailedYearlyInventory(
+    @Query() params: { month: string; year: string; categoryId?: string },
+  ) {
     return this.inventoryService.getDetailedYearlyInventory({
       month: parseInt(params.month),
       year: parseInt(params.year),
-      categoryId: params.categoryId
+      categoryId: params.categoryId,
     });
   }
 
@@ -221,7 +260,10 @@ export class InventoryController {
   @Get('stock/alerts')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get stock alerts (low stock & expiring items)' })
-  @ApiResponse({ status: 200, description: 'Stock alerts retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Stock alerts retrieved successfully',
+  })
   async getStockAlerts(@Query() params: StockAlertDto) {
     return this.inventoryService.getStockAlerts(params);
   }
@@ -229,7 +271,10 @@ export class InventoryController {
   @Get('stock/current')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get current stock of all medicines' })
-  @ApiResponse({ status: 200, description: 'All current stock retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'All current stock retrieved successfully',
+  })
   async getAllCurrentStock() {
     return this.inventoryService.getAllCurrentStock();
   }
@@ -237,27 +282,48 @@ export class InventoryController {
   @Get('stock/:medicineId/current')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get current stock of a medicine' })
-  @ApiResponse({ status: 200, description: 'Current stock retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Current stock retrieved successfully',
+  })
   async getCurrentStock(@Param('medicineId') medicineId: string) {
     return this.inventoryService.getCurrentStock(medicineId);
   }
 
   @Patch('balance')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({ 
+  @ApiOperation({
     summary: 'Update inventory balance manually',
-    description: 'Manually update opening balance, suggested purchase, etc.'
+    description: 'Manually update opening balance, suggested purchase, etc.',
   })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   async updateBalance(@Body() data: UpdateInventoryBalanceDto) {
     return this.inventoryService.updateInventoryBalanceManual(data);
   }
 
+  @Post('recalculate-balances')
+  @Roles('ADMIN', 'SUPERADMIN')
+  @ApiOperation({
+    summary: 'Recalculate all inventory balances from scratch',
+    description:
+      'One-time repair: recomputes closing[M]=opening[M]+import-export, opening[M+1]=closing[M], and yearly accumulators for ALL medicines from their first record. Use after data migration or logic upgrades.',
+  })
+  @ApiResponse({ status: 200, description: 'Recalculation completed' })
+  async recalculateAllBalances() {
+    const result = await this.inventoryService.recalculateAllBalances();
+    return {
+      success: true,
+      message: `Recalculated ${result.records} records across ${result.medicines} medicines`,
+      data: result,
+    };
+  }
+
   @Post('import-from-excel')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Import inventory data from Excel file',
-    description: 'Upload Excel file with inventory data. Auto-detects month/year from title format: "QT THUỐC THÁNG XX NĂM YYYY _ ĐỀ NGHỊ MUA THUỐC THÁNG YY NĂM YYYY"'
+    description:
+      'Upload Excel file with inventory data. Auto-detects month/year from title format: "QT THUỐC THÁNG XX NĂM YYYY _ ĐỀ NGHỊ MUA THUỐC THÁNG YY NĂM YYYY"',
   })
   @ApiConsumes('multipart/form-data')
   @ApiBody({
@@ -280,15 +346,19 @@ export class InventoryController {
     }
 
     if (!file.originalname.match(/\.(xlsx|xls)$/)) {
-      throw new BadRequestException('Only Excel files (.xlsx, .xls) are allowed');
+      throw new BadRequestException(
+        'Only Excel files (.xlsx, .xls) are allowed',
+      );
     }
 
     try {
-      const result = await this.inventoryService.importFromExcelFile(file.buffer);
+      const result = await this.inventoryService.importFromExcelFile(
+        file.buffer,
+      );
       return {
         success: true,
         message: 'Import completed successfully',
-        data: result
+        data: result,
       };
     } catch (error) {
       throw new BadRequestException(`Import failed: ${error.message}`);
