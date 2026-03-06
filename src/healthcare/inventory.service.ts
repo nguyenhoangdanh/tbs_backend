@@ -421,6 +421,7 @@ export class InventoryService {
           hasAmount: medicineData.openingTotalAmount !== undefined,
         });
 
+        let processedMedicineId: string | undefined;
         await this.prisma.$transaction(async (prisma) => {
           // 1. Tạo/tìm category nếu có
           let categoryId: string | undefined;
@@ -480,6 +481,7 @@ export class InventoryService {
             });
             results.updated++;
           }
+          processedMedicineId = medicine.id;
 
           // 3. Tạo/cập nhật inventory balance cho tháng này
           // ✅ D() helper đảm bảo giữ đủ 20 số thập phân, .toFixed() trả về string chính xác
@@ -617,8 +619,8 @@ export class InventoryService {
           });
         });
         // After transaction: cascade opening to all subsequent months
-        if (medicine) {
-          await this.propagateOpeningForward(medicine.id, month, year);
+        if (processedMedicineId) {
+          await this.propagateOpeningForward(processedMedicineId, month, year);
         }
       } catch (error) {
         results.errors.push({
