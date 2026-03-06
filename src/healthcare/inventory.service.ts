@@ -630,6 +630,8 @@ export class InventoryService {
 
     return results;
   }
+
+  /**
    * User chỉ nhập: Thông tin thuốc + Nhập phát sinh + Đề nghị mua
    * Hệ thống tự động tính: Tồn đầu kỳ, Xuất, Tồn cuối kỳ
    */
