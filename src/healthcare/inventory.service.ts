@@ -616,6 +616,10 @@ export class InventoryService {
             },
           });
         });
+        // After transaction: cascade opening to all subsequent months
+        if (medicine) {
+          await this.propagateOpeningForward(medicine.id, month, year);
+        }
       } catch (error) {
         results.errors.push({
           medicine: medicineData.name,
@@ -626,9 +630,6 @@ export class InventoryService {
 
     return results;
   }
-
-  /**
-   * Simplified bulk import (13-column template)
    * User chỉ nhập: Thông tin thuốc + Nhập phát sinh + Đề nghị mua
    * Hệ thống tự động tính: Tồn đầu kỳ, Xuất, Tồn cuối kỳ
    */
@@ -864,16 +865,9 @@ export class InventoryService {
 
           // 3.4. Nếu chưa có record, tính toán đầy đủ
           if (!existingInventory) {
-            // Lấy tồn cuối kỳ tháng trước làm tồn đầu kỳ tháng này
-            const prevInventory = await prisma.medicineInventory.findUnique({
-              where: {
-                medicineId_month_year: {
-                  medicineId: medicine.id,
-                  month: prevMonth,
-                  year: prevYear,
-                },
-              },
-            });
+            // Lấy tồn cuối kỳ tháng gần nhất làm tồn đầu kỳ tháng này
+            // (findMostRecentPreviousInventory dùng this.prisma để đọc committed data)
+            const prevInventory = await this.findMostRecentPreviousInventory(medicine.id, month, year);
 
             // ── Dùng Decimal để giữ toàn bộ chữ số thập phân ──
             const dOpenQty = D(prevInventory?.closingQuantity);
@@ -957,16 +951,8 @@ export class InventoryService {
             });
           } else {
             // 3.5. Nếu đã có record: CẬP NHẬT import + suggested, tái tính closing bằng Decimal
-            // Re-fetch previous month closing để đảm bảo opening luôn = closing tháng trước
-            const prevRecForOpen = await prisma.medicineInventory.findUnique({
-              where: {
-                medicineId_month_year: {
-                  medicineId: medicine.id,
-                  month: prevMonth,
-                  year: prevYear,
-                },
-              },
-            });
+            // Re-fetch most recent previous closing để đảm bảo opening luôn = closing tháng gần nhất
+            const prevRecForOpen = await this.findMostRecentPreviousInventory(medicine.id, month, year);
             const dCurrOpen = prevRecForOpen
               ? D(prevRecForOpen.closingQuantity)
               : D(existingInventory.openingQuantity);
@@ -2520,36 +2506,45 @@ export class InventoryService {
         const strength = row[3]?.toString().trim() || null;
         const manufacturer = row[4]?.toString().trim() || null;
 
-        // Parse numeric columns
-        const openingQty = parseFloat(row[6]) || 0;
-        const openingPrice = parseFloat(row[7]) || 0;
-        const openingAmount = parseFloat(row[8]) || 0;
+        // Parse numeric columns — dùng D() để giữ đủ độ chính xác thập phân
+        const _n = (v: any) => (v !== undefined && v !== null && v !== '' ? D(v).toFixed() : '0');
+        const _q = (v: any) => Number(D(_n(v)).toFixed());
 
-        const monthlyImportQty = parseFloat(row[9]) || 0;
-        const monthlyImportPrice = parseFloat(row[10]) || 0;
-        const monthlyImportAmount = parseFloat(row[11]) || 0;
+        const openingQty = _q(row[6]);
+        const openingPrice = _n(row[7]);
+        const openingAmount = row[8] != null && row[8] !== '' ? _n(row[8]) : D(openingQty).times(D(openingPrice)).toFixed();
 
-        const monthlyExportQty = parseFloat(row[12]) || 0;
-        const monthlyExportPrice = parseFloat(row[13]) || 0;
-        const monthlyExportAmount = parseFloat(row[14]) || 0;
+        const monthlyImportQty = _q(row[9]);
+        const monthlyImportPrice = _n(row[10]);
+        const monthlyImportAmount = row[11] != null && row[11] !== '' ? _n(row[11]) : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
-        const closingQty = parseFloat(row[15]) || 0;
-        const closingPrice = parseFloat(row[16]) || 0;
-        const closingAmount = parseFloat(row[17]) || 0;
+        const monthlyExportQty = _q(row[12]);
+        const monthlyExportPrice = _n(row[13]);
+        const monthlyExportAmount = row[14] != null && row[14] !== '' ? _n(row[14]) : D(monthlyExportQty).times(D(monthlyExportPrice)).toFixed();
+
+        // Recompute closing from opening + import - export for guaranteed accuracy
+        const closingQty = _q(row[15]) || openingQty + monthlyImportQty - monthlyExportQty;
+        const closingPrice = _n(row[16]) || openingPrice;
+        const closingAmount = (() => {
+          const computedClosingQty = D(openingQty).plus(D(monthlyImportQty)).minus(D(monthlyExportQty));
+          const totalVal = D(openingQty).times(D(openingPrice)).plus(D(monthlyImportAmount)).minus(D(monthlyExportAmount));
+          const computedPrice = computedClosingQty.gt(0) ? totalVal.div(computedClosingQty) : D(closingPrice);
+          return computedClosingQty.times(computedPrice).toFixed();
+        })();
 
         const expiryStr = row[18]?.toString().trim();
 
-        const yearlyImportQty = parseFloat(row[19]) || 0;
-        const yearlyImportPrice = parseFloat(row[20]) || 0;
-        const yearlyImportAmount = parseFloat(row[21]) || 0;
+        const yearlyImportQty = _q(row[19]);
+        const yearlyImportPrice = _n(row[20]);
+        const yearlyImportAmount = row[21] != null && row[21] !== '' ? _n(row[21]) : D(yearlyImportQty).times(D(yearlyImportPrice)).toFixed();
 
-        const yearlyExportQty = parseFloat(row[22]) || 0;
-        const yearlyExportPrice = parseFloat(row[23]) || 0;
-        const yearlyExportAmount = parseFloat(row[24]) || 0;
+        const yearlyExportQty = _q(row[22]);
+        const yearlyExportPrice = _n(row[23]);
+        const yearlyExportAmount = row[24] != null && row[24] !== '' ? _n(row[24]) : D(yearlyExportQty).times(D(yearlyExportPrice)).toFixed();
 
-        const suggestedQty = parseFloat(row[25]) || 0;
-        const suggestedPrice = parseFloat(row[26]) || 0;
-        const suggestedAmount = parseFloat(row[27]) || 0;
+        const suggestedQty = _q(row[25]);
+        const suggestedPrice = _n(row[26]);
+        const suggestedAmount = row[27] != null && row[27] !== '' ? _n(row[27]) : D(suggestedQty).times(D(suggestedPrice)).toFixed();
 
         // Determine category and item type
         let categoryId: string | undefined;
@@ -2798,72 +2793,136 @@ export class InventoryService {
   }
 
   /**
-   * Sau khi closing của (month, year) thay đổi, tự động cập nhật opening của tháng kế tiếp
-   * và tái tính closing của nó, rồi tiếp tục lan truyền đến hết chuỗi bản ghi.
+   * Bất biến kho: closing[N] = opening[N+1]  AND  yearlyImport[N] = yearlyImport[N-1] + monthlyImport[N]
    *
-   * Đây là cơ chế đảm bảo bất biến: closing[N] === opening[N+1] tại mọi thời điểm.
+   * Sau khi bản ghi tháng (startMonth, startYear) thay đổi, hàm này lan truyền:
+   *   1. opening[M+1]  ← closing[M]                  (cascade tồn đầu kỳ)
+   *   2. closing[M]    ← opening[M] + import - export (tái tính tồn cuối kỳ)
+   *   3. yearlyImport/Export[M] ← yearlyImport/Export[M-1] + monthly[M]  (cascade lũy kế năm)
+   *
+   * Hoạt động đúng với: tháng không liên tiếp (có gap), xuyên năm dương lịch.
+   * Dừng sớm khi không còn bản ghi kế tiếp hoặc dữ liệu không thay đổi.
    */
   private async propagateOpeningForward(
     medicineId: string,
-    month: number,
-    year: number,
+    startMonth: number,
+    startYear: number,
   ): Promise<void> {
-    // Đọc bản ghi hiện tại để lấy closing
-    const current = await this.prisma.medicineInventory.findUnique({
-      where: { medicineId_month_year: { medicineId, month, year } },
-    });
-    if (!current) return;
-
-    const nextMonth = month === 12 ? 1 : month + 1;
-    const nextYear = month === 12 ? year + 1 : year;
-
-    const next = await this.prisma.medicineInventory.findUnique({
+    // Bước 1: Lấy bản ghi gốc để lấy closing và YTD hiện tại
+    const startRecord = await this.prisma.medicineInventory.findUnique({
       where: {
-        medicineId_month_year: { medicineId, month: nextMonth, year: nextYear },
+        medicineId_month_year: { medicineId, month: startMonth, year: startYear },
       },
     });
-    if (!next) return; // Không có bản ghi kế tiếp — dừng lan truyền
+    if (!startRecord) return;
 
-    const dNewOpenQty = D(current.closingQuantity);
-    const dNewOpenPrice = D(current.closingUnitPrice);
-    const dNewOpenAmt = dNewOpenQty.times(dNewOpenPrice);
+    // Bước 2: Lấy TẤT CẢ bản ghi kế tiếp theo thứ tự thời gian (xử lý gap + xuyên năm)
+    const subsequentRecords = await this.prisma.medicineInventory.findMany({
+      where: {
+        medicineId,
+        OR: [
+          { year: { gt: startYear } },
+          { year: startYear, month: { gt: startMonth } },
+        ],
+      },
+      orderBy: [{ year: 'asc' }, { month: 'asc' }],
+    });
 
-    // Bỏ qua nếu opening không thay đổi (tránh write thừa)
-    if (
-      D(next.openingQuantity).eq(dNewOpenQty) &&
-      D(next.openingUnitPrice).eq(dNewOpenPrice)
-    ) {
-      return;
+    if (subsequentRecords.length === 0) return;
+
+    // Bước 3: Khởi tạo các biến carry-forward từ startRecord
+    let prevClosingQty   = D(startRecord.closingQuantity);
+    let prevClosingPrice = D(startRecord.closingUnitPrice);
+    let prevYear         = startYear;
+    // YTD tích lũy: bắt đầu từ giá trị yearlyXxx của startRecord (đúng với cùng năm)
+    let ytdImportQty  = D(startRecord.yearlyImportQuantity);
+    let ytdImportAmt  = D(startRecord.yearlyImportAmount);
+    let ytdExportQty  = D(startRecord.yearlyExportQuantity);
+    let ytdExportAmt  = D(startRecord.yearlyExportAmount);
+
+    for (const rec of subsequentRecords) {
+      // ── A. Khi sang năm mới: reset lũy kế về 0 ────────────────────────
+      if (rec.year !== prevYear) {
+        ytdImportQty  = new Prisma.Decimal(0);
+        ytdImportAmt  = new Prisma.Decimal(0);
+        ytdExportQty  = new Prisma.Decimal(0);
+        ytdExportAmt  = new Prisma.Decimal(0);
+        prevYear = rec.year;
+      }
+
+      // ── B. Tính opening mới = closing của tháng trước ─────────────────
+      const dOpenQty   = prevClosingQty;
+      const dOpenPrice = prevClosingPrice;
+      const dOpenAmt   = dOpenQty.times(dOpenPrice);
+
+      // ── C. Monthly data của tháng này (giữ nguyên, không thay đổi) ────
+      const dImportQty  = D(rec.monthlyImportQuantity);
+      const dImportAmt  = D(rec.monthlyImportAmount);
+      const dExportQty  = D(rec.monthlyExportQuantity);
+      const dExportAmt  = D(rec.monthlyExportAmount);
+
+      // ── D. Tái tính closing với opening mới ──────────────────────────
+      const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
+      const totalVal    = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+      // Giá bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
+      const dClosingPrice = dClosingQty.gt(0)
+        ? totalVal.div(dClosingQty)
+        : dOpenPrice;
+      const dClosingAmt = dClosingQty.times(dClosingPrice);
+
+      // ── E. Tính lũy kế năm = lũy kế tháng trước + tháng này ─────────
+      const newYtdImportQty  = ytdImportQty.plus(dImportQty);
+      const newYtdImportAmt  = ytdImportAmt.plus(dImportAmt);
+      const newYtdExportQty  = ytdExportQty.plus(dExportQty);
+      const newYtdExportAmt  = ytdExportAmt.plus(dExportAmt);
+      const newYtdImportPr   = newYtdImportQty.gt(0)
+        ? newYtdImportAmt.div(newYtdImportQty)
+        : dOpenPrice;
+      const newYtdExportPr   = newYtdExportQty.gt(0)
+        ? newYtdExportAmt.div(newYtdExportQty)
+        : new Prisma.Decimal(0);
+
+      // ── F. Kiểm tra xem có thay đổi thực sự không (tối ưu write) ─────
+      const openingUnchanged =
+        D(rec.openingQuantity).eq(dOpenQty) &&
+        D(rec.openingUnitPrice).eq(dOpenPrice);
+      const ytdUnchanged =
+        D(rec.yearlyImportQuantity).eq(newYtdImportQty) &&
+        D(rec.yearlyExportQuantity).eq(newYtdExportQty);
+
+      if (openingUnchanged && ytdUnchanged) {
+        // Không còn thay đổi → dừng lan truyền sớm
+        break;
+      }
+
+      // ── G. Lưu bản ghi đã cập nhật ───────────────────────────────────
+      await this.prisma.medicineInventory.update({
+        where: {
+          medicineId_month_year: { medicineId, month: rec.month, year: rec.year },
+        },
+        data: {
+          openingQuantity:      dOpenQty.toFixed(),
+          openingUnitPrice:     dOpenPrice.toFixed(),
+          openingTotalAmount:   dOpenAmt.toFixed(),
+          closingQuantity:      dClosingQty.toFixed(),
+          closingUnitPrice:     dClosingPrice.toFixed(),
+          closingTotalAmount:   dClosingAmt.toFixed(),
+          yearlyImportQuantity: newYtdImportQty.toFixed(),
+          yearlyImportUnitPrice: newYtdImportPr.toFixed(),
+          yearlyImportAmount:   newYtdImportAmt.toFixed(),
+          yearlyExportQuantity: newYtdExportQty.toFixed(),
+          yearlyExportUnitPrice: newYtdExportPr.toFixed(),
+          yearlyExportAmount:   newYtdExportAmt.toFixed(),
+        },
+      });
+
+      // ── H. Cập nhật carry-forward cho tháng tiếp theo ─────────────────
+      prevClosingQty   = dClosingQty;
+      prevClosingPrice = dClosingPrice;
+      ytdImportQty     = newYtdImportQty;
+      ytdImportAmt     = newYtdImportAmt;
+      ytdExportQty     = newYtdExportQty;
+      ytdExportAmt     = newYtdExportAmt;
     }
-
-    // Tái tính closing của tháng kế tiếp với opening mới
-    const dImportQty = D(next.monthlyImportQuantity);
-    const dImportAmt = D(next.monthlyImportAmount);
-    const dExportQty = D(next.monthlyExportQuantity);
-    const dExportAmt = D(next.monthlyExportAmount);
-
-    const dNewClosingQty = dNewOpenQty.plus(dImportQty).minus(dExportQty);
-    const totalValue = dNewOpenAmt.plus(dImportAmt).minus(dExportAmt);
-    const dNewClosingPrice = dNewClosingQty.gt(0)
-      ? totalValue.div(dNewClosingQty)
-      : dNewOpenPrice;
-    const dNewClosingAmt = dNewClosingQty.times(dNewClosingPrice);
-
-    await this.prisma.medicineInventory.update({
-      where: {
-        medicineId_month_year: { medicineId, month: nextMonth, year: nextYear },
-      },
-      data: {
-        openingQuantity: dNewOpenQty.toFixed(),
-        openingUnitPrice: dNewOpenPrice.toFixed(),
-        openingTotalAmount: dNewOpenAmt.toFixed(),
-        closingQuantity: dNewClosingQty.toFixed(),
-        closingUnitPrice: dNewClosingPrice.toFixed(),
-        closingTotalAmount: dNewClosingAmt.toFixed(),
-      },
-    });
-
-    // Tiếp tục lan truyền đến tháng sau
-    await this.propagateOpeningForward(medicineId, nextMonth, nextYear);
   }
 }
