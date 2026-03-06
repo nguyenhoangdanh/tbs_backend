@@ -2770,6 +2770,79 @@ export class InventoryService {
   // ==================== ADMIN RECALCULATION ====================
 
   /**
+   * Khởi tạo bản ghi tồn kho cho tháng mới từ tồn cuối kỳ tháng gần nhất.
+   * Tạo bản ghi với opening = previous closing, tất cả nhập/xuất = 0.
+   * Dùng khi bắt đầu tháng mới chưa có dữ liệu nhập.
+   */
+  async initializeMonth(month: number, year: number): Promise<{ created: number; skipped: number }> {
+    // Lấy tất cả thuốc đang active
+    const medicines = await this.prisma.medicine.findMany({
+      where: { isActive: true },
+      select: { id: true },
+    });
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const { id: medicineId } of medicines) {
+      // Bỏ qua nếu đã có bản ghi cho tháng này
+      const existing = await this.prisma.medicineInventory.findUnique({
+        where: { medicineId_month_year: { medicineId, month, year } },
+      });
+      if (existing) { skipped++; continue; }
+
+      // Lấy tồn cuối kỳ tháng gần nhất
+      const prev = await this.findMostRecentPreviousInventory(medicineId, month, year);
+      if (!prev) { skipped++; continue; } // Chưa có lịch sử → bỏ qua
+
+      const dOpenQty   = D(prev.closingQuantity);
+      const dOpenPrice = D(prev.closingUnitPrice);
+      const dOpenAmt   = dOpenQty.times(dOpenPrice);
+
+      // Tính lũy kế năm = lũy kế tháng trước + tháng này (tháng này = 0)
+      const sameYear = prev.year === year;
+      const dYtdImportQty = sameYear ? D(prev.yearlyImportQuantity) : new Prisma.Decimal(0);
+      const dYtdImportAmt = sameYear ? D(prev.yearlyImportAmount)   : new Prisma.Decimal(0);
+      const dYtdExportQty = sameYear ? D(prev.yearlyExportQuantity) : new Prisma.Decimal(0);
+      const dYtdExportAmt = sameYear ? D(prev.yearlyExportAmount)   : new Prisma.Decimal(0);
+      const dYtdImportPr  = dYtdImportQty.gt(0) ? dYtdImportAmt.div(dYtdImportQty) : dOpenPrice;
+      const dYtdExportPr  = dYtdExportQty.gt(0) ? dYtdExportAmt.div(dYtdExportQty) : new Prisma.Decimal(0);
+
+      await this.prisma.medicineInventory.create({
+        data: {
+          medicineId,
+          month,
+          year,
+          openingQuantity:       dOpenQty.toFixed(),
+          openingUnitPrice:      dOpenPrice.toFixed(),
+          openingTotalAmount:    dOpenAmt.toFixed(),
+          monthlyImportQuantity: '0',
+          monthlyImportUnitPrice:'0',
+          monthlyImportAmount:   '0',
+          monthlyExportQuantity: '0',
+          monthlyExportUnitPrice:'0',
+          monthlyExportAmount:   '0',
+          closingQuantity:       dOpenQty.toFixed(),
+          closingUnitPrice:      dOpenPrice.toFixed(),
+          closingTotalAmount:    dOpenAmt.toFixed(),
+          yearlyImportQuantity:  dYtdImportQty.toFixed(),
+          yearlyImportUnitPrice: dYtdImportPr.toFixed(),
+          yearlyImportAmount:    dYtdImportAmt.toFixed(),
+          yearlyExportQuantity:  dYtdExportQty.toFixed(),
+          yearlyExportUnitPrice: dYtdExportPr.toFixed(),
+          yearlyExportAmount:    dYtdExportAmt.toFixed(),
+          suggestedPurchaseQuantity: '0',
+          suggestedPurchaseUnitPrice:'0',
+          suggestedPurchaseAmount:   '0',
+        },
+      });
+      created++;
+    }
+
+    return { created, skipped };
+  }
+
+  /**
    * Tính lại toàn bộ chuỗi tồn kho cho tất cả thuốc từ bản ghi đầu tiên.
    * Dùng để sửa dữ liệu lịch sử bị sai sau khi upgrade logic cascade.
    * Invariant: closing[M] = opening[M] + import[M] - export[M]; opening[M+1] = closing[M]

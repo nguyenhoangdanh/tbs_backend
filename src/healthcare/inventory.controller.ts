@@ -318,6 +318,27 @@ export class InventoryController {
     };
   }
 
+  @Post('initialize-month')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({
+    summary: 'Initialize a new month from previous closing balance',
+    description:
+      'Creates inventory records for all active medicines for the given month with opening = previous month closing, all monthly quantities = 0. Skips medicines that already have a record for this month.',
+  })
+  @ApiResponse({ status: 200, description: 'Month initialized' })
+  async initializeMonth(@Body() body: { month: number; year: number }) {
+    const { month, year } = body;
+    if (!month || !year || month < 1 || month > 12) {
+      throw new BadRequestException('Invalid month or year');
+    }
+    const result = await this.inventoryService.initializeMonth(month, year);
+    return {
+      success: true,
+      message: `Initialized ${result.created} records for ${month}/${year} (${result.skipped} skipped)`,
+      data: result,
+    };
+  }
+
   @Post('import-from-excel')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
