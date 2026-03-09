@@ -486,15 +486,15 @@ model GatePassApproval {
 // 1. Quản lý thuốc cơ bản
 // Danh mục y tế (bao gồm: thuốc, vật tư y tế, cấp cứu)
 model MedicineCategory {
-  id          String     @id @default(uuid())
-  code        String     @unique // "I", "II", "IX", "XIII", "XV", "XVI", "XVII"
+  id          String          @id @default(uuid())
+  code        String          @unique // "I", "II", "IX", "XIII", "XV", "XVI", "XVII"
   name        String // "NHÓM THUỐC HẠ SỐT...", "CẤP CỨU", "VẬT TƯ Y TẾ"
   type        MedicalItemType @default(MEDICINE) // Loại: MEDICINE, EMERGENCY_SUPPLY, MEDICAL_EQUIPMENT
   description String?
-  sortOrder   Int        @default(0) // Thứ tự hiển thị
-  isActive    Boolean    @default(true)
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  sortOrder   Int             @default(0) // Thứ tự hiển thị
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   medicines   Medicine[]
 
   @@index([isActive])
@@ -503,9 +503,9 @@ model MedicineCategory {
 }
 
 model Medicine {
-  id           String                @id @default(uuid())
+  id           String          @id @default(uuid())
   name         String // Tên thuốc/vật tư y tế
-  type         MedicalItemType       @default(MEDICINE) // MEDICINE, EMERGENCY_SUPPLY, MEDICAL_EQUIPMENT
+  type         MedicalItemType @default(MEDICINE) // MEDICINE, EMERGENCY_SUPPLY, MEDICAL_EQUIPMENT
   categoryId   String? // Thuộc nhóm nào (I-XVII)
   route        String? // Đường dùng: "UỐNG", "NHỎ MẮT", "BÔI", "DÁN" (chỉ cho MEDICINE)
   strength     String? // Hàm lượng: "500mg", "10ml"
@@ -514,13 +514,13 @@ model Medicine {
   frequency    String? // Tần suất: "sáng", "tối", "sáng-tối", "3 lần/ngày" (chỉ cho MEDICINE)
   instructions String? // Hướng dẫn: "sau ăn", "trước ăn", "khi đói"
   units        String? // Đơn vị tính: "viên", "chai", "lọ", "hộp", "cái", "miếng"
-  isActive     Boolean               @default(true)
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
+  isActive     Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 
-  category            MedicineCategory?     @relation(fields: [categoryId], references: [id])
-  prescriptions       MedicalPrescription[]
-  inventoryBalances   MedicineInventory[] // Tồn kho theo tháng
+  category              MedicineCategory?      @relation(fields: [categoryId], references: [id])
+  prescriptions         MedicalPrescription[]
+  inventoryBalances     MedicineInventory[] // Tồn kho theo tháng
   inventoryTransactions InventoryTransaction[] // Lịch sử xuất/nhập
 
   @@index([isActive])
@@ -533,15 +533,16 @@ model Medicine {
 
 // 2. Lịch sử khám bệnh (đơn giản hóa)
 model MedicalRecord {
-  id        String   @id @default(uuid())
-  patientId String // ID nhân viên khám
-  doctorId  String // ID nhân viên y tế
-  visitDate DateTime @default(now())
-  symptoms  String? // Triệu chứng
-  diagnosis String? // Chẩn đoán
-  notes     String? // Ghi chú
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now())
+  id             String   @id @default(uuid())
+  patientId      String // ID nhân viên khám
+  doctorId       String // ID nhân viên y tế
+  visitDate      DateTime @default(now())
+  symptoms       String? // Triệu chứng
+  diagnosis      String? // Chẩn đoán
+  notes          String? // Ghi chú
+  isWorkAccident Boolean  @default(false) // Tai nạn lao động (TNLĐ)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @default(now())
 
   patient       User                  @relation("PatientMedicalRecords", fields: [patientId], references: [id])
   doctor        User                  @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
@@ -583,52 +584,52 @@ model MedicalPrescription {
 
 // 4. Quản lý tồn kho thuốc theo tháng
 model MedicineInventory {
-  id                    String    @id @default(uuid())
-  medicineId            String
-  month                 Int // 1-12
-  year                  Int // 2024, 2025
-  expiryDate            DateTime? @db.Date // Hạn sử dụng
-  
+  id         String    @id @default(uuid())
+  medicineId String
+  month      Int // 1-12
+  year       Int // 2024, 2025
+  expiryDate DateTime? @db.Date // Hạn sử dụng
+
   // Tồn đầu kỳ
-  openingQuantity       Decimal   @default(0) @db.Decimal(30, 20) // Số lượng
-  openingUnitPrice      Decimal   @default(0) @db.Decimal(30, 20) // Đơn giá
-  openingTotalAmount    Decimal   @default(0) @db.Decimal(30, 20) // Thành tiền
-  
+  openingQuantity    Decimal @default(0) @db.Decimal(30, 20) // Số lượng
+  openingUnitPrice   Decimal @default(0) @db.Decimal(30, 20) // Đơn giá
+  openingTotalAmount Decimal @default(0) @db.Decimal(30, 20) // Thành tiền
+
   // Phát sinh trong tháng - Nhập
-  monthlyImportQuantity   Decimal @default(0) @db.Decimal(30, 20)
-  monthlyImportUnitPrice  Decimal @default(0) @db.Decimal(30, 20)
-  monthlyImportAmount     Decimal @default(0) @db.Decimal(30, 20)
-  
+  monthlyImportQuantity  Decimal @default(0) @db.Decimal(30, 20)
+  monthlyImportUnitPrice Decimal @default(0) @db.Decimal(30, 20)
+  monthlyImportAmount    Decimal @default(0) @db.Decimal(30, 20)
+
   // Phát sinh trong tháng - Xuất
-  monthlyExportQuantity   Decimal @default(0) @db.Decimal(30, 20)
-  monthlyExportUnitPrice  Decimal @default(0) @db.Decimal(30, 20)
-  monthlyExportAmount     Decimal @default(0) @db.Decimal(30, 20)
-  
+  monthlyExportQuantity  Decimal @default(0) @db.Decimal(30, 20)
+  monthlyExportUnitPrice Decimal @default(0) @db.Decimal(30, 20)
+  monthlyExportAmount    Decimal @default(0) @db.Decimal(30, 20)
+
   // Tồn cuối kỳ
-  closingQuantity       Decimal   @default(0) @db.Decimal(30, 20)
-  closingUnitPrice      Decimal   @default(0) @db.Decimal(30, 20)
-  closingTotalAmount    Decimal   @default(0) @db.Decimal(30, 20)
-  
+  closingQuantity    Decimal @default(0) @db.Decimal(30, 20)
+  closingUnitPrice   Decimal @default(0) @db.Decimal(30, 20)
+  closingTotalAmount Decimal @default(0) @db.Decimal(30, 20)
+
   // Lũy kế năm - Nhập
-  yearlyImportQuantity  Decimal   @default(0) @db.Decimal(30, 20)
-  yearlyImportUnitPrice Decimal   @default(0) @db.Decimal(30, 20)
-  yearlyImportAmount    Decimal   @default(0) @db.Decimal(30, 20)
-  
+  yearlyImportQuantity  Decimal @default(0) @db.Decimal(30, 20)
+  yearlyImportUnitPrice Decimal @default(0) @db.Decimal(30, 20)
+  yearlyImportAmount    Decimal @default(0) @db.Decimal(30, 20)
+
   // Lũy kế năm - Xuất
-  yearlyExportQuantity  Decimal   @default(0) @db.Decimal(30, 20)
-  yearlyExportUnitPrice Decimal   @default(0) @db.Decimal(30, 20)
-  yearlyExportAmount    Decimal   @default(0) @db.Decimal(30, 20)
-  
+  yearlyExportQuantity  Decimal @default(0) @db.Decimal(30, 20)
+  yearlyExportUnitPrice Decimal @default(0) @db.Decimal(30, 20)
+  yearlyExportAmount    Decimal @default(0) @db.Decimal(30, 20)
+
   // Đề nghị mua tháng sau
   suggestedPurchaseQuantity  Decimal @default(0) @db.Decimal(30, 20)
   suggestedPurchaseUnitPrice Decimal @default(0) @db.Decimal(30, 20)
   suggestedPurchaseAmount    Decimal @default(0) @db.Decimal(30, 20)
-  
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
-  
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  
+
   @@unique([medicineId, month, year])
   @@index([medicineId])
   @@index([month, year])
@@ -638,29 +639,29 @@ model MedicineInventory {
 
 // 5. Lịch sử giao dịch xuất/nhập kho
 model InventoryTransaction {
-  id                String              @id @default(uuid())
-  medicineId        String
-  type              InventoryTransactionType // IMPORT, EXPORT, ADJUSTMENT
-  quantity          Decimal             @db.Decimal(30, 20)
-  unitPrice         Decimal             @db.Decimal(30, 20)
-  totalAmount       Decimal             @db.Decimal(30, 20)
-  transactionDate   DateTime            @default(now())
-  
+  id              String                   @id @default(uuid())
+  medicineId      String
+  type            InventoryTransactionType // IMPORT, EXPORT, ADJUSTMENT
+  quantity        Decimal                  @db.Decimal(30, 20)
+  unitPrice       Decimal                  @db.Decimal(30, 20)
+  totalAmount     Decimal                  @db.Decimal(30, 20)
+  transactionDate DateTime                 @default(now())
+
   // Thông tin liên quan
-  referenceType     String? // "MEDICAL_RECORD", "PURCHASE_ORDER", "MANUAL"
-  referenceId       String? // ID của medical record hoặc purchase order
-  
-  expiryDate        DateTime?           @db.Date // Hạn sử dụng (cho nhập kho)
-  batchNumber       String? // Số lô (cho nhập kho)
-  supplier          String? // Nhà cung cấp (cho nhập kho)
-  
-  notes             String?
-  createdBy         String? // User ID người tạo giao dịch
-  createdAt         DateTime            @default(now())
-  updatedAt         DateTime            @updatedAt
-  
+  referenceType String? // "MEDICAL_RECORD", "PURCHASE_ORDER", "MANUAL"
+  referenceId   String? // ID của medical record hoặc purchase order
+
+  expiryDate  DateTime? @db.Date // Hạn sử dụng (cho nhập kho)
+  batchNumber String? // Số lô (cho nhập kho)
+  supplier    String? // Nhà cung cấp (cho nhập kho)
+
+  notes     String?
+  createdBy String? // User ID người tạo giao dịch
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
   medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  
+
   @@index([medicineId])
   @@index([type])
   @@index([transactionDate])
@@ -669,17 +670,16 @@ model InventoryTransaction {
 }
 
 enum MedicalItemType {
-  MEDICINE           // Thuốc (I-XIV, XVII)
-  EMERGENCY_SUPPLY   // Cấp cứu (XV)
-  MEDICAL_EQUIPMENT  // Vật tư y tế (XVI)
+  MEDICINE // Thuốc (I-XIV, XVII)
+  EMERGENCY_SUPPLY // Cấp cứu (XV)
+  MEDICAL_EQUIPMENT // Vật tư y tế (XVI)
 }
 
 enum InventoryTransactionType {
-  IMPORT       // Nhập kho
-  EXPORT       // Xuất kho (kê đơn)
-  ADJUSTMENT   // Điều chỉnh (kiểm kê, hỏng hóc)
+  IMPORT // Nhập kho
+  EXPORT // Xuất kho (kê đơn)
+  ADJUSTMENT // Điều chỉnh (kiểm kê, hỏng hóc)
 }
-
 
 enum ShiftType {
   NORMAL_8H
@@ -794,12 +794,12 @@ model RoleDefinition {
 
 // ⭐ NEW: Many-to-Many relationship between RoleDefinition and Permission
 model RoleDefinitionPermission {
-  id               String         @id @default(uuid())
+  id               String   @id @default(uuid())
   roleDefinitionId String
   permissionId     String
-  isGranted        Boolean        @default(true)
-  createdAt        DateTime       @default(now())
-  updatedAt        DateTime       @updatedAt
+  isGranted        Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   roleDefinition RoleDefinition @relation(fields: [roleDefinitionId], references: [id], onDelete: Cascade)
   permission     Permission     @relation(fields: [permissionId], references: [id], onDelete: Cascade)
@@ -850,8 +850,8 @@ model Permission {
 model Feedback {
   id        String   @id @default(uuid())
   content   String   @db.Text
-  ipAddress String?  // Track IP for spam prevention
-  userAgent String?  // Track browser/device info
+  ipAddress String? // Track IP for spam prevention
+  userAgent String? // Track browser/device info
   createdAt DateTime @default(now())
 
   @@index([createdAt])

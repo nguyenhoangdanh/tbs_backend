@@ -12,16 +12,21 @@ import {
   ValidationPipe,
   Patch,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { HealthcareService } from './healthcare.service';
-import { 
-  CreateMedicalRecordDto, 
+import {
+  CreateMedicalRecordDto,
   UpdateMedicalRecordDto,
   CreateMedicineDto,
-  UpdateMedicineDto
+  UpdateMedicineDto,
 } from './dto/healthcare.dto';
 import { Public } from 'src/common/decorators/public.decorator';
 
@@ -35,7 +40,10 @@ export class HealthcareController {
   @Get('dashboard')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get healthcare dashboard statistics' })
-  @ApiResponse({ status: 200, description: 'Dashboard statistics retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Dashboard statistics retrieved successfully',
+  })
   async getDashboard() {
     return this.healthcareService.getDashboardStats();
   }
@@ -43,7 +51,10 @@ export class HealthcareController {
   @Get('recent-activities')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get recent healthcare activities' })
-  @ApiResponse({ status: 200, description: 'Recent activities retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Recent activities retrieved successfully',
+  })
   async getRecentActivities(
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
   ) {
@@ -61,11 +72,13 @@ export class HealthcareController {
   @Post('medicines')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create new medicine' })
-  @UsePipes(new ValidationPipe({ 
-    whitelist: true, 
-    forbidNonWhitelisted: false,
-    transform: true 
-  }))
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+    }),
+  )
   async createMedicine(@Body() data: CreateMedicineDto) {
     return this.healthcareService.createMedicine(data);
   }
@@ -73,14 +86,16 @@ export class HealthcareController {
   @Patch('medicines/:id')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update medicine' })
-  @UsePipes(new ValidationPipe({ 
-    whitelist: true, 
-    forbidNonWhitelisted: false,
-    transform: true 
-  }))
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+    }),
+  )
   async updateMedicine(
     @Param('id') id: string,
-    @Body() data: UpdateMedicineDto
+    @Body() data: UpdateMedicineDto,
   ) {
     return this.healthcareService.updateMedicine(id, data);
   }
@@ -104,11 +119,13 @@ export class HealthcareController {
   @Post('medical-records')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create new medical record with prescriptions' })
-  @UsePipes(new ValidationPipe({ 
-    whitelist: true, 
-    forbidNonWhitelisted: false,
-    transform: true 
-  }))
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+    }),
+  )
   async createMedicalRecord(@Body() data: CreateMedicalRecordDto) {
     return this.healthcareService.createMedicalRecordByEmployeeCode(data);
   }
@@ -116,14 +133,16 @@ export class HealthcareController {
   @Patch('medical-records/:id')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update medical record' })
-  @UsePipes(new ValidationPipe({ 
-    whitelist: true, 
-    forbidNonWhitelisted: false,
-    transform: true 
-  }))
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: false,
+      transform: true,
+    }),
+  )
   async updateMedicalRecord(
     @Param('id') id: string,
-    @Body() data: UpdateMedicalRecordDto
+    @Body() data: UpdateMedicalRecordDto,
   ) {
     return this.healthcareService.updateMedicalRecord(id, data);
   }
@@ -133,28 +152,41 @@ export class HealthcareController {
   @ApiOperation({ summary: 'Dispense medicine prescription' })
   async dispenseMedicine(
     @Param('id') prescriptionId: string,
-    @Body() data: { dispenserId: string }
+    @Body() data: { dispenserId: string },
   ) {
-    return this.healthcareService.dispenseMedicine(prescriptionId, data.dispenserId);
+    return this.healthcareService.dispenseMedicine(
+      prescriptionId,
+      data.dispenserId,
+    );
   }
 
   // Medicine Statistics & Analytics
   @Get('statistics/medicine-usage')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get medicine usage statistics' })
-  @ApiResponse({ status: 200, description: 'Medicine usage statistics retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Medicine usage statistics retrieved successfully',
+  })
   async getMedicineUsageStatistics(
     @Query('period') period: 'day' | 'week' | 'month' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.healthcareService.getMedicineUsageStatistics(period, startDate, endDate);
+    return this.healthcareService.getMedicineUsageStatistics(
+      period,
+      startDate,
+      endDate,
+    );
   }
 
   @Get('statistics/prescription-trends')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get prescription trends by time period' })
-  @ApiResponse({ status: 200, description: 'Prescription trends retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Prescription trends retrieved successfully',
+  })
   async getPrescriptionTrends(
     @Query('period') period: 'day' | 'week' | 'month' = 'month',
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 12,
@@ -162,16 +194,45 @@ export class HealthcareController {
     return this.healthcareService.getPrescriptionTrends(period, limit);
   }
 
+  @Get('statistics/detailed')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({
+    summary: 'Get detailed healthcare statistics (dispensing frequency, TNLĐ)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Detailed statistics retrieved successfully',
+  })
+  async getDetailedStatistics(
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.healthcareService.getDetailedStatistics(
+      period,
+      startDate,
+      endDate,
+    );
+  }
+
   @Get('statistics/top-medicines')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get top prescribed medicines' })
-  @ApiResponse({ status: 200, description: 'Top medicines retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Top medicines retrieved successfully',
+  })
   async getTopPrescribedMedicines(
     @Query('period') period: 'day' | 'week' | 'month' = 'month',
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 10,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    return this.healthcareService.getTopPrescribedMedicines(period, limit, startDate, endDate);
+    return this.healthcareService.getTopPrescribedMedicines(
+      period,
+      limit,
+      startDate,
+      endDate,
+    );
   }
 }

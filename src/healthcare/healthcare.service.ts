@@ -384,6 +384,7 @@ export class HealthcareService {
       symptoms?: string;
       diagnosis?: string;
       notes?: string;
+      isWorkAccident?: boolean;
       prescriptions?: Array<{
         medicineId: string;
         quantity: number;
@@ -606,6 +607,7 @@ export class HealthcareService {
     symptoms?: string;
     diagnosis?: string;
     notes?: string;
+    isWorkAccident?: boolean;
     prescriptions?: Array<{
       medicineId: string;
       quantity: number;
@@ -1240,5 +1242,115 @@ export class HealthcareService {
     const pastDaysOfYear =
       (date.getTime() - firstDayOfYear.getTime()) / 86400000;
     return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
+  }
+
+  /**
+   * Get detailed healthcare statistics:
+   * - Workers dispensed 1st / 2nd / 3rd+ time in the period
+   * - Visits without medicine
+   * - Total visits with medicine + total doses
+   * - Work accident (TNLĐ) cases
+   */
+  async getDetailedStatistics(
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const end = endDate ? new Date(endDate) : new Date();
+    if (endDate) end.setHours(23, 59, 59, 999);
+
+    let start: Date;
+    if (startDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      const now = new Date(end);
+      switch (period) {
+        case 'day':
+          start = new Date(now);
+          start.setHours(0, 0, 0, 0);
+          break;
+        case 'week': {
+          start = new Date(now);
+          const day = start.getDay();
+          const diff = day === 0 ? 6 : day - 1;
+          start.setDate(start.getDate() - diff);
+          start.setHours(0, 0, 0, 0);
+          break;
+        }
+        case 'month':
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          start = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+    }
+
+    // Fetch all medical records in the period with their prescriptions
+    const records = await this.prisma.medicalRecord.findMany({
+      where: {
+        visitDate: { gte: start, lte: end },
+      },
+      include: {
+        prescriptions: {
+          select: { id: true, quantity: true, isDispensed: true },
+        },
+      },
+    });
+
+    // Count visits per patient in this period
+    const visitCountByPatient = new Map<string, number>();
+    for (const r of records) {
+      visitCountByPatient.set(
+        r.patientId,
+        (visitCountByPatient.get(r.patientId) || 0) + 1,
+      );
+    }
+
+    // Workers dispensed exactly 1 / exactly 2 / 3+ times
+    let dispensedOnce = 0;
+    let dispensedTwice = 0;
+    let dispensedThreePlus = 0;
+    for (const count of visitCountByPatient.values()) {
+      if (count === 1) dispensedOnce++;
+      else if (count === 2) dispensedTwice++;
+      else dispensedThreePlus++;
+    }
+
+    // Visits: with medicine vs without
+    let visitsWithMedicine = 0;
+    let visitsWithoutMedicine = 0;
+    let totalDoses = 0;
+    let workAccidentCases = 0;
+
+    for (const r of records) {
+      const hasDispensed = r.prescriptions.some((p) => p.isDispensed);
+      if (hasDispensed) {
+        visitsWithMedicine++;
+        totalDoses += r.prescriptions
+          .filter((p) => p.isDispensed)
+          .reduce((sum, p) => sum + p.quantity, 0);
+      } else {
+        visitsWithoutMedicine++;
+      }
+      if (r.isWorkAccident) workAccidentCases++;
+    }
+
+    return {
+      period,
+      dateRange: { start, end },
+      totalVisits: records.length,
+      uniquePatients: visitCountByPatient.size,
+      dispensedOnce,   // Cấp lần 1
+      dispensedTwice,  // Cấp lần 2
+      dispensedThreePlus, // Cấp lần 3+
+      visitsWithMedicine,   // Tổng lượt cấp thuốc
+      visitsWithoutMedicine, // Tổng lượt không cấp thuốc
+      totalDoses,            // Tổng số liều
+      workAccidentCases,     // Tổng số trường hợp TNLĐ
+    };
   }
 }

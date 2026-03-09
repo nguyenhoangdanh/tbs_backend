@@ -1,4 +1,11 @@
-import { IsString, IsNumber, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import {
+  IsString,
+  IsNumber,
+  IsOptional,
+  IsArray,
+  IsBoolean,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -47,7 +54,9 @@ export class CreateMedicalRecordDto {
   @IsString()
   doctorId: string;
 
-  @ApiPropertyOptional({ description: 'Visit date - defaults to current date if not provided' })
+  @ApiPropertyOptional({
+    description: 'Visit date - defaults to current date if not provided',
+  })
   @IsOptional()
   @IsString()
   visitDate?: string;
@@ -67,7 +76,15 @@ export class CreateMedicalRecordDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ description: 'List of prescriptions', type: [CreatePrescriptionDto] })
+  @ApiPropertyOptional({ description: 'Work accident case (TNLĐ)' })
+  @IsOptional()
+  @IsBoolean()
+  isWorkAccident?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'List of prescriptions',
+    type: [CreatePrescriptionDto],
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -96,7 +113,15 @@ export class UpdateMedicalRecordDto {
   @IsString()
   notes?: string;
 
-  @ApiPropertyOptional({ description: 'List of prescriptions to update/add', type: [CreatePrescriptionDto] })
+  @ApiPropertyOptional({ description: 'Work accident case (TNLĐ)' })
+  @IsOptional()
+  @IsBoolean()
+  isWorkAccident?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'List of prescriptions to update/add',
+    type: [CreatePrescriptionDto],
+  })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
@@ -129,7 +154,9 @@ export class CreateMedicineDto {
   @IsString()
   instructions?: string;
 
-  @ApiPropertyOptional({ description: 'Units of the medicine, e.g., "tablet", "bottle"' })
+  @ApiPropertyOptional({
+    description: 'Units of the medicine, e.g., "tablet", "bottle"',
+  })
   @IsOptional()
   @IsString()
   units?: string;
@@ -161,7 +188,9 @@ export class UpdateMedicineDto {
   @IsString()
   instructions?: string;
 
-  @ApiPropertyOptional({ description: 'Units of the medicine, e.g., "tablet", "bottle"' })
+  @ApiPropertyOptional({
+    description: 'Units of the medicine, e.g., "tablet", "bottle"',
+  })
   @IsOptional()
   @IsString()
   units?: string;
