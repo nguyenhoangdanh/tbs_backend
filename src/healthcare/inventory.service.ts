@@ -1748,7 +1748,9 @@ export class InventoryService {
     const grandTotal = this.createEmptyTotals();
     const groups = Array.from(categoryGroups.values())
       // Sort categories by sortOrder
-      .sort((a, b) => (a.category.sortOrder || 0) - (b.category.sortOrder || 0));
+      .sort(
+        (a, b) => (a.category.sortOrder || 0) - (b.category.sortOrder || 0),
+      );
 
     groups.forEach((group) => {
       // Sort items A→Z by medicine name within each category
