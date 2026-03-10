@@ -1344,13 +1344,13 @@ export class HealthcareService {
       dateRange: { start, end },
       totalVisits: records.length,
       uniquePatients: visitCountByPatient.size,
-      dispensedOnce,   // Cấp lần 1
-      dispensedTwice,  // Cấp lần 2
+      dispensedOnce, // Cấp lần 1
+      dispensedTwice, // Cấp lần 2
       dispensedThreePlus, // Cấp lần 3+
-      visitsWithMedicine,   // Tổng lượt cấp thuốc
+      visitsWithMedicine, // Tổng lượt cấp thuốc
       visitsWithoutMedicine, // Tổng lượt không cấp thuốc
-      totalDoses,            // Tổng số liều
-      workAccidentCases,     // Tổng số trường hợp TNLĐ
+      totalDoses, // Tổng số liều
+      workAccidentCases, // Tổng số trường hợp TNLĐ
     };
   }
 }
