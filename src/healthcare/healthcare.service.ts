@@ -1303,18 +1303,27 @@ export class HealthcareService {
 
     // Count visits per patient in this period
     const visitCountByPatient = new Map<string, number>();
+    // Count dispensed visits per patient (only visits where medicine was given)
+    const dispensedCountByPatient = new Map<string, number>();
     for (const r of records) {
       visitCountByPatient.set(
         r.patientId,
         (visitCountByPatient.get(r.patientId) || 0) + 1,
       );
+      const hasDispensed = r.prescriptions.some((p) => p.isDispensed);
+      if (hasDispensed) {
+        dispensedCountByPatient.set(
+          r.patientId,
+          (dispensedCountByPatient.get(r.patientId) || 0) + 1,
+        );
+      }
     }
 
-    // Workers dispensed exactly 1 / exactly 2 / 3+ times
+    // Workers dispensed exactly 1 / exactly 2 / 3+ times (only counting visits WITH medicine)
     let dispensedOnce = 0;
     let dispensedTwice = 0;
     let dispensedThreePlus = 0;
-    for (const count of visitCountByPatient.values()) {
+    for (const count of dispensedCountByPatient.values()) {
       if (count === 1) dispensedOnce++;
       else if (count === 2) dispensedTwice++;
       else dispensedThreePlus++;
