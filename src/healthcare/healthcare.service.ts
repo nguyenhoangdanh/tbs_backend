@@ -1319,15 +1319,21 @@ export class HealthcareService {
       }
     }
 
-    // Workers dispensed exactly 1 / exactly 2 / 3+ times (only counting visits WITH medicine)
-    let dispensedOnce = 0;
-    let dispensedTwice = 0;
-    let dispensedThreePlus = 0;
+    // Build dynamic frequency distribution: { times: N, workers: count }
+    const frequencyMap = new Map<number, number>();
     for (const count of dispensedCountByPatient.values()) {
-      if (count === 1) dispensedOnce++;
-      else if (count === 2) dispensedTwice++;
-      else dispensedThreePlus++;
+      frequencyMap.set(count, (frequencyMap.get(count) || 0) + 1);
     }
+    const dispensingFrequency = Array.from(frequencyMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([times, workers]) => ({ times, workers }));
+
+    // Backward-compat buckets
+    const dispensedOnce = frequencyMap.get(1) || 0;
+    const dispensedTwice = frequencyMap.get(2) || 0;
+    const dispensedThreePlus = Array.from(frequencyMap.entries())
+      .filter(([times]) => times >= 3)
+      .reduce((sum, [, workers]) => sum + workers, 0);
 
     // Visits: with medicine vs without
     let visitsWithMedicine = 0;
@@ -1353,13 +1359,14 @@ export class HealthcareService {
       dateRange: { start, end },
       totalVisits: records.length,
       uniquePatients: visitCountByPatient.size,
-      dispensedOnce, // Cấp lần 1
-      dispensedTwice, // Cấp lần 2
-      dispensedThreePlus, // Cấp lần 3+
-      visitsWithMedicine, // Tổng lượt cấp thuốc
-      visitsWithoutMedicine, // Tổng lượt không cấp thuốc
-      totalDoses, // Tổng số liều
-      workAccidentCases, // Tổng số trường hợp TNLĐ
+      dispensingFrequency,  // Dynamic: [{times:1,workers:300},{times:2,workers:58},...]
+      dispensedOnce,
+      dispensedTwice,
+      dispensedThreePlus,
+      visitsWithMedicine,
+      visitsWithoutMedicine,
+      totalDoses,
+      workAccidentCases,
     };
   }
 }
