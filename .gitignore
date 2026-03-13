@@ -56,7 +56,6 @@ Thumbs.db
 *.db-journal
 
 # Prisma
-/prisma/migrations/
 /prisma/dev.db
 /prisma/dev.db-journal
 
@@ -184,7 +183,6 @@ temp/
 # Package manager
 package-lock.json
 yarn.lock
-pnpm-lock.yaml
 
 # NestJS specific
 /dist/

@@ -126,7 +126,7 @@ export class InventoryService {
           referenceType: data.referenceType,
           referenceId: data.referenceId,
           notes: data.notes,
-          createdBy: data.createdBy,
+          createdById: data.createdById,
         },
         include: { medicine: true },
       });

@@ -135,7 +135,7 @@ export class CreateInventoryTransactionDto {
   @ApiPropertyOptional({ description: 'Created by user ID' })
   @IsOptional()
   @IsString()
-  createdBy?: string;
+  createdById?: string;
 }
 
 // ========== BULK IMPORT DTOs (from Excel) ==========

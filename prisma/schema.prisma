@@ -43,7 +43,8 @@ model Office {
   departments  Department[]
   jobPositions JobPosition[]
   users        User[]
-  worksheets   WorkSheet[] // Office = Factory for FACTORY_OFFICE type
+  worksheets   WorkSheet[]            // Office = Factory for FACTORY_OFFICE type
+  monthlyBackups WorkSheetMonthlyBackup[]
 
   @@index([type])
   @@map("offices")
@@ -116,9 +117,10 @@ model User {
   createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator") // Quản trị line tạo
   pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
 
-  medicalRecordsAsPatient MedicalRecord[]       @relation("PatientMedicalRecords")
-  medicalRecordsAsDoctor  MedicalRecord[]       @relation("DoctorMedicalRecords")
-  prescriptionsDispensed  MedicalPrescription[] @relation("MedicineDispenser")
+  medicalRecordsAsPatient      MedicalRecord[]        @relation("PatientMedicalRecords")
+  medicalRecordsAsDoctor       MedicalRecord[]        @relation("DoctorMedicalRecords")
+  prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
+  inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
 
   @@index([jobPositionId])
   @@index([officeId])
@@ -242,6 +244,7 @@ model Group {
   team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   members     User[]      @relation("GroupMembers")
   worksheets  WorkSheet[]
+  monthlyBackups WorkSheetMonthlyBackup[]
 
   @@unique([code, teamId])
   @@index([teamId])
@@ -398,6 +401,7 @@ model WorkSheetRecordCause {
   delta     Int
   note      String?
   createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
   record    WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
 
   @@unique([recordId, cause])
@@ -409,7 +413,7 @@ model WorkSheetMonthlyBackup {
   id              String   @id @default(uuid())
   month           Int
   year            Int
-  officeId        String // Office = Factory
+  officeId        String
   groupId         String
   totalWorksheets Int
   totalOutput     Int
@@ -417,9 +421,13 @@ model WorkSheetMonthlyBackup {
   backupData      Json
   createdAt       DateTime @default(now())
 
+  office Office @relation(fields: [officeId], references: [id], onDelete: NoAction)
+  group  Group  @relation(fields: [groupId], references: [id], onDelete: NoAction)
+
   @@unique([month, year, officeId, groupId])
   @@index([year, month])
   @@index([officeId])
+  @@index([groupId])
   @@map("worksheet_monthly_backups")
 }
 
@@ -433,6 +441,7 @@ model AttendanceEvent {
   hourEnd     Int?
   note        String?
   createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   worksheet   WorkSheet           @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
 
@@ -542,7 +551,7 @@ model MedicalRecord {
   notes          String? // Ghi chú
   isWorkAccident Boolean  @default(false) // Tai nạn lao động (TNLĐ)
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   patient       User                  @relation("PatientMedicalRecords", fields: [patientId], references: [id])
   doctor        User                  @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
@@ -655,17 +664,19 @@ model InventoryTransaction {
   batchNumber String? // Số lô (cho nhập kho)
   supplier    String? // Nhà cung cấp (cho nhập kho)
 
-  notes     String?
-  createdBy String? // User ID người tạo giao dịch
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  notes       String?
+  createdById String? // User ID người tạo giao dịch
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  medicine    Medicine  @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  createdByUser User?   @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([medicineId])
   @@index([type])
   @@index([transactionDate])
   @@index([referenceType, referenceId])
+  @@index([createdById])
   @@map("inventory_transactions")
 }
 
