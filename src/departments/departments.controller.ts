@@ -14,19 +14,21 @@ import { DepartmentsService } from './departments.service';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { User } from '@prisma/client';
 import { ApiOperation, ApiResponse } from '@nestjs/swagger';
 
 @Controller('departments')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 export class DepartmentsController {
   constructor(private departmentsService: DepartmentsService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @HttpCode(HttpStatus.CREATED)
   create(@Body() createDepartmentDto: CreateDepartmentDto) {
     return this.departmentsService.create(createDepartmentDto);
@@ -58,6 +60,7 @@ export class DepartmentsController {
 
   @Delete(':id')
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Delete department' })
   @ApiResponse({ status: 200, description: 'Department deleted successfully' })
   remove(@Param('id') id: string) {

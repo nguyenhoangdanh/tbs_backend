@@ -27,6 +27,7 @@ import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Request } from 'express';
 
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @ApiTags('feedback')
 @Controller('feedback')
 export class FeedbackController {
@@ -62,8 +63,7 @@ export class FeedbackController {
   // ========== PROTECTED ENDPOINTS - REQUIRE PERMISSIONS ==========
 
   @Get()
-  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-  @RequirePermissions('feedback:view')
+    @RequirePermissions('feedback:view')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Lấy danh sách góp ý (Cần quyền)',
@@ -98,8 +98,7 @@ export class FeedbackController {
   }
 
   @Get('stats')
-  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-  @RequirePermissions('feedback:view')
+    @RequirePermissions('feedback:view')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Lấy thống kê góp ý',
@@ -114,8 +113,7 @@ export class FeedbackController {
   }
 
   @Get(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-  @RequirePermissions('feedback:view')
+    @RequirePermissions('feedback:view')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Lấy chi tiết góp ý theo ID',
@@ -129,8 +127,7 @@ export class FeedbackController {
   }
 
   @Delete(':id')
-  @UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
-  @RequirePermissions('feedback:delete')
+    @RequirePermissions('feedback:delete')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Xóa góp ý (Cần quyền)',

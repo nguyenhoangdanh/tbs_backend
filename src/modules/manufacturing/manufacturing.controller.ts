@@ -19,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { ManufacturingService } from './manufacturing.service';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -30,7 +31,8 @@ import { UpdateProductProcessDto } from './dto/update-product-process.dto';
 
 @ApiTags('manufacturing')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('manufacturing:view')
 @Controller('manufacturing')
 export class ManufacturingController {
   constructor(private readonly manufacturingService: ManufacturingService) {}

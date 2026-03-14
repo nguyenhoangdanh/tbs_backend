@@ -26,20 +26,22 @@ import { AdjustRecordTargetDto } from './dto/adjust-record-target.dto';
 import { BulkUpdateGroupWorksheetsDto } from './dto/bulk-update-group-worksheets.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { WorksheetService } from './worksheet.service';
 
 @ApiTags('worksheets')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('worksheets:view')
 @Controller('worksheets')
 export class WorksheetController {
   constructor(private readonly worksheetService: WorksheetService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
   @Roles('SUPERADMIN', 'ADMIN', 'USER')
+  @RequirePermissions('worksheets:create')
   @ApiOperation({ summary: 'Create new worksheet' })
   @ApiResponse({ status: 201, description: 'Worksheet created successfully' })
   create(@Body() createWorksheetDto: CreateWorksheetDto, @GetUser() user: any) {

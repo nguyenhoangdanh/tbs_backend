@@ -18,6 +18,7 @@ import {
 import { CreateJobPositionDto } from './dto/create-job-position.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { RolesGuard } from 'src/common/guards/roles.guard';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { JobPositionsService } from './job-positions.service';
 import { Roles } from 'src/common/decorators/roles.decorator';
 import { UpdateJobPositionDto } from './dto/update-job-position.dto';
@@ -25,11 +26,13 @@ import { UpdateJobPositionDto } from './dto/update-job-position.dto';
 @ApiTags('job-positions')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('job-positions')
 export class JobPositionsController {
   constructor(private readonly jobPositionsService: JobPositionsService) {}
 
   @Post()
+  @RequirePermissions('organizations:manage')
   @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create a new job position' })
   @ApiResponse({
@@ -83,6 +86,7 @@ export class JobPositionsController {
   }
 
   @Delete(':id')
+  @RequirePermissions('organizations:manage')
   @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete job position' })
   @ApiResponse({

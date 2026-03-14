@@ -11,6 +11,7 @@ import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiParam } from '@nestjs/
 import { HierarchyReportsService } from './hierarchy-reports.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 

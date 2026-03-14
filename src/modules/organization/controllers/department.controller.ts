@@ -18,6 +18,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
 import { User } from '@prisma/client';
@@ -27,14 +28,15 @@ import { UpdateDepartmentDto } from '../dto/department/update-department.dto';
 
 @ApiTags('organization/departments')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('organization/departments')
 export class DepartmentController {
   constructor(private readonly departmentService: DepartmentService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new department' })
   @ApiResponse({
@@ -58,7 +60,6 @@ export class DepartmentController {
   }
 
   @Get('by-office')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get departments by office' })
   async findByOffice(@GetUser() user: any) {
@@ -86,8 +87,8 @@ export class DepartmentController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Update department' })
   @ApiResponse({
     status: 200,
@@ -101,8 +102,8 @@ export class DepartmentController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Delete department' })
   @ApiResponse({
     status: 200,

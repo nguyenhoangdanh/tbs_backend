@@ -7,10 +7,12 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ProductionHierarchyService } from './services/production-hierarchy.service';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 
 @ApiTags('production')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('groups:view')
 @Controller('production')
 export class ProductionController {
   private readonly logger = new Logger(ProductionController.name);

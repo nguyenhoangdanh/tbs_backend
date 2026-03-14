@@ -265,15 +265,49 @@ export class PermissionsService {
       { resource: 'healthcare', action: 'view', description: 'View healthcare' },
       { resource: 'healthcare', action: 'create', description: 'Create healthcare records' },
       { resource: 'healthcare', action: 'update', description: 'Update healthcare records' },
+      { resource: 'healthcare', action: 'delete', description: 'Delete healthcare records' },
       // Gate Pass
       { resource: 'gate-pass', action: 'view', description: 'View gate passes' },
       { resource: 'gate-pass', action: 'create', description: 'Create gate passes' },
       { resource: 'gate-pass', action: 'approve', description: 'Approve gate passes' },
       // Statistics
       { resource: 'statistics', action: 'view', description: 'View statistics' },
-      // Organizations
-      { resource: 'organizations', action: 'view', description: 'View organizations' },
-      { resource: 'organizations', action: 'manage', description: 'Manage organizations' },
+      // Organizations (HR structure)
+      { resource: 'organizations', action: 'view', description: 'View organization structure' },
+      { resource: 'organizations', action: 'create', description: 'Create org units' },
+      { resource: 'organizations', action: 'update', description: 'Update org units' },
+      { resource: 'organizations', action: 'delete', description: 'Delete org units' },
+      { resource: 'organizations', action: 'manage', description: 'Full org management' },
+      // Manufacturing
+      { resource: 'manufacturing', action: 'view', description: 'View manufacturing data' },
+      { resource: 'manufacturing', action: 'manage', description: 'Manage manufacturing' },
+      // Worksheets
+      { resource: 'worksheets', action: 'view', description: 'View worksheets' },
+      { resource: 'worksheets', action: 'create', description: 'Create worksheets' },
+      { resource: 'worksheets', action: 'update', description: 'Update worksheets' },
+      { resource: 'worksheets', action: 'delete', description: 'Delete worksheets' },
+      // Production groups & teams
+      { resource: 'groups', action: 'view', description: 'View production groups' },
+      { resource: 'groups', action: 'create', description: 'Create production groups' },
+      { resource: 'groups', action: 'update', description: 'Update production groups' },
+      { resource: 'groups', action: 'assign', description: 'Assign users to groups' },
+      { resource: 'groups', action: 'manage', description: 'Manage production groups' },
+      { resource: 'teams', action: 'view', description: 'View teams' },
+      { resource: 'teams', action: 'create', description: 'Create teams' },
+      { resource: 'teams', action: 'update', description: 'Update teams' },
+      { resource: 'teams', action: 'delete', description: 'Delete teams' },
+      { resource: 'teams', action: 'manage', description: 'Manage teams' },
+      // Feedback
+      { resource: 'feedback', action: 'view', description: 'View feedback' },
+      { resource: 'feedback', action: 'create', description: 'Create feedback' },
+      { resource: 'feedback', action: 'manage', description: 'Manage feedback' },
+      // Hierarchy reports
+      { resource: 'hierarchy-reports', action: 'view', description: 'View hierarchy reports' },
+      // Task evaluations
+      { resource: 'task-evaluations', action: 'view', description: 'View task evaluations' },
+      { resource: 'task-evaluations', action: 'create', description: 'Create task evaluations' },
+      { resource: 'task-evaluations', action: 'update', description: 'Update task evaluations' },
+      { resource: 'task-evaluations', action: 'delete', description: 'Delete task evaluations' },
     ];
 
     let created = 0;
@@ -313,16 +347,16 @@ export class PermissionsService {
     // Assign all permissions to ADMIN role (full access)
     await this._assignPermissionsToRole('ADMIN', null, roleAssignments);
 
-    // MEDICAL_STAFF: healthcare + organizations:view
+    // MEDICAL_STAFF: full healthcare access + organizations:view
     await this._assignPermissionsToRole('MEDICAL_STAFF', ['healthcare'], roleAssignments);
+    await this._assignPermissionsToRole('MEDICAL_STAFF', ['organizations'], roleAssignments, ['view']);
 
-    // USER: view-only for reports, statistics, organizations, gate-pass
-    await this._assignPermissionsToRole(
-      'USER',
-      null,
-      roleAssignments,
-      ['view'],
-    );
+    // USER: can view reports/stats/organizations + create reports + submit gate-pass + task-evaluations
+    await this._assignPermissionsToRole('USER', null, roleAssignments, ['view']);
+    await this._assignPermissionsToRole('USER', ['reports'], roleAssignments, ['create', 'update', 'delete']);
+    await this._assignPermissionsToRole('USER', ['gate-pass'], roleAssignments, ['create']);
+    await this._assignPermissionsToRole('USER', ['worksheets'], roleAssignments, ['create', 'update']);
+    await this._assignPermissionsToRole('USER', ['task-evaluations'], roleAssignments, ['create', 'update', 'delete']);
 
     return {
       totalPermissions: created,

@@ -16,6 +16,8 @@ import { TaskEvaluationsService } from './task-evaluations.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { EvaluationType } from '@prisma/client';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 
 @ApiTags('task-evaluations')
 @Controller('task-evaluations')
