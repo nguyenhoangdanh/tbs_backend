@@ -17,7 +17,8 @@
     "db:migrate:deploy": "npx prisma migrate deploy",
     "db:studio": "npx prisma studio",
     "db:seed": "npx tsx prisma/seed.ts",
-    "db:seed:medicines": "npx tsx prisma/seed-medicines.ts"
+    "db:seed:medicines": "npx tsx prisma/seed-medicines.ts",
+    "db:import": "npx tsx prisma/import-workers.ts"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",

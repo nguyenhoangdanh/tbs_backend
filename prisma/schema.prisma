@@ -11,24 +11,67 @@ datasource db {
 
 // ========== MULTI-COMPANY / TENANT ROOT ==========
 
-model Company {
-  id          String   @id @default(uuid())
-  code        String   @unique // "TBS", "TBS_FOOTWEAR", "TBS_TECH", etc.
-  name        String   @unique // "TBS Group", "TBS Footwear Co., Ltd"
-  taxCode     String?  @unique // Mã số thuế
-  address     String?
-  phone       String?
-  email       String?
-  logoUrl     String?
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum CompanyType {
+  HOLDING         // Tập đoàn (TBSGroup)
+  SUBSIDIARY      // Công ty thành viên / con (TBS An Giang)
+  FACTORY_COMPLEX // Tổ hợp / cụm nhà máy (Tổ hợp Thoại Sơn)
+  BRANCH          // Chi nhánh / văn phòng đại diện
+}
 
+enum BusinessSector {
+  BAGS        // Túi xách
+  FOOTWEAR    // Giày da
+  REAL_ESTATE // Bất động sản nhà ở
+  APARTMENT   // Chung cư
+  LOGISTICS   // Logistics
+  EDUCATION   // Giáo dục
+  OTHER       // Khác
+}
+
+model Region {
+  id          String    @id @default(uuid())
+  code        String    @unique // "AN_GIANG", "HCM", "BINH_DUONG"
+  name        String    @unique // "An Giang", "TP. Hồ Chí Minh"
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([isActive])
+  @@map("regions")
+}
+
+model Company {
+  id              String          @id @default(uuid())
+  code            String          @unique // "TBS", "TBS_AN_GIANG", "TOHO_THOAI_SON"
+  name            String          @unique // "TBS Group", "TBS An Giang", "Tổ hợp túi xách Thoại Sơn"
+  type            CompanyType     @default(SUBSIDIARY)
+  parentCompanyId String?         // Self-reference for hierarchy
+  regionId        String?         // Geographic region
+  sector          BusinessSector? // Business sector / lĩnh vực
+  taxCode         String?  @unique // Mã số thuế
+  address         String?
+  phone           String?
+  email           String?
+  logoUrl         String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  parent    Company?  @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
+  children  Company[] @relation("CompanyHierarchy")
+  region    Region?   @relation(fields: [regionId], references: [id])
   offices   Office[]
   users     User[]
   products  Product[]
   processes Process[]
 
+  @@index([type])
+  @@index([parentCompanyId])
+  @@index([regionId])
+  @@index([sector])
   @@index([isActive])
   @@map("companies")
 }

@@ -254,19 +254,69 @@ async function assignPermissionsToRoles(
 }
 
 async function seedDefaultCompany() {
-  console.log('\n━━━ [4/6] Seeding default company ━━━');
-  const company = await prisma.company.upsert({
+  console.log('\n━━━ [4/6] Seeding company hierarchy ━━━');
+
+  // ── Root holding
+  const holding = await prisma.company.upsert({
     where: { code: 'TBS' },
-    update: { name: 'TBS Group', isActive: true },
+    update: { name: 'TBS Group', type: 'HOLDING', isActive: true },
     create: {
       code: 'TBS',
       name: 'TBS Group',
+      type: 'HOLDING',
       email: 'contact@tbsgroup.vn',
       isActive: true,
     },
   });
-  console.log(`  ✓ Company: ${company.code} — ${company.name}`);
-  return company;
+  console.log(`  ✓ [HOLDING]         ${holding.code} — ${holding.name}`);
+
+  // ── Region: An Giang
+  const regionAnGiang = await prisma.region.upsert({
+    where: { code: 'AN_GIANG' },
+    update: {},
+    create: {
+      code: 'AN_GIANG',
+      name: 'An Giang',
+      description: 'Tỉnh An Giang — khu vực Đồng bằng sông Cửu Long',
+    },
+  });
+  console.log(`  ✓ [REGION]          ${regionAnGiang.code} — ${regionAnGiang.name}`);
+
+  // ── Subsidiary: TBS An Giang
+  const subsidiary = await prisma.company.upsert({
+    where: { code: 'TBS_AN_GIANG' },
+    update: {},
+    create: {
+      code: 'TBS_AN_GIANG',
+      name: 'Công ty CP TBS An Giang',
+      type: 'SUBSIDIARY',
+      parentCompanyId: holding.id,
+      regionId: regionAnGiang.id,
+      email: 'info@tbs-angiang.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [SUBSIDIARY]      ${subsidiary.code} — ${subsidiary.name}`);
+
+  // ── Factory Complex: Tổ hợp Thoại Sơn (Bags)
+  const complex = await prisma.company.upsert({
+    where: { code: 'TOHO_THOAI_SON' },
+    update: {},
+    create: {
+      code: 'TOHO_THOAI_SON',
+      name: 'Tổ hợp túi xách Thoại Sơn',
+      type: 'FACTORY_COMPLEX',
+      parentCompanyId: subsidiary.id,
+      regionId: regionAnGiang.id,
+      sector: 'BAGS',
+      email: 'thoaison@tbs-angiang.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [FACTORY_COMPLEX] ${complex.code} — ${complex.name}`);
+
+  // Return holding as default company for SuperAdmin infra
+  return holding;
 }
 
 async function seedSuperAdminInfrastructure(companyId: string) {
