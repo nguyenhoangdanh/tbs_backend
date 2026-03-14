@@ -15,7 +15,6 @@ import { ApiOperation, ApiResponse, ApiTags, ApiParam, ApiQuery, ApiBody, ApiBea
 import { TaskEvaluationsService } from './task-evaluations.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
-import { PermissionsGuard } from '../common/guards/permissions.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { EvaluationType } from '@prisma/client';
@@ -30,7 +29,7 @@ function getPrimaryRole(user: any): string {
 
 @ApiTags('task-evaluations')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('task-evaluations')
 export class TaskEvaluationsController {
   constructor(private readonly taskEvaluationsService: TaskEvaluationsService) {}
