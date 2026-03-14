@@ -140,8 +140,8 @@ export class RolesService {
     const role = await this.getRoleById(id);
 
     // Cannot modify system roles
-    if (role.isSystem && (dto.name !== undefined)) {
-      throw new BadRequestException('Cannot modify system role name');
+    if (role.isSystem && (dto.name !== undefined || dto.code !== undefined)) {
+      throw new BadRequestException('Cannot modify system role name or code');
     }
 
     // Update role
@@ -149,6 +149,7 @@ export class RolesService {
       where: { id },
       data: {
         name: dto.name,
+        code: dto.code,
         description: dto.description,
         isActive: dto.isActive,
       },
