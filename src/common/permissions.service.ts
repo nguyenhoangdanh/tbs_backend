@@ -197,4 +197,79 @@ export class PermissionsService {
       where: { id },
     });
   }
+
+  /**
+   * Seed default permissions and assign to system roles
+   */
+  async seedPermissions() {
+    const defaultPermissions = [
+      // Users
+      { resource: 'users', action: 'view', description: 'View users' },
+      { resource: 'users', action: 'create', description: 'Create users' },
+      { resource: 'users', action: 'update', description: 'Update users' },
+      { resource: 'users', action: 'delete', description: 'Delete users' },
+      // Roles
+      { resource: 'roles', action: 'view', description: 'View roles' },
+      { resource: 'roles', action: 'manage', description: 'Manage roles & permissions' },
+      // Reports
+      { resource: 'reports', action: 'view', description: 'View reports' },
+      { resource: 'reports', action: 'create', description: 'Create reports' },
+      { resource: 'reports', action: 'update', description: 'Update reports' },
+      { resource: 'reports', action: 'delete', description: 'Delete reports' },
+      { resource: 'reports', action: 'approve', description: 'Approve reports' },
+      // Healthcare
+      { resource: 'healthcare', action: 'view', description: 'View healthcare' },
+      { resource: 'healthcare', action: 'create', description: 'Create healthcare records' },
+      { resource: 'healthcare', action: 'update', description: 'Update healthcare records' },
+      // Gate Pass
+      { resource: 'gate-pass', action: 'view', description: 'View gate passes' },
+      { resource: 'gate-pass', action: 'create', description: 'Create gate passes' },
+      { resource: 'gate-pass', action: 'approve', description: 'Approve gate passes' },
+      // Statistics
+      { resource: 'statistics', action: 'view', description: 'View statistics' },
+      // Organizations
+      { resource: 'organizations', action: 'view', description: 'View organizations' },
+      { resource: 'organizations', action: 'manage', description: 'Manage organizations' },
+    ];
+
+    let created = 0;
+    for (const perm of defaultPermissions) {
+      await this.prisma.permission.upsert({
+        where: { resource_action: { resource: perm.resource, action: perm.action } },
+        create: perm,
+        update: { description: perm.description },
+      });
+      created++;
+    }
+
+    // Assign all permissions to SUPERADMIN role
+    const superadminRole = await this.prisma.roleDefinition.findFirst({
+      where: { code: 'SUPERADMIN' },
+    });
+
+    let roleAssignments: Record<string, number> = {};
+
+    if (superadminRole) {
+      const allPerms = await this.prisma.permission.findMany();
+      // Clear existing
+      await this.prisma.roleDefinitionPermission.deleteMany({
+        where: { roleDefinitionId: superadminRole.id },
+      });
+      // Assign all
+      await this.prisma.roleDefinitionPermission.createMany({
+        data: allPerms.map((p) => ({
+          roleDefinitionId: superadminRole.id,
+          permissionId: p.id,
+          isGranted: true,
+        })),
+      });
+      roleAssignments['SUPERADMIN'] = allPerms.length;
+    }
+
+    return {
+      totalPermissions: created,
+      roleAssignments,
+      message: `Seeded ${created} permissions successfully`,
+    };
+  }
 }
