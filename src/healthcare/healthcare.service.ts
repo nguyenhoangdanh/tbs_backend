@@ -190,7 +190,7 @@ export class HealthcareService {
 
   // Medical records management
   async getPatientHistory(employeeCode: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { employeeCode },
       include: {
         // Thông tin JobPosition và các quan hệ của nó
@@ -620,7 +620,7 @@ export class HealthcareService {
     }>;
   }) {
     // Find patient by employee code
-    const patient = await this.prisma.user.findUnique({
+    const patient = await this.prisma.user.findFirst({
       where: { employeeCode: data.patientEmployeeCode },
     });
 

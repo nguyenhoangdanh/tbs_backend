@@ -193,7 +193,7 @@ let departmentId: string | null = null;
 
   async createUser(createUserDto: CreateUserDto) {
     // Check if employee code already exists
-    const existingUser = await this.prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findFirst({
       where: { employeeCode: createUserDto.employeeCode },
     });
 
@@ -218,10 +218,19 @@ let departmentId: string | null = null;
       10,
     );
 
+    const office = await this.prisma.office.findUnique({
+      where: { id: createUserDto.officeId },
+    });
+
+    if (!office) {
+      throw new BadRequestException('Office not found');
+    }
+
     const user = await this.prisma.user.create({
       data: {
         ...createUserDto,
         password: hashedPassword,
+        companyId: office.companyId,
       },
       include: {
         office: true,
@@ -589,6 +598,7 @@ let departmentId: string | null = null;
               dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
               sex,
               isActive: true,
+              companyId: office.companyId,
             },
           });
 
@@ -676,7 +686,7 @@ let departmentId: string | null = null;
 
         try {
           // Validate employee code uniqueness
-          const existingUser = await tx.user.findUnique({
+          const existingUser = await tx.user.findFirst({
             where: { employeeCode: userData.employeeCode },
           });
 
@@ -703,11 +713,21 @@ let departmentId: string | null = null;
             10,
           );
 
+          // Fetch office to get companyId
+          const office = await tx.office.findUnique({
+            where: { id: userData.officeId },
+          });
+
+          if (!office) {
+            throw new Error(`Office not found for user ${userData.employeeCode}`);
+          }
+
           // Create user
           const newUser = await tx.user.create({
             data: {
               ...userData,
               password: hashedPassword,
+              companyId: office.companyId,
             },
             include: {
               office: {
@@ -748,7 +768,7 @@ let departmentId: string | null = null;
    * Search user by employee code
    */
   async searchByEmployeeCode(employeeCode: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { employeeCode },
       include: {
         office: {

@@ -9,6 +9,30 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ========== MULTI-COMPANY / TENANT ROOT ==========
+
+model Company {
+  id          String   @id @default(uuid())
+  code        String   @unique // "TBS", "TBS_FOOTWEAR", "TBS_TECH", etc.
+  name        String   @unique // "TBS Group", "TBS Footwear Co., Ltd"
+  taxCode     String?  @unique // Mã số thuế
+  address     String?
+  phone       String?
+  email       String?
+  logoUrl     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  offices   Office[]
+  users     User[]
+  products  Product[]
+  processes Process[]
+
+  @@index([isActive])
+  @@map("companies")
+}
+
 model JobPosition {
   id           String     @id @default(uuid())
   jobName      String
@@ -35,17 +59,21 @@ model JobPosition {
 
 model Office {
   id           String        @id @default(uuid())
-  name         String        @unique
+  companyId    String        // Belongs to which company
+  name         String        // Unique per company (@@unique below)
   type         OfficeType
   description  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   departments  Department[]
   jobPositions JobPosition[]
   users        User[]
-  worksheets   WorkSheet[]            // Office = Factory for FACTORY_OFFICE type
+  worksheets   WorkSheet[]
   monthlyBackups WorkSheetMonthlyBackup[]
 
+  @@unique([name, companyId])
+  @@index([companyId])
   @@index([type])
   @@map("offices")
 }
@@ -85,8 +113,9 @@ model Position {
 
 model User {
   id                 String                     @id @default(uuid())
-  employeeCode       String                     @unique
-  email              String?                    @unique
+  companyId          String                     // Tenant isolation — denormalized from officeId.companyId for performance
+  employeeCode       String                     // Unique per company (@@unique below)
+  email              String?                    @unique // Global email uniqueness for login
   password           String
   firstName          String
   lastName           String
@@ -95,7 +124,7 @@ model User {
   dateOfBirth        DateTime?                  @db.Date
   address            String?
   sex                Sex?
-  roles              UserRole[]                 @relation("UserRoles") // Multiple roles support
+  roles              UserRole[]                 @relation("UserRoles")
   jobPositionId      String
   isActive           Boolean                    @default(false)
   officeId           String
@@ -109,12 +138,13 @@ model User {
   reports            Report[]
   evaluations        TaskEvaluation[]
   managedDepartments UserDepartmentManagement[] @relation("UserToManagedDepartments")
+  company            Company                    @relation(fields: [companyId], references: [id])
   group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
   jobPosition        JobPosition                @relation(fields: [jobPositionId], references: [id])
   office             Office                     @relation(fields: [officeId], references: [id])
-  myWorkSheets       WorkSheet[]                @relation("WorkerWorkSheets") // Phiếu công của mình
-  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater") // Nhóm trưởng cập nhật
-  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator") // Quản trị line tạo
+  myWorkSheets       WorkSheet[]                @relation("WorkerWorkSheets")
+  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater")
+  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator")
   pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
 
   medicalRecordsAsPatient      MedicalRecord[]        @relation("PatientMedicalRecords")
@@ -122,6 +152,8 @@ model User {
   prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
   inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
 
+  @@unique([employeeCode, companyId])
+  @@index([companyId])
   @@index([jobPositionId])
   @@index([officeId])
   @@index([isActive])
@@ -255,36 +287,42 @@ model Group {
 
 model Product {
   id                   String                @id @default(uuid())
+  companyId            String?               // null = shared/global across all companies
   name                 String
-  code                 String                @unique
+  code                 String                // Unique per company (@@unique below)
   description          String?
   imageUrl             String?
   isActive             Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  company              Company?              @relation(fields: [companyId], references: [id])
   processes            ProductProcess[]
   worksheets           WorkSheet[]
   worksheetRecordItems WorkSheetRecordItem[]
 
+  @@unique([code, companyId])
+  @@index([companyId])
   @@index([isActive])
-  @@index([code])
   @@map("products")
 }
 
 model Process {
   id                   String                @id @default(uuid())
+  companyId            String?               // null = shared/global across all companies
   name                 String
-  code                 String                @unique
+  code                 String                // Unique per company (@@unique below)
   description          String?
   isActive             Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  company              Company?              @relation(fields: [companyId], references: [id])
   products             ProductProcess[]
   worksheets           WorkSheet[]
   worksheetRecordItems WorkSheetRecordItem[]
 
+  @@unique([code, companyId])
+  @@index([companyId])
   @@index([isActive])
-  @@index([code])
   @@map("processes")
 }
 

@@ -4,6 +4,10 @@ import { OfficeType } from '@prisma/client';
 export class CreateOfficeDto {
   @IsString()
   @IsNotEmpty()
+  companyId: string;
+
+  @IsString()
+  @IsNotEmpty()
   name: string;
 
   @IsEnum(OfficeType)

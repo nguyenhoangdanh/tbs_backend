@@ -72,7 +72,7 @@ export class AuthService {
     } = registerDto;
 
     // Check if user already exists by employeeCode
-    const existingUser = await this.prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findFirst({
       where: { employeeCode },
     });
 
@@ -136,6 +136,7 @@ export class AuthService {
         phone,
         jobPositionId,
         officeId,
+        companyId: office.companyId,
       },
       include: {
         office: {
@@ -203,7 +204,7 @@ export class AuthService {
       }
 
       // ALWAYS try direct lookup by employeeCode first (handles MSNV and special codes like SUPERADMIN)
-      user = await this.prisma.user.findUnique({
+      user = await this.prisma.user.findFirst({
         where: { employeeCode },
         include: {
           office: {

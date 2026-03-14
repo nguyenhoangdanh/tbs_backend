@@ -225,3 +225,4 @@ Dockerfile.dev
 /seed-data
 /scripts/dev-*
 .vercel
+prisma/*.xlsx
