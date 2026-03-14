@@ -199,6 +199,50 @@ export class PermissionsService {
   }
 
   /**
+   * Bulk-create permissions — skips duplicates, returns created count.
+   */
+  async bulkCreatePermissions(
+    items: Array<{ resource: string; action: string; description?: string }>,
+  ): Promise<{ created: number; skipped: number; permissions: unknown[] }> {
+    const results: unknown[] = [];
+    let skipped = 0;
+
+    for (const item of items) {
+      const existing = await this.prisma.permission.findUnique({
+        where: { resource_action: { resource: item.resource, action: item.action } },
+      });
+      if (existing) {
+        skipped++;
+        continue;
+      }
+      const created = await this.prisma.permission.create({ data: item });
+      results.push(created);
+    }
+
+    return { created: results.length, skipped, permissions: results };
+  }
+
+  /**
+   * Bulk-delete permissions by IDs.
+   */
+  async bulkDeletePermissions(
+    ids: string[],
+  ): Promise<{ deleted: number }> {
+    const result = await this.prisma.permission.deleteMany({
+      where: { id: { in: ids } },
+    });
+    return { deleted: result.count };
+  }
+
+  /**
+   * Delete ALL permissions (SUPERADMIN only — destructive).
+   */
+  async deleteAllPermissions(): Promise<{ deleted: number }> {
+    const result = await this.prisma.permission.deleteMany({});
+    return { deleted: result.count };
+  }
+
+  /**
    * Seed default permissions and assign to system roles
    */
   async seedPermissions() {

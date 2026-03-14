@@ -4,7 +4,11 @@ import {
   IsOptional,
   IsBoolean,
   IsUUID,
+  IsArray,
+  ValidateNested,
+  ArrayMinSize,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreatePermissionDto {
@@ -70,4 +74,21 @@ export class BulkUpdateRolePermissionsDto {
   @IsUUID('4', { each: true })
   @IsNotEmpty()
   permissionIds: string[];
+}
+
+export class BulkCreatePermissionsDto {
+  @ApiProperty({ type: [CreatePermissionDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => CreatePermissionDto)
+  permissions: CreatePermissionDto[];
+}
+
+export class BulkDeletePermissionsDto {
+  @ApiProperty({ example: ['uuid1', 'uuid2'] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsUUID('4', { each: true })
+  ids: string[];
 }
