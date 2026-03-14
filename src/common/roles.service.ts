@@ -236,28 +236,26 @@ export class RolesService {
                 department: true,
               },
             },
+            // Include all active roles this user has
+            roles: {
+              where: { isActive: true },
+              include: {
+                roleDefinition: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                    isSystem: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
 
-    // Add permissions for each user (including roles array)
-    const enrichedUserRoles = await Promise.all(
-      userRoles.map(async (userRole) => {
-        const permissions = await this.permissionsService.getUserPermissions(
-          userRole.user.id,
-        );
-        return {
-          ...userRole,
-          user: {
-            ...userRole.user,
-            permissions,
-          },
-        };
-      }),
-    );
-
-    return enrichedUserRoles;
+    return userRoles;
   }
 
   /**
