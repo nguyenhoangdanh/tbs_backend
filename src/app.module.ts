@@ -39,7 +39,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     // ⭐ FIX: ConfigModule setup
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env.local', '.env'],
     }),
     CommonModule, // ⭐ ADD
 
