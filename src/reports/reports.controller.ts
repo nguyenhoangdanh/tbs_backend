@@ -30,15 +30,18 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 
 @ApiTags('reports')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('reports:view')
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Post()
+  @RequirePermissions('reports:create')
   @ApiOperation({ summary: 'Tạo báo cáo tuần mới' })
   @ApiResponse({ status: 201, description: 'Báo cáo đã được tạo thành công' })
   @ApiResponse({ status: 400, description: 'Dữ liệu không hợp lệ' })
@@ -88,6 +91,7 @@ export class ReportsController {
   }
 
   @Patch(':id')
+  @RequirePermissions('reports:update')
   @ApiOperation({ summary: 'Cập nhật báo cáo' })
   @ApiParam({ name: 'id', type: String })
   update(
@@ -100,6 +104,7 @@ export class ReportsController {
 
 
   @Delete(':id')
+  @RequirePermissions('reports:delete')
   @ApiOperation({ summary: 'Xóa báo cáo' })
   @ApiParam({ name: 'id', type: String })
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -119,6 +124,7 @@ export class ReportsController {
   }
 
   @Patch('tasks/:taskId/approve')
+  @RequirePermissions('reports:approve')
   @ApiOperation({ summary: 'Duyệt công việc' })
   @ApiParam({ name: 'taskId', type: String })
   approveTask(@Request() req: any, @Param('taskId') taskId: string) {

@@ -26,6 +26,7 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { InventoryService } from './inventory.service';
 import {
   CreateMedicineCategoryDto,
@@ -42,6 +43,7 @@ import {
 @ApiTags('inventory')
 @Controller('healthcare/inventory')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('healthcare:view')
 @ApiBearerAuth('JWT-auth')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
@@ -60,6 +62,7 @@ export class InventoryController {
   }
 
   @Post('categories')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Create new medicine category' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -68,6 +71,7 @@ export class InventoryController {
   }
 
   @Patch('categories/:id')
+  @RequirePermissions('healthcare:update')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Update medicine category' })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
@@ -79,6 +83,7 @@ export class InventoryController {
   }
 
   @Delete('categories/:id')
+  @RequirePermissions('healthcare:update')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Delete medicine category (soft delete)' })
   async deleteCategory(@Param('id') id: string) {
@@ -88,6 +93,7 @@ export class InventoryController {
   // ==================== INVENTORY TRANSACTION ENDPOINTS ====================
 
   @Post('transactions')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Create inventory transaction (import/export/adjustment)',
@@ -125,6 +131,7 @@ export class InventoryController {
   // ==================== BULK IMPORT ENDPOINTS ====================
 
   @Post('bulk-import')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Bulk import inventory data from Excel',
@@ -176,6 +183,7 @@ export class InventoryController {
   }
 
   @Post('simplified-import')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Simplified bulk import (13-column template)',
@@ -291,6 +299,7 @@ export class InventoryController {
   }
 
   @Patch('balance')
+  @RequirePermissions('healthcare:update')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Update inventory balance manually',
@@ -302,6 +311,7 @@ export class InventoryController {
   }
 
   @Post('recalculate-balances')
+  @RequirePermissions('healthcare:create')
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Recalculate all inventory balances from scratch',
@@ -319,6 +329,7 @@ export class InventoryController {
   }
 
   @Post('initialize-month')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Initialize a new month from previous closing balance',
@@ -340,6 +351,7 @@ export class InventoryController {
   }
 
   @Post('import-from-excel')
+  @RequirePermissions('healthcare:create')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
     summary: 'Import inventory data from Excel file',

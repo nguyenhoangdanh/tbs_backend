@@ -29,16 +29,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             const authMode = request?.headers?.['x-auth-mode'] || 'cookie';
             const isIOSOrMac = /iPad|iPhone|iPod|Macintosh/i.test(userAgent);
             
-            this.logger.log('JWT Extraction Debug:', {
-              authMode,
-              isIOSOrMac,
-              hasAuthHeader: !!request?.headers?.authorization,
-              hasCookieToken: !!token,
-              tokenSource: request?.headers?.authorization ? 'header' : (token ? 'cookie' : 'none'),
-              userAgent: userAgent?.substring(0, 50),
-              method: request?.method,
-              path: request?.url,
-            });
+            // this.logger.log('JWT Extraction Debug:', {
+            //   authMode,
+            //   isIOSOrMac,
+            //   hasAuthHeader: !!request?.headers?.authorization,
+            //   hasCookieToken: !!token,
+            //   tokenSource: request?.headers?.authorization ? 'header' : (token ? 'cookie' : 'none'),
+            //   userAgent: userAgent?.substring(0, 50),
+            //   method: request?.method,
+            //   path: request?.url,
+            // });
           }
 
           return token;

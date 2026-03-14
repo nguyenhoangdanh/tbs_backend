@@ -19,10 +19,12 @@ import {
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { Roles } from './decorators/roles.decorator';
+import { RequirePermissions } from './decorators/permissions.decorator';
 
 @ApiTags('Permissions Management')
 @Controller('permissions')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('roles:manage')
 @ApiBearerAuth()
 export class PermissionsController {
   constructor(private readonly permissionsService: PermissionsService) {}

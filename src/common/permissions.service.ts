@@ -310,10 +310,57 @@ export class PermissionsService {
       roleAssignments['SUPERADMIN'] = allPerms.length;
     }
 
+    // Assign all permissions to ADMIN role (full access)
+    await this._assignPermissionsToRole('ADMIN', null, roleAssignments);
+
+    // MEDICAL_STAFF: healthcare + organizations:view
+    await this._assignPermissionsToRole('MEDICAL_STAFF', ['healthcare'], roleAssignments);
+
+    // USER: view-only for reports, statistics, organizations, gate-pass
+    await this._assignPermissionsToRole(
+      'USER',
+      null,
+      roleAssignments,
+      ['view'],
+    );
+
     return {
       totalPermissions: created,
       roleAssignments,
       message: `Seeded ${created} permissions successfully`,
     };
+  }
+
+  /** Helper: assign permissions to a role by code */
+  private async _assignPermissionsToRole(
+    roleCode: string,
+    /** If set, only include permissions whose resource is in this list */
+    resources: string[] | null,
+    roleAssignments: Record<string, number>,
+    /** If set, only include permissions whose action is in this list */
+    actions: string[] | null = null,
+  ) {
+    const role = await this.prisma.roleDefinition.findFirst({ where: { code: roleCode } });
+    if (!role) return;
+
+    const whereClause: any = {};
+    if (resources) whereClause.resource = { in: resources };
+    if (actions) whereClause.action = { in: actions };
+
+    const perms = await this.prisma.permission.findMany({ where: whereClause });
+
+    await this.prisma.roleDefinitionPermission.deleteMany({
+      where: { roleDefinitionId: role.id },
+    });
+    if (perms.length > 0) {
+      await this.prisma.roleDefinitionPermission.createMany({
+        data: perms.map((p) => ({
+          roleDefinitionId: role.id,
+          permissionId: p.id,
+          isGranted: true,
+        })),
+      });
+    }
+    roleAssignments[roleCode] = perms.length;
   }
 }

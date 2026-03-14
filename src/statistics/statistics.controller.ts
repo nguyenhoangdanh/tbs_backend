@@ -12,11 +12,13 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
 
 @ApiTags('statistics')
 @Controller('statistics')
 @UseGuards(JwtAuthGuard)
+@RequirePermissions('statistics:view')
 export class StatisticsController {
   constructor(private readonly statisticsService: StatisticsService) {}
 

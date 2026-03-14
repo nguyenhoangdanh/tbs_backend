@@ -7,8 +7,9 @@ import { ReportsModule } from './reports/reports.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { HierarchyReportsModule } from './hierarchy-reports/hierarchy-reports.module';
 import { TaskEvaluationsModule } from './task-evaluations/task-evaluations.module';
-import { ConfigModule } from '@nestjs/config'; // ⭐ Ensure correct import
+import { ConfigModule } from '@nestjs/config';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -99,6 +100,11 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // PermissionsGuard runs after JwtAuthGuard; passes through if no @RequirePermissions
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
     },
   ],
   exports: [],
