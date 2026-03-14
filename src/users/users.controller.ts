@@ -234,7 +234,11 @@ export class UsersController {
   ) {
     // Check if user can update this profile
     const isSelfUpdate = currentUser.id === id;
-    const canUpdateOthers = ['SUPERADMIN', 'ADMIN'].includes(currentUser.role);
+    const userRoleCodes = (currentUser.roles ?? []).map(
+      (r: any) => r.roleDefinition?.code,
+    );
+    const canUpdateOthers =
+      userRoleCodes.includes('SUPERADMIN') || userRoleCodes.includes('ADMIN');
 
     if (!isSelfUpdate && !canUpdateOthers) {
       throw new BadRequestException('You can only update your own profile');

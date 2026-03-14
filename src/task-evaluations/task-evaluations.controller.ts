@@ -11,21 +11,32 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags, ApiParam, ApiQuery, ApiBody } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiParam, ApiQuery, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
 import { TaskEvaluationsService } from './task-evaluations.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
+import { PermissionsGuard } from '../common/guards/permissions.guard';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { EvaluationType } from '@prisma/client';
-import { RolesGuard } from '../common/guards/roles.guard';
-import { RequirePermissions } from '../common/decorators/permissions.decorator';
+
+/** Derive primary role code from user.roles[] (JWT shape) */
+function getPrimaryRole(user: any): string {
+  const roles: any[] = user?.roles ?? [];
+  if (roles.some((r) => r.roleDefinition?.code === 'SUPERADMIN')) return 'SUPERADMIN';
+  if (roles.some((r) => r.roleDefinition?.code === 'ADMIN')) return 'ADMIN';
+  return roles[0]?.roleDefinition?.code ?? 'USER';
+}
 
 @ApiTags('task-evaluations')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard, RolesGuard, PermissionsGuard)
 @Controller('task-evaluations')
-@UseGuards(JwtAuthGuard)
 export class TaskEvaluationsController {
   constructor(private readonly taskEvaluationsService: TaskEvaluationsService) {}
 
   @Post()
+  @RequirePermissions('task-evaluations:create')
   @ApiOperation({ summary: 'Create a new task evaluation (managers only)' })
   @ApiResponse({ status: 201, description: 'Task evaluation created successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - User does not have management permissions' })
@@ -64,6 +75,7 @@ export class TaskEvaluationsController {
   }
 
   @Put(':evaluationId')
+  @RequirePermissions('task-evaluations:update')
   @ApiOperation({ summary: 'Update a task evaluation' })
   @ApiResponse({ status: 200, description: 'Task evaluation updated successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - Cannot update this evaluation' })
@@ -98,14 +110,14 @@ export class TaskEvaluationsController {
     return this.taskEvaluationsService.updateTaskEvaluation(
       evaluationId,
       user.id,
-      user.role,
+      getPrimaryRole(user),
       updateEvaluationDto
     );
   }
 
-  
 
   @Get('my-evaluations')
+  @RequirePermissions('task-evaluations:view')
   @ApiOperation({ summary: 'Get evaluations created by the current user' })
   @ApiResponse({ status: 200, description: 'Evaluations retrieved successfully' })
   @ApiQuery({ name: 'weekNumber', required: false, description: 'Filter by week number' })
@@ -144,10 +156,11 @@ export class TaskEvaluationsController {
       filters.evaluationType = evaluationType as EvaluationType;
     }
 
-    return this.taskEvaluationsService.getEvaluationsByEvaluator(user.id, user.role, filters);
+    return this.taskEvaluationsService.getEvaluationsByEvaluator(user.id, getPrimaryRole(user), filters);
   }
 
   @Get('evaluable-tasks')
+  @RequirePermissions('task-evaluations:view')
   @ApiOperation({ summary: 'Get tasks that can be evaluated by the current manager' })
   @ApiResponse({ status: 200, description: 'Evaluable tasks retrieved successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - User does not have management permissions' })
@@ -187,10 +200,11 @@ export class TaskEvaluationsController {
       filters.isCompleted = isCompleted === 'true';
     }
 
-    return this.taskEvaluationsService.getEvaluableTasksForManager(user.id, user.role, filters);
+    return this.taskEvaluationsService.getEvaluableTasksForManager(user.id, getPrimaryRole(user), filters);
   }
 
-@Get('task/:taskId')
+  @Get('task/:taskId')
+  @RequirePermissions('task-evaluations:view')
   @ApiOperation({ summary: 'Get all evaluations for a specific task' })
   @ApiResponse({ status: 200, description: 'Task evaluations retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Task not found' })
@@ -203,6 +217,7 @@ export class TaskEvaluationsController {
   }
 
   @Delete(':evaluationId')
+  @RequirePermissions('task-evaluations:delete')
   @ApiOperation({ summary: 'Delete a task evaluation' })
   @ApiResponse({ status: 200, description: 'Task evaluation deleted successfully' })
   @ApiResponse({ status: 403, description: 'Forbidden - Cannot delete this evaluation' })
@@ -213,6 +228,6 @@ export class TaskEvaluationsController {
     @Param('evaluationId') evaluationId: string,
     @GetUser() user: any
   ) {
-    return this.taskEvaluationsService.deleteTaskEvaluation(evaluationId, user.id, user.role);
+    return this.taskEvaluationsService.deleteTaskEvaluation(evaluationId, user.id, getPrimaryRole(user));
   }
 }
