@@ -20,6 +20,18 @@ export class OrganizationHierarchyService {
                   include: {
                     position: true,
                     _count: { select: { users: true } },
+                    users: {
+                      where: { isActive: true },
+                      select: {
+                        id: true,
+                        employeeCode: true,
+                        firstName: true,
+                        lastName: true,
+                        avatar: true,
+                        isActive: true,
+                      },
+                      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+                    },
                   },
                   orderBy: { position: { level: 'asc' } },
                 },
