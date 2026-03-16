@@ -5,7 +5,6 @@ import {
   Body,
   Param,
   Delete,
-  Put,
   Patch,
   UseGuards,
   HttpCode,
@@ -64,7 +63,6 @@ export class PositionController {
     return this.positionService.findOne(id);
   }
 
-  @Put(':id')
   @Patch(':id')
   @Roles('ADMIN', 'SUPERADMIN')
   @RequirePermissions('organizations:manage')

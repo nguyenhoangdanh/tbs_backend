@@ -5,7 +5,6 @@ import {
   Body,
   Param,
   Delete,
-  Put,
   Patch,
   UseGuards,
   HttpCode,
@@ -68,7 +67,6 @@ export class OfficeController {
     return this.officeService.getDepartments(id);
   }
 
-  @Put(':id')
   @Patch(':id')
   @Roles('SUPERADMIN')
   @RequirePermissions('organizations:manage')
