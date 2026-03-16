@@ -240,9 +240,12 @@ let departmentId: string | null = null;
       throw new BadRequestException('Office not found');
     }
 
+    // Destructure role out — User model has no `role` scalar, role assigned via UserRole
+    const { role, password: _pw, ...userFields } = createUserDto;
+
     const user = await this.prisma.user.create({
       data: {
-        ...createUserDto,
+        ...userFields,
         password: hashedPassword,
         companyId: office.companyId,
       },
@@ -256,6 +259,18 @@ let departmentId: string | null = null;
         },
       },
     });
+
+    // Assign role via UserRole table
+    if (role) {
+      const roleDef = await this.prisma.roleDefinition.findUnique({
+        where: { code: role },
+      });
+      if (roleDef) {
+        await this.prisma.userRole.create({
+          data: { userId: user.id, roleDefinitionId: roleDef.id },
+        });
+      }
+    }
 
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
@@ -271,15 +286,18 @@ let departmentId: string | null = null;
       throw new NotFoundException('User not found');
     }
 
+    // Destructure role out — handled via UserRole table separately
+    const { role, ...profileFields } = updateProfileDto as any;
+
     // Check role permission - only SUPERADMIN can change role
-    if (updateProfileDto.role && currentUser.role !== 'SUPERADMIN') {
+    if (role && currentUser.role !== 'SUPERADMIN' && !currentUser.roles?.some?.((r: any) => r?.roleDefinition?.code === 'SUPERADMIN')) {
       throw new ForbiddenException('Only SUPERADMIN can change user roles');
     }
 
     // Check email uniqueness if changed
-    if (updateProfileDto.email && updateProfileDto.email !== user.email) {
+    if (profileFields.email && profileFields.email !== user.email) {
       const existingEmail = await this.prisma.user.findUnique({
-        where: { email: updateProfileDto.email },
+        where: { email: profileFields.email },
       });
 
       if (existingEmail) {
@@ -289,7 +307,7 @@ let departmentId: string | null = null;
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: updateProfileDto,
+      data: profileFields,
       include: {
         office: true,
         jobPosition: {
@@ -300,6 +318,25 @@ let departmentId: string | null = null;
         },
       },
     });
+
+    // Update role via UserRole table if provided
+    if (role) {
+      const roleDef = await this.prisma.roleDefinition.findUnique({
+        where: { code: role },
+      });
+      if (roleDef) {
+        // Deactivate existing roles, then upsert new one
+        await this.prisma.userRole.updateMany({
+          where: { userId: id, isActive: true },
+          data: { isActive: false },
+        });
+        await this.prisma.userRole.upsert({
+          where: { userId_roleDefinitionId: { userId: id, roleDefinitionId: roleDef.id } },
+          update: { isActive: true },
+          create: { userId: id, roleDefinitionId: roleDef.id },
+        });
+      }
+    }
 
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
