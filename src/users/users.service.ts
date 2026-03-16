@@ -46,23 +46,23 @@ export class UsersService {
     const where: any = {};
 
     if (search) {
-      // Split search into tokens so "mỹ hạnh" matches firstName="Mỹ" + lastName="Hạnh"
-      const tokens = search.trim().split(/\s+/).filter(Boolean);
+      // Normalize search to uppercase so lowercase input matches all-caps stored data
+      const normalized = search.trim().toLocaleUpperCase('vi');
+      const tokens = normalized.split(/\s+/).filter(Boolean);
       if (tokens.length === 1) {
         where.OR = [
           { employeeCode: { contains: tokens[0], mode: 'insensitive' } },
           { firstName: { contains: tokens[0], mode: 'insensitive' } },
           { lastName: { contains: tokens[0], mode: 'insensitive' } },
-          { email: { contains: tokens[0], mode: 'insensitive' } },
+          { email: { contains: search.trim(), mode: 'insensitive' } },
         ];
       } else {
-        // Multi-word: all tokens must appear across firstName + lastName (any order)
+        // Multi-word: every token must match at least one name field
         where.AND = tokens.map((token) => ({
           OR: [
             { firstName: { contains: token, mode: 'insensitive' } },
             { lastName: { contains: token, mode: 'insensitive' } },
             { employeeCode: { contains: token, mode: 'insensitive' } },
-            { email: { contains: token, mode: 'insensitive' } },
           ],
         }));
       }
