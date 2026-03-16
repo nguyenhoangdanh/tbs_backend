@@ -6,6 +6,7 @@ import {
   Param,
   Delete,
   Put,
+  Patch,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -64,6 +65,7 @@ export class PositionController {
   }
 
   @Put(':id')
+  @Patch(':id')
   @Roles('ADMIN', 'SUPERADMIN')
   @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Update position' })

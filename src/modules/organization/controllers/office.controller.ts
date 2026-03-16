@@ -6,6 +6,7 @@ import {
   Param,
   Delete,
   Put,
+  Patch,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -68,6 +69,7 @@ export class OfficeController {
   }
 
   @Put(':id')
+  @Patch(':id')
   @Roles('SUPERADMIN')
   @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Update office' })
