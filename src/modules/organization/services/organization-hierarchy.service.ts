@@ -6,46 +6,66 @@ export class OrganizationHierarchyService {
   constructor(private prisma: PrismaService) {}
 
   /**
-   * Get complete organization structure
+   * Get complete organization structure grouped by company
    */
   async getOrganizationStructure() {
-    const offices = await this.prisma.office.findMany({
+    const companies = await this.prisma.company.findMany({
       include: {
-        departments: {
+        offices: {
           include: {
-            jobPositions: {
-              where: { isActive: true },
+            departments: {
               include: {
-                position: true,
-                _count: { select: { users: true } },
+                jobPositions: {
+                  where: { isActive: true },
+                  include: {
+                    position: true,
+                    _count: { select: { users: true } },
+                  },
+                  orderBy: { position: { level: 'asc' } },
+                },
               },
-              orderBy: { position: { level: 'asc' } },
+              orderBy: { name: 'asc' },
+            },
+            _count: {
+              select: {
+                departments: true,
+                users: true,
+              },
             },
           },
           orderBy: { name: 'asc' },
         },
         _count: {
-          select: {
-            departments: true,
-            users: true,
-          },
+          select: { offices: true },
         },
       },
       orderBy: { name: 'asc' },
     });
 
+    const totalOffices = companies.reduce(
+      (sum, c) => sum + c.offices.length,
+      0,
+    );
+    const totalDepartments = companies.reduce(
+      (sum, c) =>
+        sum + c.offices.reduce((s, o) => s + (o._count?.departments || 0), 0),
+      0,
+    );
+    const totalUsers = companies.reduce(
+      (sum, c) =>
+        sum + c.offices.reduce((s, o) => s + (o._count?.users || 0), 0),
+      0,
+    );
+
     return {
-      offices,
+      companies,
+      // legacy flat offices list for backward compat
+      offices: companies.flatMap((c) => c.offices),
       summary: {
-        totalOffices: offices.length,
-        totalDepartments: offices.reduce(
-          (sum, office) => sum + (office._count?.departments || 0),
-          0,
-        ),
-        totalUsers: offices.reduce(
-          (sum, office) => sum + (office._count?.users || 0),
-          0,
-        ),
+        totalCompanies: companies.length,
+        totalOffices,
+        totalDepartments,
+        totalUsers,
       },
     };
   }

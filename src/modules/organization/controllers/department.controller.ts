@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Patch,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -21,7 +22,6 @@ import { RolesGuard } from '../../../common/guards/roles.guard';
 import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
-import { User } from '@prisma/client';
 import { DepartmentService } from '../services/department.service';
 import { CreateDepartmentDto } from '../dto/department/create-department.dto';
 import { UpdateDepartmentDto } from '../dto/department/update-department.dto';
@@ -54,8 +54,17 @@ export class DepartmentController {
     status: 200,
     description: 'Departments retrieved successfully',
   })
-  findAll(@GetUser() user: User) {
-    // Role check handled by guard - filter by office for non-superadmin
+  findAll(@GetUser() user: any, @Query('companyId') companyId?: string) {
+    // SUPERADMIN/ADMIN see all departments; others see only their office
+    const userRoleCodes = (user.roles || [])
+      .filter((ur: any) => ur.roleDefinition && ur.isActive)
+      .map((ur: any) => ur.roleDefinition.code as string);
+    const isAdminOrAbove = userRoleCodes.some((c: string) =>
+      ['SUPERADMIN', 'ADMIN'].includes(c),
+    );
+    if (isAdminOrAbove) {
+      return this.departmentService.findAll(companyId);
+    }
     return this.departmentService.findByOffice(user.officeId);
   }
 

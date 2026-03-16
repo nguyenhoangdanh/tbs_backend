@@ -6,6 +6,7 @@ import {
   Param,
   Delete,
   Patch,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -46,8 +47,8 @@ export class OfficeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all offices' })
   @ApiResponse({ status: 200, description: 'Offices retrieved successfully' })
-  findAll() {
-    return this.officeService.findAll();
+  findAll(@Query('companyId') companyId?: string) {
+    return this.officeService.findAll(companyId);
   }
 
   @Get(':id')
