@@ -11,21 +11,36 @@ datasource db {
 
 // ========== MULTI-COMPANY / TENANT ROOT ==========
 
-enum CompanyType {
-  HOLDING         // Tập đoàn (TBSGroup)
-  SUBSIDIARY      // Công ty thành viên / con (TBS An Giang)
-  FACTORY_COMPLEX // Tổ hợp / cụm nhà máy (Tổ hợp Thoại Sơn)
-  BRANCH          // Chi nhánh / văn phòng đại diện
+model CompanyType {
+  id          String    @id @default(uuid())
+  code        String    @unique // "HOLDING", "NGANH", "CHUOI", "TO_HOP", "NHA_MAY"
+  name        String    @unique // "Tập đoàn", "Ngành", "Chuỗi", "Tổ hợp", "Nhà máy"
+  level       Int       // 0=top (Tập đoàn) → higher = deeper in hierarchy
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([level])
+  @@index([isActive])
+  @@map("company_types")
 }
 
-enum BusinessSector {
-  BAGS        // Túi xách
-  FOOTWEAR    // Giày da
-  REAL_ESTATE // Bất động sản nhà ở
-  APARTMENT   // Chung cư
-  LOGISTICS   // Logistics
-  EDUCATION   // Giáo dục
-  OTHER       // Khác
+model BusinessSector {
+  id          String    @id @default(uuid())
+  code        String    @unique // "BAGS", "FOOTWEAR", etc.
+  name        String    @unique // "Túi xách", "Giày da", etc.
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([isActive])
+  @@map("business_sectors")
 }
 
 model Region {
@@ -44,34 +59,34 @@ model Region {
 }
 
 model Company {
-  id              String          @id @default(uuid())
-  code            String          @unique // "TBS", "TBS_AN_GIANG", "TOHO_THOAI_SON"
-  name            String          @unique // "TBS Group", "TBS An Giang", "Tổ hợp túi xách Thoại Sơn"
-  type            CompanyType     @default(SUBSIDIARY)
-  parentCompanyId String?         // Self-reference for hierarchy
-  regionId        String?         // Geographic region
-  sector          BusinessSector? // Business sector / lĩnh vực
-  taxCode         String?  @unique // Mã số thuế
+  id              String    @id @default(uuid())
+  code            String    @unique
+  name            String    @unique
+  typeId          String
+  parentCompanyId String?
+  regionId        String?
+  taxCode         String?   @unique
   address         String?
   phone           String?
   email           String?
   logoUrl         String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
-  parent    Company?  @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
-  children  Company[] @relation("CompanyHierarchy")
-  region    Region?   @relation(fields: [regionId], references: [id])
-  offices   Office[]
-  users     User[]
-  products  Product[]
-  processes Process[]
+  companyType CompanyType     @relation(fields: [typeId], references: [id])
+  parent      Company?        @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
+  children    Company[]       @relation("CompanyHierarchy")
+  region      Region?         @relation(fields: [regionId], references: [id])
+  sectors     BusinessSector[]
+  offices     Office[]
+  users       User[]
+  products    Product[]
+  processes   Process[]
 
-  @@index([type])
+  @@index([typeId])
   @@index([parentCompanyId])
   @@index([regionId])
-  @@index([sector])
   @@index([isActive])
   @@map("companies")
 }

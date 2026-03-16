@@ -34,6 +34,9 @@ import { PositionsModule } from './positions/positions.module';
 import { JobPositionsModule } from './job-positions/job-positions.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { CompanyModule } from './company/company.module';
+import { CompanyTypesModule } from './company-types/company-types.module';
+import { BusinessSectorsModule } from './business-sectors/business-sectors.module';
+import { RegionsModule } from './regions/regions.module';
 import { CommonModule } from './common/common.module'; // ⭐ ADD
 
 @Module({
@@ -92,6 +95,9 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     JobPositionsModule,
     OrganizationsModule,
     CompanyModule,
+    CompanyTypesModule,
+    BusinessSectorsModule,
+    RegionsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -48,21 +48,21 @@ export class CompanyController {
   @Get()
   @ApiOperation({ summary: 'List all companies with optional filters' })
   @ApiQuery({ name: 'search', required: false })
-  @ApiQuery({ name: 'type', required: false, description: 'HOLDING | SUBSIDIARY | FACTORY_COMPLEX | BRANCH' })
-  @ApiQuery({ name: 'sector', required: false })
+  @ApiQuery({ name: 'typeId', required: false, description: 'CompanyType ID' })
+  @ApiQuery({ name: 'sectorId', required: false, description: 'BusinessSector ID' })
   @ApiQuery({ name: 'isActive', required: false, type: Boolean })
   @ApiQuery({ name: 'parentCompanyId', required: false, description: 'null for top-level only' })
   findAll(
     @Query('search') search?: string,
-    @Query('type') type?: string,
-    @Query('sector') sector?: string,
+    @Query('typeId') typeId?: string,
+    @Query('sectorId') sectorId?: string,
     @Query('isActive') isActive?: string,
     @Query('parentCompanyId') parentCompanyId?: string,
   ) {
     return this.companyService.findAll({
       search,
-      type,
-      sector,
+      typeId,
+      sectorId,
       isActive: isActive === 'true' ? true : isActive === 'false' ? false : undefined,
       parentCompanyId,
     });
@@ -72,12 +72,6 @@ export class CompanyController {
   @ApiOperation({ summary: 'Get company hierarchy tree (root → children)' })
   findTree() {
     return this.companyService.findTree();
-  }
-
-  @Get('regions')
-  @ApiOperation({ summary: 'Get all active regions' })
-  findRegions() {
-    return this.companyService.findRegions();
   }
 
   @Get(':id')

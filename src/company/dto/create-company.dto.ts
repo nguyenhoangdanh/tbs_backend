@@ -2,13 +2,13 @@ import {
   IsString,
   IsNotEmpty,
   IsOptional,
-  IsEnum,
   IsEmail,
   IsBoolean,
   IsUrl,
+  IsArray,
+  IsUUID,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CompanyType, BusinessSector } from '@prisma/client';
 
 export class CreateCompanyDto {
   @ApiProperty({ example: 'TBS_AN_GIANG' })
@@ -21,24 +21,26 @@ export class CreateCompanyDto {
   @IsNotEmpty()
   name: string;
 
-  @ApiProperty({ enum: CompanyType, default: CompanyType.SUBSIDIARY })
-  @IsEnum(CompanyType)
-  type: CompanyType;
+  @ApiProperty({ description: 'CompanyType ID' })
+  @IsUUID()
+  @IsNotEmpty()
+  typeId: string;
 
   @ApiPropertyOptional({ description: 'Parent company ID for hierarchy' })
-  @IsString()
+  @IsUUID()
   @IsOptional()
   parentCompanyId?: string;
 
-  @ApiPropertyOptional()
-  @IsString()
+  @ApiPropertyOptional({ description: 'Region ID' })
+  @IsUUID()
   @IsOptional()
   regionId?: string;
 
-  @ApiPropertyOptional({ enum: BusinessSector, isArray: true, description: 'Business sectors (multiple)' })
-  @IsEnum(BusinessSector, { each: true })
+  @ApiPropertyOptional({ description: 'BusinessSector IDs (many-to-many)', type: [String] })
+  @IsArray()
+  @IsUUID(undefined, { each: true })
   @IsOptional()
-  sector?: BusinessSector[];
+  sectorIds?: string[];
 
   @ApiPropertyOptional({ example: '1234567890' })
   @IsString()

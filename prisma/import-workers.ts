@@ -6,7 +6,7 @@
  * Usage:
  *   pnpm db:import [--company <COMPANY_CODE>]
  *
- * Mặc định company: TOHO_THOAI_SON
+ * Mặc định company: TOHOP_TUIXACH_THOAISON
  *
  * Excel structure (prisma/data.xlsx):
  *   Sheet 1 (index 1): "DSTH (CBQL, NV)" — cán bộ quản lý + nhân viên
@@ -45,7 +45,7 @@ const prisma = new PrismaClient({ log: ['error', 'warn'] });
 function getCompanyCode(): string {
   const idx = process.argv.indexOf('--company');
   if (idx !== -1 && process.argv[idx + 1]) return process.argv[idx + 1];
-  return process.env.COMPANY_CODE ?? 'TOHO_THOAI_SON';
+  return process.env.COMPANY_CODE ?? 'TOHOP_TUIXACH_THOAISON';
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────

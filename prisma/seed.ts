@@ -66,6 +66,9 @@ type RoleCode = (typeof SYSTEM_ROLES)[number]['code'];
 
 const RESOURCES = [
   'companies',
+  'company-types',
+  'business-sectors',
+  'regions',
   'offices',
   'departments',
   'teams',
@@ -100,63 +103,72 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
   SUPERADMIN: 'ALL',
 
   ADMIN: {
-    companies:      ['view'],
-    offices:        ['view', 'create', 'update', 'delete', 'manage'],
-    departments:    ['view', 'create', 'update', 'delete', 'manage'],
-    teams:          ['view', 'create', 'update', 'delete', 'manage'],
-    groups:         ['view', 'create', 'update', 'delete', 'manage', 'assign'],
-    positions:      ['view', 'create', 'update', 'delete'],
-    'job-positions':['view', 'create', 'update', 'delete'],
-    users:          ['view', 'create', 'update', 'delete', 'manage', 'assign'],
-    reports:        ['view', 'approve', 'manage'],
-    'gate-passes':  ['view', 'approve', 'manage'],
-    worksheets:     ['view', 'create', 'update', 'delete', 'manage'],
-    products:       ['view', 'create', 'update', 'delete'],
-    processes:      ['view', 'create', 'update', 'delete'],
-    medicines:      ['view', 'create', 'update'],
+    companies:        ['view', 'create', 'update', 'delete', 'manage'],
+    'company-types':  ['view', 'create', 'update', 'delete', 'manage'],
+    'business-sectors': ['view', 'create', 'update', 'delete', 'manage'],
+    regions:          ['view', 'create', 'update', 'delete', 'manage'],
+    offices:          ['view', 'create', 'update', 'delete', 'manage'],
+    departments:      ['view', 'create', 'update', 'delete', 'manage'],
+    teams:            ['view', 'create', 'update', 'delete', 'manage'],
+    groups:           ['view', 'create', 'update', 'delete', 'manage', 'assign'],
+    positions:        ['view', 'create', 'update', 'delete'],
+    'job-positions':  ['view', 'create', 'update', 'delete'],
+    users:            ['view', 'create', 'update', 'delete', 'manage', 'assign'],
+    reports:          ['view', 'approve', 'manage'],
+    'gate-passes':    ['view', 'approve', 'manage'],
+    worksheets:       ['view', 'create', 'update', 'delete', 'manage'],
+    products:         ['view', 'create', 'update', 'delete'],
+    processes:        ['view', 'create', 'update', 'delete'],
+    medicines:        ['view', 'create', 'update'],
     'medical-records': ['view'],
-    inventory:      ['view'],
-    feedback:       ['view', 'delete'],
-    roles:          ['view'],
-    permissions:    ['view'],
+    inventory:        ['view'],
+    feedback:         ['view', 'delete'],
+    roles:            ['view'],
+    permissions:      ['view'],
   },
 
   MANAGER: {
-    companies:      ['view'],
-    offices:        ['view'],
-    departments:    ['view', 'update'],
-    teams:          ['view', 'create', 'update'],
-    groups:         ['view', 'create', 'update', 'assign'],
-    positions:      ['view'],
-    'job-positions':['view'],
-    users:          ['view', 'update'],
-    reports:        ['view', 'create', 'update', 'approve', 'manage'],
-    'gate-passes':  ['view', 'approve'],
-    worksheets:     ['view', 'create', 'update', 'manage'],
-    products:       ['view'],
-    processes:      ['view'],
-    medicines:      ['view'],
+    companies:        ['view'],
+    'company-types':  ['view'],
+    'business-sectors': ['view'],
+    regions:          ['view'],
+    offices:          ['view'],
+    departments:      ['view', 'update'],
+    teams:            ['view', 'create', 'update'],
+    groups:           ['view', 'create', 'update', 'assign'],
+    positions:        ['view'],
+    'job-positions':  ['view'],
+    users:            ['view', 'update'],
+    reports:          ['view', 'create', 'update', 'approve', 'manage'],
+    'gate-passes':    ['view', 'approve'],
+    worksheets:       ['view', 'create', 'update', 'manage'],
+    products:         ['view'],
+    processes:        ['view'],
+    medicines:        ['view'],
     'medical-records': ['view'],
-    inventory:      ['view'],
+    inventory:        ['view'],
   },
 
   USER: {
-    companies:      ['view'],
-    offices:        ['view'],
-    departments:    ['view'],
-    teams:          ['view'],
-    groups:         ['view'],
-    positions:      ['view'],
-    'job-positions':['view'],
-    users:          ['view', 'update'],
-    reports:        ['view', 'create', 'update'],
-    'gate-passes':  ['view', 'create'],
-    worksheets:     ['view'],
-    products:       ['view'],
-    processes:      ['view'],
-    medicines:      ['view'],
+    companies:        ['view'],
+    'company-types':  ['view'],
+    'business-sectors': ['view'],
+    regions:          ['view'],
+    offices:          ['view'],
+    departments:      ['view'],
+    teams:            ['view'],
+    groups:           ['view'],
+    positions:        ['view'],
+    'job-positions':  ['view'],
+    users:            ['view', 'update'],
+    reports:          ['view', 'create', 'update'],
+    'gate-passes':    ['view', 'create'],
+    worksheets:       ['view'],
+    products:         ['view'],
+    processes:        ['view'],
+    medicines:        ['view'],
     'medical-records': ['view'],
-    inventory:      ['view'],
+    inventory:        ['view'],
   },
 
   WORKER: {
@@ -256,21 +268,48 @@ async function assignPermissionsToRoles(
 async function seedDefaultCompany() {
   console.log('\n━━━ [4/6] Seeding company hierarchy ━━━');
 
-  // ── Root holding
-  const holding = await prisma.company.upsert({
-    where: { code: 'TBS' },
-    update: { name: 'TBS Group', type: 'HOLDING', isActive: true },
-    create: {
-      code: 'TBS',
-      name: 'TBS Group',
-      type: 'HOLDING',
-      email: 'contact@tbsgroup.vn',
-      isActive: true,
-    },
-  });
-  console.log(`  ✓ [HOLDING]         ${holding.code} — ${holding.name}`);
+  // ── Seed CompanyTypes
+  const companyTypesData = [
+    { code: 'HOLDING',    name: 'Tập đoàn',   level: 0, description: 'Tập đoàn mẹ (holding company)' },
+    { code: 'NGANH',      name: 'Ngành',       level: 1, description: 'Ngành sản xuất — đại diện lĩnh vực sản phẩm' },
+    { code: 'CHUOI',      name: 'Chuỗi',       level: 2, description: 'Chuỗi điều hành sản phẩm/khách hàng cụ thể' },
+    { code: 'TO_HOP',     name: 'Tổ hợp',      level: 3, description: 'Cụm nhà máy sản xuất thực tế' },
+    { code: 'NHA_MAY',    name: 'Nhà máy',     level: 4, description: 'Nhà máy sản xuất' },
+    { code: 'CHI_NHANH',  name: 'Chi nhánh',   level: 4, description: 'Chi nhánh / văn phòng đại diện' },
+  ];
+  const companyTypes: Record<string, { id: string }> = {};
+  for (const ct of companyTypesData) {
+    const record = await prisma.companyType.upsert({
+      where: { code: ct.code },
+      update: { name: ct.name, level: ct.level, description: ct.description, isActive: true },
+      create: { ...ct, isActive: true },
+    });
+    companyTypes[ct.code] = record;
+    console.log(`  ✓ [TYPE]   level ${ct.level}  ${ct.code} — ${ct.name}`);
+  }
 
-  // ── Region: An Giang
+  // ── Seed BusinessSectors
+  const sectorsData = [
+    { code: 'BAGS',        name: 'Túi xách',         description: 'Sản xuất và xuất khẩu túi xách' },
+    { code: 'FOOTWEAR',    name: 'Giày da',           description: 'Sản xuất và xuất khẩu giày da' },
+    { code: 'REAL_ESTATE', name: 'Bất động sản',      description: 'Kinh doanh bất động sản nhà ở' },
+    { code: 'APARTMENT',   name: 'Chung cư',          description: 'Đầu tư và vận hành chung cư' },
+    { code: 'LOGISTICS',   name: 'Logistics',         description: 'Dịch vụ logistics và vận chuyển' },
+    { code: 'EDUCATION',   name: 'Giáo dục',          description: 'Đào tạo và giáo dục nghề nghiệp' },
+    { code: 'OTHER',       name: 'Khác',              description: 'Lĩnh vực khác' },
+  ];
+  const sectors: Record<string, { id: string }> = {};
+  for (const s of sectorsData) {
+    const record = await prisma.businessSector.upsert({
+      where: { code: s.code },
+      update: { name: s.name, description: s.description, isActive: true },
+      create: { ...s, isActive: true },
+    });
+    sectors[s.code] = record;
+    console.log(`  ✓ [SECTOR] ${s.code} — ${s.name}`);
+  }
+
+  // ── Seed Regions
   const regionAnGiang = await prisma.region.upsert({
     where: { code: 'AN_GIANG' },
     update: {},
@@ -280,7 +319,21 @@ async function seedDefaultCompany() {
       description: 'Tỉnh An Giang — khu vực Đồng bằng sông Cửu Long',
     },
   });
-  console.log(`  ✓ [REGION]          ${regionAnGiang.code} — ${regionAnGiang.name}`);
+  console.log(`  ✓ [REGION] ${regionAnGiang.code} — ${regionAnGiang.name}`);
+
+  // ── Root holding: TBS Group
+  const holding = await prisma.company.upsert({
+    where: { code: 'TBS' },
+    update: { name: 'TBS Group', typeId: companyTypes['HOLDING'].id, isActive: true },
+    create: {
+      code: 'TBS',
+      name: 'TBS Group',
+      typeId: companyTypes['HOLDING'].id,
+      email: 'contact@tbsgroup.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [HOLDING]  ${holding.code} — ${holding.name}`);
 
   // ── Subsidiary: TBS An Giang
   const subsidiary = await prisma.company.upsert({
@@ -289,31 +342,31 @@ async function seedDefaultCompany() {
     create: {
       code: 'TBS_AN_GIANG',
       name: 'Công ty CP TBS An Giang',
-      type: 'SUBSIDIARY',
+      typeId: companyTypes['NGANH'].id,
       parentCompanyId: holding.id,
       regionId: regionAnGiang.id,
       email: 'info@tbs-angiang.vn',
       isActive: true,
     },
   });
-  console.log(`  ✓ [SUBSIDIARY]      ${subsidiary.code} — ${subsidiary.name}`);
+  console.log(`  ✓ [NGANH]    ${subsidiary.code} — ${subsidiary.name}`);
 
-  // ── Factory Complex: Tổ hợp Thoại Sơn (Bags)
+  // ── Tổ hợp Thoại Sơn
   const complex = await prisma.company.upsert({
-    where: { code: 'TOHOP_THOAI_SON' },
+    where: { code: 'TOHOP_TUIXACH_THOAISON' },
     update: {},
     create: {
-      code: 'TOHOP_THOAI_SON',
+      code: 'TOHOP_TUIXACH_THOAISON',
       name: 'Tổ hợp túi xách Thoại Sơn',
-      type: 'FACTORY_COMPLEX',
+      typeId: companyTypes['TO_HOP'].id,
       parentCompanyId: subsidiary.id,
       regionId: regionAnGiang.id,
-      sector: ['BAGS'],
       email: 'thoaison@tbs-angiang.vn',
       isActive: true,
+      sectors: { connect: [{ id: sectors['BAGS'].id }] },
     },
   });
-  console.log(`  ✓ [FACTORY_COMPLEX] ${complex.code} — ${complex.name}`);
+  console.log(`  ✓ [TO_HOP]   ${complex.code} — ${complex.name}`);
 
   // Return holding as default company for SuperAdmin infra
   return holding;
