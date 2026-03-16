@@ -25,18 +25,7 @@ import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 // ✅ New consolidated modules
 import { OrganizationModule } from './modules/organization/organization.module';
 import { ProductionModule } from './modules/production/production.module';
-
-// ⚠️ DEPRECATED: These modules are now consolidated into OrganizationModule and ProductionModule
-// Keep for backward compatibility, will be removed in next version
-import { OfficesModule } from './offices/offices.module';
-import { DepartmentsModule } from './departments/departments.module';
-import { PositionsModule } from './positions/positions.module';
-import { JobPositionsModule } from './job-positions/job-positions.module';
-import { OrganizationsModule } from './organizations/organizations.module';
-import { CompanyModule } from './company/company.module';
-import { CompanyTypesModule } from './company-types/company-types.module';
-import { BusinessSectorsModule } from './business-sectors/business-sectors.module';
-import { RegionsModule } from './regions/regions.module';
+import { CompanyModule } from './modules/company/company.module';
 import { CommonModule } from './common/common.module'; // ⭐ ADD
 
 @Module({
@@ -87,17 +76,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     // ✅ New consolidated modules (Use these for new development)
     OrganizationModule,
     ProductionModule,
-
-    // ⚠️ DEPRECATED: Keep for backward compatibility
-    OfficesModule,
-    DepartmentsModule,
-    PositionsModule,
-    JobPositionsModule,
-    OrganizationsModule,
     CompanyModule,
-    CompanyTypesModule,
-    BusinessSectorsModule,
-    RegionsModule,
   ],
   controllers: [AppController],
   providers: [

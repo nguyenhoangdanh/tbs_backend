@@ -23,7 +23,6 @@ export class NotificationCleanupService {
     }
 
     try {
-      this.logger.log('Starting scheduled cleanup of invalid push subscriptions...');
       const result = await this.notificationService.cleanupInvalidSubscriptions();
       
       if (result.removedCount > 0) {
@@ -51,7 +50,6 @@ export class NotificationCleanupService {
     }
 
     try {
-      this.logger.debug('Starting scheduled cleanup of stale WebSocket connections...');
       const removedCount = await this.notificationGateway.cleanupStaleConnections();
       
       if (removedCount > 0) {
