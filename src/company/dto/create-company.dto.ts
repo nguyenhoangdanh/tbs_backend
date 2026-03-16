@@ -35,10 +35,10 @@ export class CreateCompanyDto {
   @IsOptional()
   regionId?: string;
 
-  @ApiPropertyOptional({ enum: BusinessSector })
-  @IsEnum(BusinessSector)
+  @ApiPropertyOptional({ enum: BusinessSector, isArray: true, description: 'Business sectors (multiple)' })
+  @IsEnum(BusinessSector, { each: true })
   @IsOptional()
-  sector?: BusinessSector;
+  sector?: BusinessSector[];
 
   @ApiPropertyOptional({ example: '1234567890' })
   @IsString()

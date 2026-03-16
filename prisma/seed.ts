@@ -308,7 +308,7 @@ async function seedDefaultCompany() {
       type: 'FACTORY_COMPLEX',
       parentCompanyId: subsidiary.id,
       regionId: regionAnGiang.id,
-      sectors: ['BAGS'],
+      sector: ['BAGS'],
       email: 'thoaison@tbs-angiang.vn',
       isActive: true,
     },

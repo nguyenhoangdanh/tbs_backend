@@ -62,7 +62,7 @@ export class CompanyService {
           ],
         }),
         ...(type && { type: type as any }),
-        ...(sector && { sectors: { has: sector as any } }),
+        ...(sector && { sector: { has: sector as any } }),
         ...(isActive !== undefined && { isActive }),
         ...(parentCompanyId !== undefined && { parentCompanyId: parentCompanyId || null }),
       },
