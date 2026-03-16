@@ -194,13 +194,13 @@ export class AuthService {
       const isNumericMSNV = /^\d+$/.test(employeeCode);
       const isEmailPrefix = /^[a-z][a-z0-9]*$/.test(employeeCode) && employeeCode.length >= 2 && employeeCode.length <= 20;
       
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.log(`Login type detection for "${employeeCode}":`, {
-          isNumericMSNV,
-          isEmailPrefix,
-          length: employeeCode.length
-        });
-      }
+      // if (process.env.NODE_ENV !== 'production') {
+      //   this.logger.log(`Login type detection for "${employeeCode}":`, {
+      //     isNumericMSNV,
+      //     isEmailPrefix,
+      //     length: employeeCode.length
+      //   });
+      // }
 
       // ALWAYS try direct lookup by employeeCode first (handles MSNV and special codes like SUPERADMIN)
       user = await this.prisma.user.findUnique({
