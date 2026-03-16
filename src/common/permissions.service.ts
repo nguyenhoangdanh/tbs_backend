@@ -308,6 +308,10 @@ export class PermissionsService {
       { resource: 'task-evaluations', action: 'create', description: 'Create task evaluations' },
       { resource: 'task-evaluations', action: 'update', description: 'Update task evaluations' },
       { resource: 'task-evaluations', action: 'delete', description: 'Delete task evaluations' },
+
+      // Companies
+      { resource: 'companies', action: 'view', description: 'View companies' },
+      { resource: 'companies', action: 'manage', description: 'Create/update/delete companies' },
     ];
 
     let created = 0;

@@ -33,6 +33,7 @@ import { DepartmentsModule } from './departments/departments.module';
 import { PositionsModule } from './positions/positions.module';
 import { JobPositionsModule } from './job-positions/job-positions.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { CompanyModule } from './company/company.module';
 import { CommonModule } from './common/common.module'; // ⭐ ADD
 
 @Module({
@@ -90,6 +91,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     PositionsModule,
     JobPositionsModule,
     OrganizationsModule,
+    CompanyModule,
   ],
   controllers: [AppController],
   providers: [
