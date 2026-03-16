@@ -5,13 +5,14 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ProductionHierarchyService } from './services/production-hierarchy.service';
 import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 
 @ApiTags('production')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @RequirePermissions('groups:view')
 @Controller('production')
 export class ProductionController {

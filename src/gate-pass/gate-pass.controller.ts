@@ -18,7 +18,7 @@ import { UpdateGatePassDto } from './dto/update-gate-pass.dto';
 import { ApproveGatePassDto, RejectGatePassDto, BulkApproveGatePassDto, BulkRejectGatePassDto, RequestCancellationDto, ApproveCancellationDto, RejectCancellationDto } from './dto/approve-gate-pass.dto';
 import { GatePassFiltersDto } from './dto/gate-pass-filters.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { RolesGuard } from '../auth/guards/roles.guard';
+import { RolesGuard } from '../common/guards/roles.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 
 @ApiTags('gate-passes')

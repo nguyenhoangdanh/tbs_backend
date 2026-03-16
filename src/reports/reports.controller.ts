@@ -34,7 +34,7 @@ import { RequirePermissions } from '../common/decorators/permissions.decorator';
 
 @ApiTags('reports')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
 @RequirePermissions('reports:view')
 @Controller('reports')
 export class ReportsController {
@@ -151,7 +151,6 @@ export class ReportsController {
 
   // Admin endpoints
   @Get('admin/all')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Lấy tất cả báo cáo (Admin)' })
   @ApiQuery({ name: 'page', required: false, type: Number })
@@ -170,7 +169,6 @@ export class ReportsController {
   }
 
   @Get('admin/stats')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Lấy thống kê báo cáo (Admin)' })
   @ApiQuery({ name: 'weekNumber', required: false, type: Number })
@@ -183,7 +181,6 @@ export class ReportsController {
   }
 
   @Post('admin/lock-reports/:weekNumber/:year')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Khóa báo cáo theo tuần (Admin)' })
   @ApiParam({ name: 'weekNumber', type: Number })

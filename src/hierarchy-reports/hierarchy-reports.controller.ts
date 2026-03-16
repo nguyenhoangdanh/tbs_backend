@@ -17,7 +17,8 @@ import { Roles } from '../common/decorators/roles.decorator';
 
 @ApiTags('hierarchy-reports')
 @Controller('hierarchy-reports')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('hierarchy-reports:view')
 export class HierarchyReportsController {
   constructor(private readonly hierarchyReportsService: HierarchyReportsService) {}
 
@@ -63,7 +64,6 @@ export class HierarchyReportsController {
   }
 
   @Get('offices-overview')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get offices overview (Admin/Superadmin only)' })
   @ApiResponse({ status: 200, description: 'Offices overview retrieved successfully' })
@@ -200,7 +200,6 @@ export class HierarchyReportsController {
   }
 
   @Get('employees-without-reports')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees without reports' })
   @ApiResponse({ status: 200, description: 'Employees without reports retrieved successfully' })
@@ -250,7 +249,6 @@ export class HierarchyReportsController {
   }
 
   @Get('employees-incomplete-reports')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees with incomplete reports' })
   @ApiResponse({ status: 200, description: 'Employees with incomplete reports retrieved successfully' })
@@ -300,7 +298,6 @@ export class HierarchyReportsController {
   }
 
   @Get('employees-reporting-status')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get employees reporting status' })
   @ApiResponse({ status: 200, description: 'Employees reporting status retrieved successfully' })
@@ -356,7 +353,6 @@ export class HierarchyReportsController {
   }
 
   @Get('task-completion-trends')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get task completion trends' })
   @ApiResponse({ status: 200, description: 'Task completion trends retrieved successfully' })
@@ -391,7 +387,6 @@ export class HierarchyReportsController {
   }
 
   @Get('incomplete-reasons-hierarchy')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get incomplete reasons hierarchy analysis' })
   @ApiResponse({ status: 200, description: 'Incomplete reasons hierarchy analysis retrieved successfully' })
@@ -460,7 +455,6 @@ export class HierarchyReportsController {
    * Get specific report details for admin view
    */
   @Get('user/:userId/report/:reportId')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get specific report details for admin view' })
   @ApiParam({ name: 'userId', description: 'User ID' })
