@@ -300,15 +300,15 @@ async function seedDefaultCompany() {
 
   // ── Factory Complex: Tổ hợp Thoại Sơn (Bags)
   const complex = await prisma.company.upsert({
-    where: { code: 'TOHO_THOAI_SON' },
+    where: { code: 'TOHOP_THOAI_SON' },
     update: {},
     create: {
-      code: 'TOHO_THOAI_SON',
+      code: 'TOHOP_THOAI_SON',
       name: 'Tổ hợp túi xách Thoại Sơn',
       type: 'FACTORY_COMPLEX',
       parentCompanyId: subsidiary.id,
       regionId: regionAnGiang.id,
-      sector: 'BAGS',
+      sectors: ['BAGS'],
       email: 'thoaison@tbs-angiang.vn',
       isActive: true,
     },
