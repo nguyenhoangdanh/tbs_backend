@@ -178,24 +178,16 @@ export class TaskEvaluationsController {
 
   @Post()
   @RequirePermissions('task-evaluations:create')
-  @ApiOperation({ summary: 'Create a new task evaluation (managers only)' })
+  @ApiOperation({ summary: 'Create a new task evaluation' })
   @ApiResponse({ status: 201, description: 'Task evaluation created successfully' })
-  @ApiResponse({ status: 403, description: 'Forbidden - User does not have management permissions' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
         taskId: { type: 'string', description: 'ID of the task to evaluate' },
-        evaluatedIsCompleted: { type: 'boolean', description: 'Manager evaluation of task completion' },
-        evaluatedReasonNotDone: { type: 'string', description: 'Manager evaluation of reason not done' },
-        evaluatorComment: { type: 'string', description: 'Manager comment on the evaluation' },
-        evaluationType: { 
-          type: 'string', 
-          enum: ['REVIEW', 'APPROVAL', 'REJECTION'],
-          description: 'Type of evaluation' 
-        }
+        evaluatorComment: { type: 'string', description: 'Evaluator comment' },
       },
-      required: ['taskId', 'evaluatedIsCompleted', 'evaluationType']
+      required: ['taskId']
     }
   })
   @HttpCode(HttpStatus.CREATED)
@@ -203,14 +195,16 @@ export class TaskEvaluationsController {
     @GetUser() user: any,
     @Body() createEvaluationDto: {
       taskId: string;
-      evaluatedIsCompleted: boolean;
-      evaluatedReasonNotDone?: string;
       evaluatorComment?: string;
-      evaluationType: EvaluationType;
     }
   ) {
     return this.taskEvaluationsService.create(
-      createEvaluationDto,
+      {
+        taskId: createEvaluationDto.taskId,
+        evaluatorComment: createEvaluationDto.evaluatorComment,
+        evaluatedIsCompleted: false,
+        evaluationType: EvaluationType.REVIEW,
+      },
       user.id
     );
   }
@@ -219,21 +213,12 @@ export class TaskEvaluationsController {
   @RequirePermissions('task-evaluations:update')
   @ApiOperation({ summary: 'Update a task evaluation' })
   @ApiResponse({ status: 200, description: 'Task evaluation updated successfully' })
-  @ApiResponse({ status: 403, description: 'Forbidden - Cannot update this evaluation' })
-  @ApiResponse({ status: 404, description: 'Evaluation not found' })
   @ApiParam({ name: 'evaluationId', description: 'ID of the evaluation to update' })
   @ApiBody({
     schema: {
       type: 'object',
       properties: {
-        evaluatedIsCompleted: { type: 'boolean', description: 'Manager evaluation of task completion' },
-        evaluatedReasonNotDone: { type: 'string', description: 'Manager evaluation of reason not done' },
-        evaluatorComment: { type: 'string', description: 'Manager comment on the evaluation' },
-        evaluationType: { 
-          type: 'string', 
-          enum: ['REVIEW', 'APPROVAL', 'REJECTION'],
-          description: 'Type of evaluation' 
-        }
+        evaluatorComment: { type: 'string', description: 'Evaluator comment' },
       }
     }
   })
@@ -242,17 +227,14 @@ export class TaskEvaluationsController {
     @Param('evaluationId') evaluationId: string,
     @GetUser() user: any,
     @Body() updateEvaluationDto: {
-      evaluatedIsCompleted?: boolean;
-      evaluatedReasonNotDone?: string;
       evaluatorComment?: string;
-      evaluationType?: EvaluationType;
     }
   ) {
     return this.taskEvaluationsService.updateTaskEvaluation(
       evaluationId,
       user.id,
       getPrimaryRole(user),
-      updateEvaluationDto
+      { evaluatorComment: updateEvaluationDto.evaluatorComment }
     );
   }
 

@@ -87,6 +87,7 @@ const RESOURCES = [
   'feedback',
   'roles',
   'permissions',
+  'statistics',
 ] as const;
 
 const ACTIONS = ['view', 'create', 'update', 'delete', 'approve', 'manage', 'assign'] as const;
@@ -170,6 +171,8 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     medicines:        ['view'],
     'medical-records': ['view'],
     inventory:        ['view'],
+    feedback:         ['view', 'create'],
+    statistics:       ['view'],
   },
 
   WORKER: {
