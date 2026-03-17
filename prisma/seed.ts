@@ -122,7 +122,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     medicines:        ['view', 'create', 'update'],
     'medical-records': ['view'],
     inventory:        ['view'],
-    feedback:         ['view', 'delete'],
+    feedback:         ['view', 'manage', 'delete'],
     roles:            ['view'],
     permissions:      ['view'],
   },
@@ -147,6 +147,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     medicines:        ['view'],
     'medical-records': ['view'],
     inventory:        ['view'],
+    feedback:         ['view', 'manage'],
   },
 
   USER: {

@@ -210,6 +210,9 @@ model User {
   prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
   inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
 
+  feedbackViews     FeedbackView[] @relation("FeedbackViewedBy")
+  resolvedFeedbacks Feedback[]     @relation("FeedbackResolvedBy")
+
   @@unique([employeeCode, companyId])
   @@index([companyId])
   @@index([jobPositionId])
@@ -954,13 +957,42 @@ model Permission {
 
 // ========== ANONYMOUS FEEDBACK SYSTEM ==========
 
+enum FeedbackStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+}
+
 model Feedback {
-  id        String   @id @default(uuid())
-  content   String   @db.Text
-  ipAddress String? // Track IP for spam prevention
-  userAgent String? // Track browser/device info
-  createdAt DateTime @default(now())
+  id           String         @id @default(uuid())
+  content      String         @db.Text
+  ipAddress    String? // Track IP for spam prevention
+  userAgent    String? // Track browser/device info
+  status       FeedbackStatus @default(PENDING)
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  resolvedBy User?          @relation("FeedbackResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  views      FeedbackView[]
 
   @@index([createdAt])
+  @@index([status])
   @@map("feedbacks")
+}
+
+model FeedbackView {
+  id         String   @id @default(uuid())
+  feedbackId String
+  viewerId   String
+  viewedAt   DateTime @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  viewer   User     @relation("FeedbackViewedBy", fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([feedbackId, viewerId])
+  @@index([feedbackId])
+  @@index([viewerId])
+  @@map("feedback_views")
 }
