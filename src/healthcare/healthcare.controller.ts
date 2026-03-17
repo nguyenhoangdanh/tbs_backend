@@ -21,6 +21,7 @@ import {
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { HealthcareService } from './healthcare.service';
 import {
   CreateMedicalRecordDto,
@@ -33,6 +34,7 @@ import { Public } from 'src/common/decorators/public.decorator';
 @ApiTags('healthcare')
 @Controller('healthcare')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('healthcare:view')
 @ApiBearerAuth('JWT-auth')
 export class HealthcareController {
   constructor(private readonly healthcareService: HealthcareService) {}
@@ -71,6 +73,7 @@ export class HealthcareController {
 
   @Post('medicines')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:create')
   @ApiOperation({ summary: 'Create new medicine' })
   @UsePipes(
     new ValidationPipe({
@@ -85,6 +88,7 @@ export class HealthcareController {
 
   @Patch('medicines/:id')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:update')
   @ApiOperation({ summary: 'Update medicine' })
   @UsePipes(
     new ValidationPipe({
@@ -118,6 +122,7 @@ export class HealthcareController {
   // Medical Record Management
   @Post('medical-records')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:create')
   @ApiOperation({ summary: 'Create new medical record with prescriptions' })
   @UsePipes(
     new ValidationPipe({
@@ -132,6 +137,7 @@ export class HealthcareController {
 
   @Patch('medical-records/:id')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:update')
   @ApiOperation({ summary: 'Update medical record' })
   @UsePipes(
     new ValidationPipe({
@@ -149,6 +155,7 @@ export class HealthcareController {
 
   @Post('prescriptions/:id/dispense')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:update')
   @ApiOperation({ summary: 'Dispense medicine prescription' })
   async dispenseMedicine(
     @Param('id') prescriptionId: string,

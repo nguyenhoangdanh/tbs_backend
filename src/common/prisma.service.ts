@@ -19,17 +19,11 @@ export class PrismaService
 
   constructor() {
     super({
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL,
-        },
-      },
       log: process.env.NODE_ENV === 'production' ? ['error'] : ['error', 'warn'],
       errorFormat: 'minimal',
-      // Valid Prisma configuration options only
       transactionOptions: {
-        timeout: 30000, // 30 second transaction timeout
-        maxWait: 10000, // Max wait time for a transaction slot
+        timeout: 30000,
+        maxWait: 10000,
       },
     });
   }

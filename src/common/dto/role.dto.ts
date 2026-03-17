@@ -32,6 +32,11 @@ export class UpdateRoleDto {
   @IsString()
   name?: string;
 
+  @ApiProperty({ example: 'TEAM_LEADER', required: false })
+  @IsOptional()
+  @IsString()
+  code?: string;
+
   @ApiProperty({ required: false })
   @IsOptional()
   @IsString()

@@ -13,11 +13,12 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { NotificationService, PushSubscription } from './notification.service';
 import { Public } from '../common/decorators/public.decorator';
 
 @ApiTags('notifications')
+@UseGuards(JwtAuthGuard)
 @Controller('notifications')
 export class NotificationController {
   constructor(private readonly notificationService: NotificationService) {}
@@ -42,7 +43,6 @@ export class NotificationController {
   // All other endpoints require authentication
   @Post('subscribe')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Subscribe to push notifications' })
   @ApiResponse({
     status: 201,
@@ -103,7 +103,6 @@ export class NotificationController {
 
   @Post('unsubscribe')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Unsubscribe from push notifications' })
   @ApiResponse({ status: 200, description: 'Unsubscribed successfully' })
   async unsubscribe(@Request() req, @Body() data: { endpoint: string }) {
@@ -119,7 +118,6 @@ export class NotificationController {
 
   @Get('subscription')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Get current user subscription status' })
   @ApiResponse({ status: 200, description: 'Subscription status retrieved' })
   async getSubscription(@Request() req) {
@@ -137,7 +135,6 @@ export class NotificationController {
 
   @Delete('subscription')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Delete all subscriptions for current user' })
   @ApiResponse({ status: 200, description: 'All subscriptions deleted' })
   async deleteAllSubscriptions(@Request() req) {
@@ -150,7 +147,6 @@ export class NotificationController {
 
   @Post('test')
   @ApiBearerAuth()
-  @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Send test notification to current user' })
   @ApiResponse({ status: 200, description: 'Test notification sent' })
   async sendTestNotification(@Request() req) {

@@ -5,12 +5,15 @@ import {
   ApiResponse,
   ApiBearerAuth,
 } from '@nestjs/swagger';
+import { RolesGuard } from '../../common/guards/roles.guard';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { RequirePermissions } from '../../common/decorators/permissions.decorator';
 import { OrganizationHierarchyService } from './services/organization-hierarchy.service';
 
 @ApiTags('organization')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('organization')
 export class OrganizationController {
   constructor(

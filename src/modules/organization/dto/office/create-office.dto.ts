@@ -3,6 +3,11 @@ import { ApiProperty } from '@nestjs/swagger';
 import { OfficeType } from '@prisma/client';
 
 export class CreateOfficeDto {
+  @ApiProperty({ description: 'Company ID', example: 'company-uuid' })
+  @IsString()
+  @IsNotEmpty()
+  companyId: string;
+
   @ApiProperty({ description: 'Office name', example: 'Văn phòng Hà Nội' })
   @IsString()
   @IsNotEmpty()

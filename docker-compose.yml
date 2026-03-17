@@ -4,12 +4,12 @@ services:
   # PostgreSQL Database for development
   postgres:
     image: postgres:15-alpine
-    container_name: weekly_report_postgres
+    container_name: tbsgroup_postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: weekly_report_dev
+      POSTGRES_DB: tbsgroup_db
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     ports:
       - "5433:5432"
@@ -17,9 +17,9 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./init-scripts:/docker-entrypoint-initdb.d
     networks:
-      - weekly_report_network
+      - tbsgroup_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d weekly_report_dev"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d tbsgroup_db"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -37,14 +37,14 @@ services:
   # Redis for caching
   redis:
     image: redis:7-alpine
-    container_name: weekly_report_redis
+    container_name: tbsgroup_redis
     restart: unless-stopped
     ports:
       - "6380:6379"
     volumes:
       - redis_data:/data
     networks:
-      - weekly_report_network
+      - tbsgroup_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -54,7 +54,7 @@ services:
   # pgAdmin for database management
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: weekly_report_pgadmin
+    container_name: tbsgroup_pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
@@ -66,7 +66,7 @@ services:
     volumes:
       - pgadmin_data:/var/lib/pgadmin
     networks:
-      - weekly_report_network
+      - tbsgroup_network
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,5 +82,5 @@ volumes:
     driver: local
 
 networks:
-  weekly_report_network:
+  tbsgroup_network:
     driver: bridge

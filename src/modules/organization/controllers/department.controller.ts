@@ -9,6 +9,7 @@ import {
   HttpCode,
   HttpStatus,
   Patch,
+  Query,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -18,23 +19,24 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
-import { User } from '@prisma/client';
 import { DepartmentService } from '../services/department.service';
 import { CreateDepartmentDto } from '../dto/department/create-department.dto';
 import { UpdateDepartmentDto } from '../dto/department/update-department.dto';
 
 @ApiTags('organization/departments')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('organization/departments')
 export class DepartmentController {
   constructor(private readonly departmentService: DepartmentService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new department' })
   @ApiResponse({
@@ -52,13 +54,21 @@ export class DepartmentController {
     status: 200,
     description: 'Departments retrieved successfully',
   })
-  findAll(@GetUser() user: User) {
-    // Role check handled by guard - filter by office for non-superadmin
+  findAll(@GetUser() user: any, @Query('companyId') companyId?: string) {
+    // SUPERADMIN/ADMIN see all departments; others see only their office
+    const userRoleCodes = (user.roles || [])
+      .filter((ur: any) => ur.roleDefinition && ur.isActive)
+      .map((ur: any) => ur.roleDefinition.code as string);
+    const isAdminOrAbove = userRoleCodes.some((c: string) =>
+      ['SUPERADMIN', 'ADMIN'].includes(c),
+    );
+    if (isAdminOrAbove) {
+      return this.departmentService.findAll(companyId);
+    }
     return this.departmentService.findByOffice(user.officeId);
   }
 
   @Get('by-office')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get departments by office' })
   async findByOffice(@GetUser() user: any) {
@@ -86,8 +96,8 @@ export class DepartmentController {
   }
 
   @Patch(':id')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Update department' })
   @ApiResponse({
     status: 200,
@@ -101,8 +111,8 @@ export class DepartmentController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Delete department' })
   @ApiResponse({
     status: 200,

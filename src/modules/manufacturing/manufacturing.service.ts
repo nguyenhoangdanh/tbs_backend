@@ -20,7 +20,7 @@ export class ManufacturingService {
     const { code } = createProductDto;
 
     // Check if product code already exists
-    const existingProduct = await this.prisma.product.findUnique({
+    const existingProduct = await this.prisma.product.findFirst({
       where: { code },
     });
 
@@ -103,7 +103,7 @@ export class ManufacturingService {
 
     // If updating code, check for conflicts
     if (updateProductDto.code && updateProductDto.code !== product.code) {
-      const existingProduct = await this.prisma.product.findUnique({
+      const existingProduct = await this.prisma.product.findFirst({
         where: { code: updateProductDto.code },
       });
 
@@ -157,7 +157,7 @@ export class ManufacturingService {
     const { code } = createProcessDto;
 
     // Check if process code already exists
-    const existingProcess = await this.prisma.process.findUnique({
+    const existingProcess = await this.prisma.process.findFirst({
       where: { code },
     });
 
@@ -233,7 +233,7 @@ export class ManufacturingService {
 
     // If updating code, check for conflicts
     if (updateProcessDto.code && updateProcessDto.code !== process.code) {
-      const existingProcess = await this.prisma.process.findUnique({
+      const existingProcess = await this.prisma.process.findFirst({
         where: { code: updateProcessDto.code },
       });
 

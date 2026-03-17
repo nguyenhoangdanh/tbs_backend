@@ -46,12 +46,26 @@ export class UsersService {
     const where: any = {};
 
     if (search) {
-      where.OR = [
-        { employeeCode: { contains: search, mode: 'insensitive' } },
-        { firstName: { contains: search, mode: 'insensitive' } },
-        { lastName: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
+      // Normalize search to uppercase so lowercase input matches all-caps stored data
+      const normalized = search.trim().toLocaleUpperCase('vi');
+      const tokens = normalized.split(/\s+/).filter(Boolean);
+      if (tokens.length === 1) {
+        where.OR = [
+          { employeeCode: { contains: tokens[0], mode: 'insensitive' } },
+          { firstName: { contains: tokens[0], mode: 'insensitive' } },
+          { lastName: { contains: tokens[0], mode: 'insensitive' } },
+          { email: { contains: search.trim(), mode: 'insensitive' } },
+        ];
+      } else {
+        // Multi-word: every token must match at least one name field
+        where.AND = tokens.map((token) => ({
+          OR: [
+            { firstName: { contains: token, mode: 'insensitive' } },
+            { lastName: { contains: token, mode: 'insensitive' } },
+            { employeeCode: { contains: token, mode: 'insensitive' } },
+          ],
+        }));
+      }
     }
 
     if (officeId) where.officeId = officeId;
@@ -193,7 +207,7 @@ let departmentId: string | null = null;
 
   async createUser(createUserDto: CreateUserDto) {
     // Check if employee code already exists
-    const existingUser = await this.prisma.user.findUnique({
+    const existingUser = await this.prisma.user.findFirst({
       where: { employeeCode: createUserDto.employeeCode },
     });
 
@@ -218,10 +232,22 @@ let departmentId: string | null = null;
       10,
     );
 
+    const office = await this.prisma.office.findUnique({
+      where: { id: createUserDto.officeId },
+    });
+
+    if (!office) {
+      throw new BadRequestException('Office not found');
+    }
+
+    // Destructure role out — User model has no `role` scalar, role assigned via UserRole
+    const { role, password: _pw, ...userFields } = createUserDto;
+
     const user = await this.prisma.user.create({
       data: {
-        ...createUserDto,
+        ...userFields,
         password: hashedPassword,
+        companyId: office.companyId,
       },
       include: {
         office: true,
@@ -233,6 +259,18 @@ let departmentId: string | null = null;
         },
       },
     });
+
+    // Assign role via UserRole table
+    if (role) {
+      const roleDef = await this.prisma.roleDefinition.findUnique({
+        where: { code: role },
+      });
+      if (roleDef) {
+        await this.prisma.userRole.create({
+          data: { userId: user.id, roleDefinitionId: roleDef.id },
+        });
+      }
+    }
 
     const { password, ...userWithoutPassword } = user;
     return userWithoutPassword;
@@ -248,15 +286,18 @@ let departmentId: string | null = null;
       throw new NotFoundException('User not found');
     }
 
+    // Destructure role, departmentId, positionId out — not User model fields
+    const { role, departmentId: _deptId, positionId: _posId, ...profileFields } = updateProfileDto as any;
+
     // Check role permission - only SUPERADMIN can change role
-    if (updateProfileDto.role && currentUser.role !== 'SUPERADMIN') {
+    if (role && currentUser.role !== 'SUPERADMIN' && !currentUser.roles?.some?.((r: any) => r?.roleDefinition?.code === 'SUPERADMIN')) {
       throw new ForbiddenException('Only SUPERADMIN can change user roles');
     }
 
     // Check email uniqueness if changed
-    if (updateProfileDto.email && updateProfileDto.email !== user.email) {
+    if (profileFields.email && profileFields.email !== user.email) {
       const existingEmail = await this.prisma.user.findUnique({
-        where: { email: updateProfileDto.email },
+        where: { email: profileFields.email },
       });
 
       if (existingEmail) {
@@ -266,7 +307,7 @@ let departmentId: string | null = null;
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: updateProfileDto,
+      data: profileFields,
       include: {
         office: true,
         jobPosition: {
@@ -277,6 +318,25 @@ let departmentId: string | null = null;
         },
       },
     });
+
+    // Update role via UserRole table if provided
+    if (role) {
+      const roleDef = await this.prisma.roleDefinition.findUnique({
+        where: { code: role },
+      });
+      if (roleDef) {
+        // Deactivate existing roles, then upsert new one
+        await this.prisma.userRole.updateMany({
+          where: { userId: id, isActive: true },
+          data: { isActive: false },
+        });
+        await this.prisma.userRole.upsert({
+          where: { userId_roleDefinitionId: { userId: id, roleDefinitionId: roleDef.id } },
+          update: { isActive: true },
+          create: { userId: id, roleDefinitionId: roleDef.id },
+        });
+      }
+    }
 
     const { password, ...userWithoutPassword } = updatedUser;
     return userWithoutPassword;
@@ -580,17 +640,31 @@ let departmentId: string | null = null;
             password: '123456',
           };
 
-          // Create user with additional fields
+          // Create user with additional fields — strip 'role' (not a User scalar field)
+          const { role: userRole, ...userFields } = createUserDto;
           const hashedPassword = await bcrypt.hash('123456', 10);
-          await this.prisma.user.create({
+          const createdUser = await this.prisma.user.create({
             data: {
-              ...createUserDto,
+              ...userFields,
               password: hashedPassword,
               dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
               sex,
               isActive: true,
+              companyId: office.companyId,
             },
           });
+
+          // Assign role via UserRole table
+          if (userRole) {
+            const roleDef = await this.prisma.roleDefinition.findUnique({
+              where: { code: userRole },
+            });
+            if (roleDef) {
+              await this.prisma.userRole.create({
+                data: { userId: createdUser.id, roleDefinitionId: roleDef.id },
+              });
+            }
+          }
 
           results.success++;
         } catch (error) {
@@ -676,7 +750,7 @@ let departmentId: string | null = null;
 
         try {
           // Validate employee code uniqueness
-          const existingUser = await tx.user.findUnique({
+          const existingUser = await tx.user.findFirst({
             where: { employeeCode: userData.employeeCode },
           });
 
@@ -703,11 +777,22 @@ let departmentId: string | null = null;
             10,
           );
 
-          // Create user
+          // Fetch office to get companyId
+          const office = await tx.office.findUnique({
+            where: { id: userData.officeId },
+          });
+
+          if (!office) {
+            throw new Error(`Office not found for user ${userData.employeeCode}`);
+          }
+
+          // Create user — strip 'role' (not a User scalar field)
+          const { role: bulkRole, password: _pw, ...bulkUserFields } = userData as any;
           const newUser = await tx.user.create({
             data: {
-              ...userData,
+              ...bulkUserFields,
               password: hashedPassword,
+              companyId: office.companyId,
             },
             include: {
               office: {
@@ -723,6 +808,18 @@ let departmentId: string | null = null;
               },
             },
           });
+
+          // Assign role via UserRole table
+          if (bulkRole) {
+            const roleDef = await tx.roleDefinition.findUnique({
+              where: { code: bulkRole },
+            });
+            if (roleDef) {
+              await tx.userRole.create({
+                data: { userId: newUser.id, roleDefinitionId: roleDef.id },
+              });
+            }
+          }
 
           // Remove password from response
           const { password, ...userWithoutPassword } = newUser;
@@ -748,7 +845,7 @@ let departmentId: string | null = null;
    * Search user by employee code
    */
   async searchByEmployeeCode(employeeCode: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { employeeCode },
       include: {
         office: {

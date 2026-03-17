@@ -140,8 +140,8 @@ export class RolesService {
     const role = await this.getRoleById(id);
 
     // Cannot modify system roles
-    if (role.isSystem && (dto.name !== undefined)) {
-      throw new BadRequestException('Cannot modify system role name');
+    if (role.isSystem && (dto.name !== undefined || dto.code !== undefined)) {
+      throw new BadRequestException('Cannot modify system role name or code');
     }
 
     // Update role
@@ -149,6 +149,7 @@ export class RolesService {
       where: { id },
       data: {
         name: dto.name,
+        code: dto.code,
         description: dto.description,
         isActive: dto.isActive,
       },
@@ -235,28 +236,26 @@ export class RolesService {
                 department: true,
               },
             },
+            // Include all active roles this user has
+            roles: {
+              where: { isActive: true },
+              include: {
+                roleDefinition: {
+                  select: {
+                    id: true,
+                    name: true,
+                    code: true,
+                    isSystem: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
     });
 
-    // Add permissions for each user (including roles array)
-    const enrichedUserRoles = await Promise.all(
-      userRoles.map(async (userRole) => {
-        const permissions = await this.permissionsService.getUserPermissions(
-          userRole.user.id,
-        );
-        return {
-          ...userRole,
-          user: {
-            ...userRole.user,
-            permissions,
-          },
-        };
-      }),
-    );
-
-    return enrichedUserRoles;
+    return userRoles;
   }
 
   /**

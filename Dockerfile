@@ -1,5 +1,5 @@
-# Use Node.js 18 Alpine for smaller image size
-FROM node:18-alpine AS base
+# Use Node.js 22 Alpine for smaller image size
+FROM node:22-alpine AS base
 
 # Install dependencies needed for Prisma and compilation
 RUN apk add --no-cache libc6-compat openssl
@@ -10,16 +10,10 @@ RUN npm install -g pnpm
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
-
-# Generate pnpm-lock.yaml if it doesn't exist, then install dependencies
-RUN if [ ! -f pnpm-lock.yaml ]; then \
-        echo "Generating pnpm-lock.yaml..." && \
-        pnpm install --lockfile-only; \
-    fi
+COPY package.json pnpm-lock.yaml ./
 
 # Install all dependencies (including dev dependencies for build)
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # Copy prisma schema
 COPY prisma ./prisma/
@@ -34,7 +28,7 @@ COPY . .
 RUN pnpm run build
 
 # Production stage
-FROM node:18-alpine AS production
+FROM node:22-alpine AS production
 
 # Install runtime dependencies
 RUN apk add --no-cache libc6-compat openssl
@@ -45,10 +39,10 @@ RUN npm install -g pnpm
 WORKDIR /app
 
 # Copy package files
-COPY package.json ./
+COPY package.json pnpm-lock.yaml ./
 
-# Install only production dependencies without lockfile requirement
-RUN pnpm install --prod --no-frozen-lockfile
+# Install only production dependencies
+RUN pnpm install --prod --frozen-lockfile
 
 # Copy prisma schema and generate client
 COPY prisma ./prisma/
@@ -59,11 +53,11 @@ COPY --from=base /app/dist ./dist
 
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN adduser --system --uid 1001 nestjs
 
 # Change ownership of app directory
-RUN chown -R nextjs:nodejs /app
-USER nextjs
+RUN chown -R nestjs:nodejs /app
+USER nestjs
 
 # Expose port
 EXPOSE 8080

@@ -7,8 +7,9 @@ import { ReportsModule } from './reports/reports.module';
 import { StatisticsModule } from './statistics/statistics.module';
 import { HierarchyReportsModule } from './hierarchy-reports/hierarchy-reports.module';
 import { TaskEvaluationsModule } from './task-evaluations/task-evaluations.module';
-import { ConfigModule } from '@nestjs/config'; // ⭐ Ensure correct import
+import { ConfigModule } from '@nestjs/config';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
+import { PermissionsGuard } from './common/guards/permissions.guard';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ServeStaticModule } from '@nestjs/serve-static';
@@ -24,14 +25,7 @@ import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 // ✅ New consolidated modules
 import { OrganizationModule } from './modules/organization/organization.module';
 import { ProductionModule } from './modules/production/production.module';
-
-// ⚠️ DEPRECATED: These modules are now consolidated into OrganizationModule and ProductionModule
-// Keep for backward compatibility, will be removed in next version
-import { OfficesModule } from './offices/offices.module';
-import { DepartmentsModule } from './departments/departments.module';
-import { PositionsModule } from './positions/positions.module';
-import { JobPositionsModule } from './job-positions/job-positions.module';
-import { OrganizationsModule } from './organizations/organizations.module';
+import { CompanyModule } from './modules/company/company.module';
 import { CommonModule } from './common/common.module'; // ⭐ ADD
 
 @Module({
@@ -39,7 +33,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     // ⭐ FIX: ConfigModule setup
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['.env.local', '.env'],
     }),
     CommonModule, // ⭐ ADD
 
@@ -82,13 +76,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     // ✅ New consolidated modules (Use these for new development)
     OrganizationModule,
     ProductionModule,
-
-    // ⚠️ DEPRECATED: Keep for backward compatibility
-    OfficesModule,
-    DepartmentsModule,
-    PositionsModule,
-    JobPositionsModule,
-    OrganizationsModule,
+    CompanyModule,
   ],
   controllers: [AppController],
   providers: [
@@ -99,6 +87,11 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     {
       provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // PermissionsGuard runs after JwtAuthGuard; passes through if no @RequirePermissions
+    {
+      provide: APP_GUARD,
+      useClass: PermissionsGuard,
     },
   ],
   exports: [],

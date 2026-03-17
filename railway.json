@@ -2,10 +2,10 @@
   "name": "weekly-report-backend",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install && npx prisma generate && npm run build"
+    "buildCommand": "pnpm install && npx prisma generate && pnpm run build"
   },
   "deploy": {
-    "startCommand": "npm run start:prod",
+    "startCommand": "pnpm run start:prod",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",

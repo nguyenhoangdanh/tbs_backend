@@ -1,6 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../common/prisma.service';
 import { CreateFeedbackDto } from './dto/create-feedback.dto';
+import { UpdateFeedbackStatusDto } from './dto/update-feedback-status.dto';
+import { FeedbackStatus } from '@prisma/client';
 
 interface GetAllFeedbackParams {
   page: number;
@@ -9,6 +11,7 @@ interface GetAllFeedbackParams {
   endDate?: string;
   year?: number;
   month?: number;
+  status?: FeedbackStatus;
 }
 
 @Injectable()
@@ -17,73 +20,52 @@ export class FeedbackService {
 
   constructor(private prisma: PrismaService) {}
 
-  /**
-   * Tạo feedback mới (anonymous - không cần đăng nhập)
-   */
   async createFeedback(
     dto: CreateFeedbackDto,
     ipAddress?: string,
     userAgent?: string,
   ) {
-    try {
-      const feedback = await this.prisma.feedback.create({
-        data: {
-          content: dto.content,
-          ipAddress,
-          userAgent,
-        },
-      });
+    const feedback = await this.prisma.feedback.create({
+      data: {
+        content: dto.content,
+        ipAddress,
+        userAgent,
+      },
+    });
 
-      this.logger.log(`New anonymous feedback created: ${feedback.id}`);
-
-      return {
-        message: 'Cảm ơn bạn đã gửi góp ý. Chúng tôi sẽ xem xét và phản hồi sớm nhất.',
-        feedbackId: feedback.id,
-      };
-    } catch (error) {
-      this.logger.error('Error creating feedback:', error);
-      throw error;
-    }
+    this.logger.log(`New anonymous feedback created: ${feedback.id}`);
+    return {
+      message: 'Cảm ơn bạn đã gửi góp ý. Chúng tôi sẽ xem xét và phản hồi sớm nhất.',
+      feedbackId: feedback.id,
+    };
   }
 
-  /**
-   * Lấy tất cả feedback với filter (chỉ dành cho user có quyền)
-   */
   async getAllFeedback(params: GetAllFeedbackParams) {
-    const { page, limit, startDate, endDate, year, month } = params;
-
+    const { page, limit, startDate, endDate, year, month, status } = params;
     const skip = (page - 1) * limit;
-
     const where: any = {};
 
-    // Filter theo khoảng thời gian cụ thể
+    if (status) {
+      where.status = status;
+    }
+
     if (startDate || endDate) {
       where.createdAt = {};
-      if (startDate) {
-        where.createdAt.gte = new Date(startDate);
-      }
+      if (startDate) where.createdAt.gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
         end.setHours(23, 59, 59, 999);
         where.createdAt.lte = end;
       }
-    }
-    // Filter theo tháng/năm
-    else if (year && month) {
-      const startOfMonth = new Date(year, month - 1, 1);
-      const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+    } else if (year && month) {
       where.createdAt = {
-        gte: startOfMonth,
-        lte: endOfMonth,
+        gte: new Date(year, month - 1, 1),
+        lte: new Date(year, month, 0, 23, 59, 59, 999),
       };
-    }
-    // Filter chỉ theo năm
-    else if (year) {
-      const startOfYear = new Date(year, 0, 1);
-      const endOfYear = new Date(year, 11, 31, 23, 59, 59, 999);
+    } else if (year) {
       where.createdAt = {
-        gte: startOfYear,
-        lte: endOfYear,
+        gte: new Date(year, 0, 1),
+        lte: new Date(year, 11, 31, 23, 59, 59, 999),
       };
     }
 
@@ -93,6 +75,20 @@ export class FeedbackService {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
+        include: {
+          resolvedBy: {
+            select: { id: true, firstName: true, lastName: true, employeeCode: true },
+          },
+          views: {
+            orderBy: { viewedAt: 'desc' },
+            include: {
+              viewer: {
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+              },
+            },
+          },
+          _count: { select: { views: true } },
+        },
       }),
       this.prisma.feedback.count({ where }),
     ]);
@@ -108,71 +104,102 @@ export class FeedbackService {
     };
   }
 
-  /**
-   * Lấy feedback theo ID
-   */
-  async getFeedbackById(id: string) {
+  async getFeedbackById(id: string, viewerId?: string) {
     const feedback = await this.prisma.feedback.findUnique({
       where: { id },
+      include: {
+        resolvedBy: {
+          select: { id: true, firstName: true, lastName: true, employeeCode: true },
+        },
+        views: {
+          orderBy: { viewedAt: 'desc' },
+          include: {
+            viewer: {
+              select: { id: true, firstName: true, lastName: true, employeeCode: true },
+            },
+          },
+        },
+        _count: { select: { views: true } },
+      },
     });
 
     if (!feedback) {
-      throw new Error('Feedback not found');
+      throw new NotFoundException('Feedback not found');
+    }
+
+    // Record view if viewerId provided
+    if (viewerId) {
+      await this.prisma.feedbackView.upsert({
+        where: { feedbackId_viewerId: { feedbackId: id, viewerId } },
+        create: { feedbackId: id, viewerId },
+        update: { viewedAt: new Date() },
+      });
     }
 
     return feedback;
   }
 
-  /**
-   * Xóa feedback (chỉ dành cho user có quyền)
-   */
-  async deleteFeedback(id: string) {
-    try {
-      await this.prisma.feedback.delete({
-        where: { id },
-      });
-
-      this.logger.log(`Feedback deleted: ${id}`);
-
-      return {
-        message: 'Đã xóa góp ý thành công',
-      };
-    } catch (error) {
-      this.logger.error(`Error deleting feedback ${id}:`, error);
-      throw error;
+  async updateStatus(id: string, dto: UpdateFeedbackStatusDto, actorId: string) {
+    const feedback = await this.prisma.feedback.findUnique({ where: { id } });
+    if (!feedback) {
+      throw new NotFoundException('Feedback not found');
     }
+
+    const updateData: any = { status: dto.status };
+
+    if (dto.status === FeedbackStatus.IN_PROGRESS) {
+      // Track who is currently processing
+      updateData.resolvedById = actorId;
+      updateData.resolvedAt = null;
+    } else if (dto.status === FeedbackStatus.RESOLVED) {
+      updateData.resolvedById = actorId;
+      updateData.resolvedAt = new Date();
+    } else if (dto.status === FeedbackStatus.PENDING) {
+      updateData.resolvedById = null;
+      updateData.resolvedAt = null;
+    }
+
+    const updated = await this.prisma.feedback.update({
+      where: { id },
+      data: updateData,
+      include: {
+        resolvedBy: {
+          select: { id: true, firstName: true, lastName: true, employeeCode: true },
+        },
+        _count: { select: { views: true } },
+      },
+    });
+
+    this.logger.log(`Feedback ${id} status updated to ${dto.status} by ${actorId}`);
+    return updated;
   }
 
-  /**
-   * Lấy thống kê feedback
-   */
+  async deleteFeedback(id: string) {
+    const feedback = await this.prisma.feedback.findUnique({ where: { id } });
+    if (!feedback) {
+      throw new NotFoundException('Feedback not found');
+    }
+
+    await this.prisma.feedback.delete({ where: { id } });
+    this.logger.log(`Feedback deleted: ${id}`);
+    return { message: 'Đã xóa góp ý thành công' };
+  }
+
   async getFeedbackStats() {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
-    const [total, thisMonth, lastMonth] = await Promise.all([
+    const [total, thisMonth, lastMonth, pending, inProgress, resolved] = await Promise.all([
       this.prisma.feedback.count(),
-      this.prisma.feedback.count({
-        where: {
-          createdAt: { gte: startOfMonth },
-        },
-      }),
-      this.prisma.feedback.count({
-        where: {
-          createdAt: {
-            gte: startOfLastMonth,
-            lte: endOfLastMonth,
-          },
-        },
-      }),
+      this.prisma.feedback.count({ where: { createdAt: { gte: startOfMonth } } }),
+      this.prisma.feedback.count({ where: { createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } } }),
+      this.prisma.feedback.count({ where: { status: FeedbackStatus.PENDING } }),
+      this.prisma.feedback.count({ where: { status: FeedbackStatus.IN_PROGRESS } }),
+      this.prisma.feedback.count({ where: { status: FeedbackStatus.RESOLVED } }),
     ]);
 
-    return {
-      total,
-      thisMonth,
-      lastMonth,
-    };
+    return { total, thisMonth, lastMonth, pending, inProgress, resolved };
   }
 }

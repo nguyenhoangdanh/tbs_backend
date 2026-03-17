@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { JobPositionService } from '../services/job-position.service';
 import { CreateJobPositionDto } from '../dto/job-position/create-job-position.dto';
@@ -25,11 +26,13 @@ import { UpdateJobPositionDto } from '../dto/job-position/update-job-position.dt
 @ApiTags('organization/job-positions')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('organization/job-positions')
 export class JobPositionController {
   constructor(private readonly jobPositionService: JobPositionService) {}
 
   @Post()
+  @RequirePermissions('organizations:manage')
   @Roles('SUPERADMIN', 'ADMIN')
   @ApiOperation({ summary: 'Create a new job position' })
   @ApiResponse({
@@ -70,7 +73,7 @@ export class JobPositionController {
 
   @Patch(':id')
   @Roles('SUPERADMIN', 'ADMIN')
-  @ApiOperation({ summary: 'Update job position' })
+  @RequirePermissions('organizations:manage')
   @ApiResponse({
     status: 200,
     description: 'Job position updated successfully',
@@ -83,6 +86,7 @@ export class JobPositionController {
   }
 
   @Delete(':id')
+  @RequirePermissions('organizations:manage')
   @Roles('SUPERADMIN')
   @ApiOperation({ summary: 'Delete job position' })
   @ApiResponse({

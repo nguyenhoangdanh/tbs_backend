@@ -20,40 +20,31 @@ export class CloudflareR2Service {
   private accountId: string;
   private accessKeyId: string;
   private secretAccessKey: string;
+  private isConfigured = false;
 
   constructor(private readonly envConfig: EnvironmentConfig) {
     this.initializeR2();
   }
 
   private initializeR2() {
-    try {
-      this.accountId = process.env.R2_ACCOUNT_ID || '';
-      this.bucketName = process.env.R2_BUCKET_NAME || '';
-      this.publicUrl = process.env.R2_PUBLIC_URL || '';
-      this.accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
-      this.secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
-      
-      if (!this.accountId || !this.bucketName || !this.accessKeyId || !this.secretAccessKey) {
-        throw new Error('Missing R2 configuration: All R2 environment variables are required');
-      }
+    this.accountId = process.env.R2_ACCOUNT_ID || '';
+    this.bucketName = process.env.R2_BUCKET_NAME || '';
+    this.publicUrl = process.env.R2_PUBLIC_URL || '';
+    this.accessKeyId = process.env.R2_ACCESS_KEY_ID || '';
+    this.secretAccessKey = process.env.R2_SECRET_ACCESS_KEY || '';
 
-      // Set default public URL if not provided
-      if (!this.publicUrl) {
-        this.publicUrl = `https://pub-${this.generateRandomId()}.r2.dev`;
-        this.logger.warn(`R2_PUBLIC_URL not set. Using generated URL: ${this.publicUrl}`);
-        this.logger.warn('Please setup a proper R2.dev public URL or custom domain');
-      }
-
-      // this.logger.log('Cloudflare R2 initialized successfully');
-      // this.logger.log(`Account ID: ${this.accountId}`);
-      // this.logger.log(`Bucket: ${this.bucketName}`);
-      // this.logger.log(`Public URL: ${this.publicUrl}`);
-      // this.logger.log('Using native Node.js fetch for R2 operations');
-      
-    } catch (error) {
-      this.logger.error('Failed to initialize Cloudflare R2:', error);
-      throw new InternalServerErrorException('R2 initialization failed');
+    if (!this.accountId || !this.bucketName || !this.accessKeyId || !this.secretAccessKey) {
+      this.logger.warn('⚠️  R2 env vars not configured — file uploads will use local storage fallback');
+      this.isConfigured = false;
+      return;
     }
+
+    if (!this.publicUrl) {
+      this.publicUrl = `https://pub-${this.generateRandomId()}.r2.dev`;
+      this.logger.warn(`R2_PUBLIC_URL not set. Using generated URL: ${this.publicUrl}`);
+    }
+
+    this.isConfigured = true;
   }
 
   private generateRandomId(): string {
@@ -127,6 +118,9 @@ export class CloudflareR2Service {
     userId: string,
     employeeCode: string
   ): Promise<string> {
+    if (!this.isConfigured) {
+      return await this.uploadToLocalStorage(file, userId, employeeCode);
+    }
     // Try R2 upload first, fallback to local if it fails
     try {
       const r2Url = await this.uploadToR2Direct(file, userId, employeeCode);

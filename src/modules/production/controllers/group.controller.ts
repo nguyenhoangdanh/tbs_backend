@@ -17,7 +17,7 @@ import {
   ApiBearerAuth,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
-import { PermissionsGuard } from '../../../common/guards/permissions.guard';
+import { RolesGuard } from '../../../common/guards/roles.guard';
 import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { GroupService } from '../services/group.service'; // ⭐ ADD
 import { CreateGroupDto } from '../dto/group/create-group.dto'; // ⭐ ADD
@@ -28,7 +28,7 @@ import { TransferGroupDto } from '../dto/group/transfer-group.dto'; // ⭐ ADD
 
 @ApiTags('production/groups')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard, PermissionsGuard) // ⭐ Use PermissionsGuard
+@UseGuards(JwtAuthGuard, RolesGuard) // ⭐ Use PermissionsGuard
 @Controller('production/groups')
 export class GroupController {
   constructor(private readonly groupService: GroupService) {}

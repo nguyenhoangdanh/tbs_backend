@@ -5,7 +5,8 @@ import {
   Body,
   Param,
   Delete,
-  Put,
+  Patch,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -18,6 +19,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
+import { RequirePermissions } from '../../../common/decorators/permissions.decorator';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { OfficeService } from '../services/office.service';
 import { CreateOfficeDto } from '../dto/office/create-office.dto';
@@ -25,14 +27,15 @@ import { UpdateOfficeDto } from '../dto/office/update-office.dto';
 
 @ApiTags('organization/offices')
 @ApiBearerAuth('JWT-auth')
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('organizations:view')
 @Controller('organization/offices')
 export class OfficeController {
   constructor(private readonly officeService: OfficeService) {}
 
   @Post()
-  @UseGuards(RolesGuard)
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Create new office' })
   @ApiResponse({ status: 201, description: 'Office created successfully' })
@@ -44,8 +47,8 @@ export class OfficeController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Get all offices' })
   @ApiResponse({ status: 200, description: 'Offices retrieved successfully' })
-  findAll() {
-    return this.officeService.findAll();
+  findAll(@Query('companyId') companyId?: string) {
+    return this.officeService.findAll(companyId);
   }
 
   @Get(':id')
@@ -65,9 +68,9 @@ export class OfficeController {
     return this.officeService.getDepartments(id);
   }
 
-  @Put(':id')
-  @UseGuards(RolesGuard)
+  @Patch(':id')
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Update office' })
   @ApiResponse({ status: 200, description: 'Office updated successfully' })
   update(@Param('id') id: string, @Body() updateOfficeDto: UpdateOfficeDto) {
@@ -75,8 +78,8 @@ export class OfficeController {
   }
 
   @Delete(':id')
-  @UseGuards(RolesGuard)
   @Roles('SUPERADMIN')
+  @RequirePermissions('organizations:manage')
   @ApiOperation({ summary: 'Delete office' })
   @ApiResponse({ status: 200, description: 'Office deleted successfully' })
   remove(@Param('id') id: string) {

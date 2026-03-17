@@ -21,8 +21,9 @@ export class PermissionsGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
+    // No @RequirePermissions decorator — pass through
     if (!requiredPermissions || requiredPermissions.length === 0) {
-      return true; // No permissions required
+      return true;
     }
 
     const request = context.switchToHttp().getRequest();
@@ -32,29 +33,27 @@ export class PermissionsGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
-    // ⭐ COMMENT OUT BYPASS - Test permissions for all users including SUPERADMIN
-    // if (user.role === 'SUPERADMIN') {
-    //   return true;
-    // }
+    // SUPERADMIN bypass — always has all permissions
+    const userRoleCodes: string[] = (user.roles ?? [])
+      .filter((ur: any) => ur.isActive !== false)
+      .map((ur: any) => ur.roleDefinition?.code ?? ur.code ?? '');
 
-    // Get user permissions
-    const userPermissions = await this.permissionsService.getUserPermissions(
-      user.id,
-    );
+    if (userRoleCodes.includes('SUPERADMIN')) {
+      return true;
+    }
 
-    // Check if user has all required permissions
+    // Look up effective permissions from DB (combines all role permissions)
+    const userPermissions = await this.permissionsService.getUserPermissions(user.id);
+
     const hasAllPermissions = requiredPermissions.every((permission) =>
       userPermissions.permissions.includes(permission),
     );
 
     if (!hasAllPermissions) {
-      const missingPermissions = requiredPermissions.filter(
-        (permission) => !userPermissions.permissions.includes(permission),
+      const missing = requiredPermissions.filter(
+        (p) => !userPermissions.permissions.includes(p),
       );
-
-      throw new ForbiddenException(
-        `Missing permissions: ${missingPermissions.join(', ')}`,
-      );
+      throw new ForbiddenException(`Missing permissions: ${missing.join(', ')}`);
     }
 
     return true;

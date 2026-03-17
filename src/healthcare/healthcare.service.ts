@@ -190,7 +190,7 @@ export class HealthcareService {
 
   // Medical records management
   async getPatientHistory(employeeCode: string) {
-    const user = await this.prisma.user.findUnique({
+    const user = await this.prisma.user.findFirst({
       where: { employeeCode },
       include: {
         // Thông tin JobPosition và các quan hệ của nó
@@ -361,7 +361,7 @@ export class HealthcareService {
               referenceType: 'MEDICAL_RECORD',
               referenceId: medicalRecord.id,
               notes: `Xuất thuốc theo đơn - BS: ${data.doctorId}`,
-              createdBy: data.doctorId,
+              createdById: data.doctorId,
             });
           } catch (error) {
             console.error(
@@ -486,7 +486,7 @@ export class HealthcareService {
               referenceType: 'MEDICAL_RECORD',
               referenceId: id,
               notes: `Xuất thuốc theo đơn (cập nhật) - Đơn #${id.slice(-8)}`,
-              createdBy: medicalRecord?.doctorId || undefined,
+              createdById: medicalRecord?.doctorId || undefined,
             });
           } catch (err) {
             console.error(
@@ -587,7 +587,7 @@ export class HealthcareService {
         referenceType: 'MEDICAL_RECORD',
         referenceId: prescription.medicalRecordId,
         notes: `Xuất thuốc thủ công - Người cấp: ${dispenserId}`,
-        createdBy: dispenserId,
+        createdById: dispenserId,
       });
     } catch (err) {
       console.error(
@@ -620,7 +620,7 @@ export class HealthcareService {
     }>;
   }) {
     // Find patient by employee code
-    const patient = await this.prisma.user.findUnique({
+    const patient = await this.prisma.user.findFirst({
       where: { employeeCode: data.patientEmployeeCode },
     });
 
@@ -706,7 +706,7 @@ export class HealthcareService {
               referenceType: 'MEDICAL_RECORD',
               referenceId: medicalRecord.id,
               notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
-              createdBy: data.doctorId,
+              createdById: data.doctorId,
             });
           } catch (error) {
             console.error(

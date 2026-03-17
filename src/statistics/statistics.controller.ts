@@ -6,17 +6,20 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiOperation, ApiResponse, ApiTags, ApiQuery } from '@nestjs/swagger';
+import { ApiOperation, ApiResponse, ApiTags, ApiQuery, ApiBearerAuth } from '@nestjs/swagger';
 import { StatisticsService } from './statistics.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
+import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { getCurrentWorkWeek } from '../common/utils/week-utils';
 
 @ApiTags('statistics')
+@ApiBearerAuth('JWT-auth')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@RequirePermissions('statistics:view')
 @Controller('statistics')
-@UseGuards(JwtAuthGuard)
 export class StatisticsController {
   constructor(private readonly statisticsService: StatisticsService) {}
 
@@ -153,7 +156,6 @@ export class StatisticsController {
 
   // Admin endpoints
   @Get('admin/dashboard')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get admin dashboard statistics' })
   @ApiResponse({ status: 200, description: 'Admin dashboard statistics retrieved successfully' })
@@ -192,7 +194,6 @@ export class StatisticsController {
   }
 
   @Get('overview')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get overview statistics (Admin only)' })
   @ApiResponse({ status: 200, description: 'Overview statistics retrieved successfully' })
@@ -203,7 +204,6 @@ export class StatisticsController {
   }
 
   @Get('completion-rate')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get completion rate statistics' })
   @ApiResponse({ status: 200, description: 'Completion rate statistics retrieved successfully' })
@@ -242,7 +242,6 @@ export class StatisticsController {
   }
 
   @Get('missing-reports')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get missing reports statistics' })
   @ApiResponse({ status: 200, description: 'Missing reports statistics retrieved successfully' })
@@ -275,7 +274,6 @@ export class StatisticsController {
   }
 
   @Get('summary-report')
-  @UseGuards(RolesGuard)
   @Roles('ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get summary report' })
   @ApiResponse({ status: 200, description: 'Summary report retrieved successfully' })

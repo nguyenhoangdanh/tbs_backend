@@ -9,6 +9,12 @@ import { PrismaService } from './common/prisma.service';
 import { webcrypto } from 'node:crypto';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import * as dotenv from 'dotenv';
+import { resolve } from 'path';
+
+// Load env vars before any module initialisation so PrismaClient can read DATABASE_URL
+dotenv.config({ path: resolve(process.cwd(), '.env.local') });
+dotenv.config({ path: resolve(process.cwd(), '.env') });
 
 // Polyfill for crypto in Node.js environment
 if (!globalThis.crypto) {

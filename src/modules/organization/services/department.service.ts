@@ -74,8 +74,9 @@ export class DepartmentService {
     });
   }
 
-  async findAll() {
+  async findAll(companyId?: string) {
     return this.prisma.department.findMany({
+      where: companyId ? { office: { companyId } } : undefined,
       include: {
         office: true,
         _count: {

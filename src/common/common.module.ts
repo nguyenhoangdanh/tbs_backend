@@ -5,11 +5,12 @@ import { RolesService } from './roles.service';
 import { PermissionsGuard } from './guards/permissions.guard';
 import { RolesGuard } from './guards/roles.guard';
 import { RolesController } from './roles.controller';
+import { PermissionsController } from './permissions.controller';
 import { EnvironmentConfig } from '../config/config.environment'; // ⭐ ADD
 import { CloudflareR2Service } from './r2.service'; // ⭐ ADD
 
 @Module({
-  controllers: [RolesController],
+  controllers: [RolesController, PermissionsController],
   providers: [
     PrismaService,
     PermissionsService,

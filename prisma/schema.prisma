@@ -9,6 +9,88 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ========== MULTI-COMPANY / TENANT ROOT ==========
+
+model CompanyType {
+  id          String    @id @default(uuid())
+  code        String    @unique // "HOLDING", "NGANH", "CHUOI", "TO_HOP", "NHA_MAY"
+  name        String    @unique // "Tập đoàn", "Ngành", "Chuỗi", "Tổ hợp", "Nhà máy"
+  level       Int       // 0=top (Tập đoàn) → higher = deeper in hierarchy
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([level])
+  @@index([isActive])
+  @@map("company_types")
+}
+
+model BusinessSector {
+  id          String    @id @default(uuid())
+  code        String    @unique // "BAGS", "FOOTWEAR", etc.
+  name        String    @unique // "Túi xách", "Giày da", etc.
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([isActive])
+  @@map("business_sectors")
+}
+
+model Region {
+  id          String    @id @default(uuid())
+  code        String    @unique // "AN_GIANG", "HCM", "BINH_DUONG"
+  name        String    @unique // "An Giang", "TP. Hồ Chí Minh"
+  description String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  companies Company[]
+
+  @@index([isActive])
+  @@map("regions")
+}
+
+model Company {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  name            String    @unique
+  typeId          String
+  parentCompanyId String?
+  regionId        String?
+  taxCode         String?   @unique
+  address         String?
+  phone           String?
+  email           String?
+  logoUrl         String?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  companyType CompanyType     @relation(fields: [typeId], references: [id])
+  parent      Company?        @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
+  children    Company[]       @relation("CompanyHierarchy")
+  region      Region?         @relation(fields: [regionId], references: [id])
+  sectors     BusinessSector[]
+  offices     Office[]
+  users       User[]
+  products    Product[]
+  processes   Process[]
+
+  @@index([typeId])
+  @@index([parentCompanyId])
+  @@index([regionId])
+  @@index([isActive])
+  @@map("companies")
+}
+
 model JobPosition {
   id           String     @id @default(uuid())
   jobName      String
@@ -35,16 +117,21 @@ model JobPosition {
 
 model Office {
   id           String        @id @default(uuid())
-  name         String        @unique
+  companyId    String        // Belongs to which company
+  name         String        // Unique per company (@@unique below)
   type         OfficeType
   description  String?
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
   departments  Department[]
   jobPositions JobPosition[]
   users        User[]
-  worksheets   WorkSheet[] // Office = Factory for FACTORY_OFFICE type
+  worksheets   WorkSheet[]
+  monthlyBackups WorkSheetMonthlyBackup[]
 
+  @@unique([name, companyId])
+  @@index([companyId])
   @@index([type])
   @@map("offices")
 }
@@ -84,8 +171,9 @@ model Position {
 
 model User {
   id                 String                     @id @default(uuid())
-  employeeCode       String                     @unique
-  email              String?                    @unique
+  companyId          String                     // Tenant isolation — denormalized from officeId.companyId for performance
+  employeeCode       String                     // Unique per company (@@unique below)
+  email              String?                    @unique // Global email uniqueness for login
   password           String
   firstName          String
   lastName           String
@@ -94,7 +182,7 @@ model User {
   dateOfBirth        DateTime?                  @db.Date
   address            String?
   sex                Sex?
-  roles              UserRole[]                 @relation("UserRoles") // Multiple roles support
+  roles              UserRole[]                 @relation("UserRoles")
   jobPositionId      String
   isActive           Boolean                    @default(false)
   officeId           String
@@ -108,18 +196,26 @@ model User {
   reports            Report[]
   evaluations        TaskEvaluation[]
   managedDepartments UserDepartmentManagement[] @relation("UserToManagedDepartments")
+  company            Company                    @relation(fields: [companyId], references: [id])
   group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
   jobPosition        JobPosition                @relation(fields: [jobPositionId], references: [id])
   office             Office                     @relation(fields: [officeId], references: [id])
-  myWorkSheets       WorkSheet[]                @relation("WorkerWorkSheets") // Phiếu công của mình
-  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater") // Nhóm trưởng cập nhật
-  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator") // Quản trị line tạo
+  myWorkSheets       WorkSheet[]                @relation("WorkerWorkSheets")
+  updatedWorkRecords WorkSheetRecord[]          @relation("WorkRecordUpdater")
+  createdWorkSheets  WorkSheet[]                @relation("WorkSheetCreator")
   pushSubscriptions  PushSubscription[]         @relation("UserPushSubscriptions")
 
-  medicalRecordsAsPatient MedicalRecord[]       @relation("PatientMedicalRecords")
-  medicalRecordsAsDoctor  MedicalRecord[]       @relation("DoctorMedicalRecords")
-  prescriptionsDispensed  MedicalPrescription[] @relation("MedicineDispenser")
+  medicalRecordsAsPatient      MedicalRecord[]        @relation("PatientMedicalRecords")
+  medicalRecordsAsDoctor       MedicalRecord[]        @relation("DoctorMedicalRecords")
+  prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
+  inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
 
+  feedbackViews       FeedbackView[] @relation("FeedbackViewedBy")
+  resolvedFeedbacks   Feedback[]     @relation("FeedbackResolvedBy")
+  processedFeedbacks  Feedback[]     @relation("FeedbackProcessedBy")
+
+  @@unique([employeeCode, companyId])
+  @@index([companyId])
   @@index([jobPositionId])
   @@index([officeId])
   @@index([isActive])
@@ -242,6 +338,7 @@ model Group {
   team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
   members     User[]      @relation("GroupMembers")
   worksheets  WorkSheet[]
+  monthlyBackups WorkSheetMonthlyBackup[]
 
   @@unique([code, teamId])
   @@index([teamId])
@@ -252,36 +349,42 @@ model Group {
 
 model Product {
   id                   String                @id @default(uuid())
+  companyId            String?               // null = shared/global across all companies
   name                 String
-  code                 String                @unique
+  code                 String                // Unique per company (@@unique below)
   description          String?
   imageUrl             String?
   isActive             Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  company              Company?              @relation(fields: [companyId], references: [id])
   processes            ProductProcess[]
   worksheets           WorkSheet[]
   worksheetRecordItems WorkSheetRecordItem[]
 
+  @@unique([code, companyId])
+  @@index([companyId])
   @@index([isActive])
-  @@index([code])
   @@map("products")
 }
 
 model Process {
   id                   String                @id @default(uuid())
+  companyId            String?               // null = shared/global across all companies
   name                 String
-  code                 String                @unique
+  code                 String                // Unique per company (@@unique below)
   description          String?
   isActive             Boolean               @default(true)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  company              Company?              @relation(fields: [companyId], references: [id])
   products             ProductProcess[]
   worksheets           WorkSheet[]
   worksheetRecordItems WorkSheetRecordItem[]
 
+  @@unique([code, companyId])
+  @@index([companyId])
   @@index([isActive])
-  @@index([code])
   @@map("processes")
 }
 
@@ -398,6 +501,7 @@ model WorkSheetRecordCause {
   delta     Int
   note      String?
   createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
   record    WorkSheetRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
 
   @@unique([recordId, cause])
@@ -409,7 +513,7 @@ model WorkSheetMonthlyBackup {
   id              String   @id @default(uuid())
   month           Int
   year            Int
-  officeId        String // Office = Factory
+  officeId        String
   groupId         String
   totalWorksheets Int
   totalOutput     Int
@@ -417,9 +521,13 @@ model WorkSheetMonthlyBackup {
   backupData      Json
   createdAt       DateTime @default(now())
 
+  office Office @relation(fields: [officeId], references: [id], onDelete: NoAction)
+  group  Group  @relation(fields: [groupId], references: [id], onDelete: NoAction)
+
   @@unique([month, year, officeId, groupId])
   @@index([year, month])
   @@index([officeId])
+  @@index([groupId])
   @@map("worksheet_monthly_backups")
 }
 
@@ -433,6 +541,7 @@ model AttendanceEvent {
   hourEnd     Int?
   note        String?
   createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
   user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
   worksheet   WorkSheet           @relation(fields: [worksheetId], references: [id], onDelete: Cascade)
 
@@ -542,7 +651,7 @@ model MedicalRecord {
   notes          String? // Ghi chú
   isWorkAccident Boolean  @default(false) // Tai nạn lao động (TNLĐ)
   createdAt      DateTime @default(now())
-  updatedAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   patient       User                  @relation("PatientMedicalRecords", fields: [patientId], references: [id])
   doctor        User                  @relation("DoctorMedicalRecords", fields: [doctorId], references: [id])
@@ -655,17 +764,19 @@ model InventoryTransaction {
   batchNumber String? // Số lô (cho nhập kho)
   supplier    String? // Nhà cung cấp (cho nhập kho)
 
-  notes     String?
-  createdBy String? // User ID người tạo giao dịch
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  notes       String?
+  createdById String? // User ID người tạo giao dịch
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  medicine    Medicine  @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  createdByUser User?   @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([medicineId])
   @@index([type])
   @@index([transactionDate])
   @@index([referenceType, referenceId])
+  @@index([createdById])
   @@map("inventory_transactions")
 }
 
@@ -847,13 +958,45 @@ model Permission {
 
 // ========== ANONYMOUS FEEDBACK SYSTEM ==========
 
+enum FeedbackStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+}
+
 model Feedback {
-  id        String   @id @default(uuid())
-  content   String   @db.Text
-  ipAddress String? // Track IP for spam prevention
-  userAgent String? // Track browser/device info
-  createdAt DateTime @default(now())
+  id           String         @id @default(uuid())
+  content      String         @db.Text
+  ipAddress    String?
+  userAgent    String?
+  status       FeedbackStatus @default(PENDING)
+  processorId  String?
+  processorAt  DateTime?
+  resolvedById String?
+  resolvedAt   DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  processor  User?          @relation("FeedbackProcessedBy", fields: [processorId], references: [id], onDelete: SetNull)
+  resolvedBy User?          @relation("FeedbackResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  views      FeedbackView[]
 
   @@index([createdAt])
+  @@index([status])
   @@map("feedbacks")
+}
+
+model FeedbackView {
+  id         String   @id @default(uuid())
+  feedbackId String
+  viewerId   String
+  viewedAt   DateTime @default(now())
+
+  feedback Feedback @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  viewer   User     @relation("FeedbackViewedBy", fields: [viewerId], references: [id], onDelete: Cascade)
+
+  @@unique([feedbackId, viewerId])
+  @@index([feedbackId])
+  @@index([viewerId])
+  @@map("feedback_views")
 }
