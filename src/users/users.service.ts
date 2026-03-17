@@ -640,11 +640,12 @@ let departmentId: string | null = null;
             password: '123456',
           };
 
-          // Create user with additional fields
+          // Create user with additional fields — strip 'role' (not a User scalar field)
+          const { role: userRole, ...userFields } = createUserDto;
           const hashedPassword = await bcrypt.hash('123456', 10);
-          await this.prisma.user.create({
+          const createdUser = await this.prisma.user.create({
             data: {
-              ...createUserDto,
+              ...userFields,
               password: hashedPassword,
               dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
               sex,
@@ -652,6 +653,18 @@ let departmentId: string | null = null;
               companyId: office.companyId,
             },
           });
+
+          // Assign role via UserRole table
+          if (userRole) {
+            const roleDef = await this.prisma.roleDefinition.findUnique({
+              where: { code: userRole },
+            });
+            if (roleDef) {
+              await this.prisma.userRole.create({
+                data: { userId: createdUser.id, roleDefinitionId: roleDef.id },
+              });
+            }
+          }
 
           results.success++;
         } catch (error) {
@@ -773,10 +786,11 @@ let departmentId: string | null = null;
             throw new Error(`Office not found for user ${userData.employeeCode}`);
           }
 
-          // Create user
+          // Create user — strip 'role' (not a User scalar field)
+          const { role: bulkRole, password: _pw, ...bulkUserFields } = userData as any;
           const newUser = await tx.user.create({
             data: {
-              ...userData,
+              ...bulkUserFields,
               password: hashedPassword,
               companyId: office.companyId,
             },
@@ -794,6 +808,18 @@ let departmentId: string | null = null;
               },
             },
           });
+
+          // Assign role via UserRole table
+          if (bulkRole) {
+            const roleDef = await tx.roleDefinition.findUnique({
+              where: { code: bulkRole },
+            });
+            if (roleDef) {
+              await tx.userRole.create({
+                data: { userId: newUser.id, roleDefinitionId: roleDef.id },
+              });
+            }
+          }
 
           // Remove password from response
           const { password, ...userWithoutPassword } = newUser;
