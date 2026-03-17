@@ -15,6 +15,14 @@ import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { Roles } from '../common/decorators/roles.decorator';
 
+/** Derive primary role code from user.roles[] (JWT shape) */
+function getPrimaryRole(user: any): string {
+  const roles: any[] = user?.roles ?? [];
+  if (roles.some((r) => r.roleDefinition?.code === 'SUPERADMIN')) return 'SUPERADMIN';
+  if (roles.some((r) => r.roleDefinition?.code === 'ADMIN')) return 'ADMIN';
+  return roles[0]?.roleDefinition?.code ?? 'USER';
+}
+
 @ApiTags('hierarchy-reports')
 @Controller('hierarchy-reports')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -58,7 +66,7 @@ export class HierarchyReportsController {
       }
     }
 
-    const result = await this.hierarchyReportsService.getMyHierarchyView(user.id, user.role, filters);
+    const result = await this.hierarchyReportsService.getMyHierarchyView(user.id, getPrimaryRole(user), filters);
     
     return result;
   }
@@ -123,7 +131,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getPositionDetails(user.id, user.role, positionId, filters);
+    return this.hierarchyReportsService.getPositionDetails(user.id, getPrimaryRole(user), positionId, filters);
   }
 
   @Get('position-users/:positionId')
@@ -155,7 +163,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getPositionUsers(user.id, user.role, positionId, filters);
+    return this.hierarchyReportsService.getPositionUsers(user.id, getPrimaryRole(user), positionId, filters);
   }
 
   @Get('user/:userId')
@@ -196,7 +204,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getUserDetails(user.id, user.role, userId, filters);
+    return this.hierarchyReportsService.getUserDetails(user.id, getPrimaryRole(user), userId, filters);
   }
 
   @Get('employees-without-reports')
@@ -245,7 +253,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getEmployeesWithoutReports(user.id, user.role, filters);
+    return this.hierarchyReportsService.getEmployeesWithoutReports(user.id, getPrimaryRole(user), filters);
   }
 
   @Get('employees-incomplete-reports')
@@ -294,7 +302,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getEmployeesWithIncompleteReports(user.id, user.role, filters);
+    return this.hierarchyReportsService.getEmployeesWithIncompleteReports(user.id, getPrimaryRole(user), filters);
   }
 
   @Get('employees-reporting-status')
@@ -349,7 +357,7 @@ export class HierarchyReportsController {
       filters.status = status;
     }
 
-    return this.hierarchyReportsService.getEmployeesReportingStatus(user.id, user.role, filters);
+    return this.hierarchyReportsService.getEmployeesReportingStatus(user.id, getPrimaryRole(user), filters);
   }
 
   @Get('task-completion-trends')
@@ -383,7 +391,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getTaskCompletionTrends(user.id, user.role, filters);
+    return this.hierarchyReportsService.getTaskCompletionTrends(user.id, getPrimaryRole(user), filters);
   }
 
   @Get('incomplete-reasons-hierarchy')
@@ -414,7 +422,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getIncompleteReasonsHierarchy(user.id, user.role, filters);
+    return this.hierarchyReportsService.getIncompleteReasonsHierarchy(user.id, getPrimaryRole(user), filters);
   }
 
   /**
@@ -448,7 +456,7 @@ export class HierarchyReportsController {
       }
     }
 
-    return this.hierarchyReportsService.getManagerReports(user.id, user.role, filters);
+    return this.hierarchyReportsService.getManagerReports(user.id, getPrimaryRole(user), filters);
   }
 
   /**
