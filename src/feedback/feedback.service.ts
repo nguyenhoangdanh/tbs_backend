@@ -147,10 +147,14 @@ export class FeedbackService {
 
     const updateData: any = { status: dto.status };
 
-    if (dto.status === FeedbackStatus.RESOLVED) {
+    if (dto.status === FeedbackStatus.IN_PROGRESS) {
+      // Track who is currently processing
+      updateData.resolvedById = actorId;
+      updateData.resolvedAt = null;
+    } else if (dto.status === FeedbackStatus.RESOLVED) {
       updateData.resolvedById = actorId;
       updateData.resolvedAt = new Date();
-    } else if (dto.status === FeedbackStatus.PENDING || dto.status === FeedbackStatus.IN_PROGRESS) {
+    } else if (dto.status === FeedbackStatus.PENDING) {
       updateData.resolvedById = null;
       updateData.resolvedAt = null;
     }
