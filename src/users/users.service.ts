@@ -286,8 +286,8 @@ let departmentId: string | null = null;
       throw new NotFoundException('User not found');
     }
 
-    // Destructure role out — handled via UserRole table separately
-    const { role, ...profileFields } = updateProfileDto as any;
+    // Destructure role, departmentId, positionId out — not User model fields
+    const { role, departmentId: _deptId, positionId: _posId, ...profileFields } = updateProfileDto as any;
 
     // Check role permission - only SUPERADMIN can change role
     if (role && currentUser.role !== 'SUPERADMIN' && !currentUser.roles?.some?.((r: any) => r?.roleDefinition?.code === 'SUPERADMIN')) {
