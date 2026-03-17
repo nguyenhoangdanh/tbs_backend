@@ -123,22 +123,6 @@ export class ReportsController {
     return this.reportsService.updateTask(req.user.id, taskId, updateTaskDto);
   }
 
-  @Patch('tasks/:taskId/approve')
-  @RequirePermissions('reports:approve')
-  @ApiOperation({ summary: 'Duyệt công việc' })
-  @ApiParam({ name: 'taskId', type: String })
-  approveTask(@Request() req: any, @Param('taskId') taskId: string) {
-    return this.reportsService.approveTask(taskId);
-  }
-
-  @Patch('tasks/:taskId/reject')
-  @ApiOperation({ summary: 'Từ chối công việc' })
-  @ApiParam({ name: 'taskId', type: String })
-  rejectTask(@Request() req: any, @Param('taskId') taskId: string) {
-    const fullname = `${req.user.firstName} ${req.user.lastName}`;
-    return this.reportsService.rejectTask(taskId, fullname);
-  }
-
   
 
   @Delete('tasks/:taskId')
