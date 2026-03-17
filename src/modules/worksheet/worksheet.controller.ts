@@ -31,6 +31,13 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { WorksheetService } from './worksheet.service';
 
+function getPrimaryRole(user: any): string {
+  const roles: any[] = user?.roles ?? [];
+  if (roles.some((r: any) => r.roleDefinition?.code === 'SUPERADMIN')) return 'SUPERADMIN';
+  if (roles.some((r: any) => r.roleDefinition?.code === 'ADMIN')) return 'ADMIN';
+  return roles[0]?.roleDefinition?.code ?? 'USER';
+}
+
 @ApiTags('worksheets')
 @ApiBearerAuth('JWT-auth')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -72,7 +79,7 @@ export class WorksheetController {
       date: dateFilter,
       status,
       userId: user.id,
-      userRole: user.role
+      userRole: getPrimaryRole(user)
     });
   }
 
@@ -146,7 +153,7 @@ export class WorksheetController {
       officeId,
       date: dateFilter,
       userId: user.id,
-      userRole: user.role
+      userRole: getPrimaryRole(user)
     });
   }
 
@@ -360,7 +367,7 @@ export class WorksheetController {
       teamId,
       groupId,
       userId: user?.id,
-      userRole: user?.role
+      userRole: getPrimaryRole(user)
     });
   }
 }

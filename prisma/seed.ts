@@ -88,6 +88,8 @@ const RESOURCES = [
   'roles',
   'permissions',
   'statistics',
+  'hierarchy-reports',
+  'task-evaluations',
 ] as const;
 
 const ACTIONS = ['view', 'create', 'update', 'delete', 'approve', 'manage', 'assign'] as const;
@@ -126,6 +128,9 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     feedback:         ['view', 'manage', 'delete'],
     roles:            ['view'],
     permissions:      ['view'],
+    statistics:       ['view'],
+    'hierarchy-reports': ['view'],
+    'task-evaluations': ['view', 'update', 'delete', 'manage', 'create'],
   },
 
   MANAGER: {
@@ -149,6 +154,8 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'medical-records': ['view'],
     inventory:        ['view'],
     feedback:         ['view', 'manage'],
+    'hierarchy-reports': ['view'],
+    'task-evaluations': ['view', 'update', 'delete', 'manage', 'create'],
   },
 
   USER: {

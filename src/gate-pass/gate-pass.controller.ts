@@ -21,6 +21,13 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 
+function getPrimaryRole(user: any): string {
+  const roles: any[] = user?.roles ?? [];
+  if (roles.some((r) => r.roleDefinition?.code === 'SUPERADMIN')) return 'SUPERADMIN';
+  if (roles.some((r) => r.roleDefinition?.code === 'ADMIN')) return 'ADMIN';
+  return roles[0]?.roleDefinition?.code ?? 'USER';
+}
+
 @ApiTags('gate-passes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -58,7 +65,7 @@ export class GatePassController {
     @Request() req, 
     @Query(ValidationPipe) filters: GatePassFiltersDto
   ) {
-    return this.gatePassService.findAll(req.user.id, req.user.role, filters);
+    return this.gatePassService.findAll(req.user.id, getPrimaryRole(req.user), filters);
   }
 
   @Get('my-gate-passes')
@@ -78,7 +85,7 @@ export class GatePassController {
     @Request() req,
     @Query(ValidationPipe) filters: Omit<GatePassFiltersDto, 'page' | 'limit'>
   ) {
-    return this.gatePassService.getStats(req.user.id, req.user.role, filters);
+    return this.gatePassService.getStats(req.user.id, getPrimaryRole(req.user), filters);
   }
 
   @Get('pending-approvals')
@@ -93,7 +100,7 @@ export class GatePassController {
   @ApiResponse({ status: 200, description: 'Gate pass retrieved successfully' })
   @ApiResponse({ status: 404, description: 'Gate pass not found' })
   findOne(@Param('id') id: string, @Request() req) {
-    return this.gatePassService.findOne(id, req.user.id, req.user.role);
+    return this.gatePassService.findOne(id, req.user.id, getPrimaryRole(req.user));
   }
 
   @Patch(':id')
@@ -115,7 +122,7 @@ export class GatePassController {
   @ApiResponse({ status: 403, description: 'Forbidden' })
   @ApiResponse({ status: 404, description: 'Gate pass not found' })
   remove(@Param('id') id: string, @Request() req) {
-    return this.gatePassService.remove(id, req.user.id, req.user.role);
+    return this.gatePassService.remove(id, req.user.id, getPrimaryRole(req.user));
   }
 
   @Post(':id/approve')

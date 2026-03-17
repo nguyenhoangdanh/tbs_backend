@@ -386,7 +386,7 @@ private async buildUserAccessFilter(userId: string, userRole: string) {
     return {};
   }
   
-  if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
+  if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
     const user = await this.prisma.user.findUnique({
       where: { 
         id: userId,
@@ -488,7 +488,7 @@ private async getSubordinates(manager: any, userRole: string) {
     });
   }
 
-  if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
+  if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
     // Get manager's information with managed departments
     const managerWithDepartments = await this.prisma.user.findUnique({
       where: { 
@@ -706,7 +706,7 @@ private async getSubordinates(manager: any, userRole: string) {
       } else if (jobPositionCount > 0) {
         return this.getStaffHierarchyView(userId, userRole, weekNumber, year, filters);
       }
-    } else if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
+    } else if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
       if (userCanViewHierarchy) {
         if (managementPositionCount > 0 && jobPositionCount > 0) {
           return this.getMixedHierarchyView(userId, userRole, weekNumber, year, filters);
@@ -1888,7 +1888,7 @@ private async getSubordinates(manager: any, userRole: string) {
 
     if (userRole === 'SUPERADMIN' || userRole === 'ADMIN') {
       // No additional filters for super admin/admin
-    } else if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
+    } else if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
       // Check if user has hierarchy viewing permission
       if (user.jobPosition?.position?.canViewHierarchy === true) {
         // Management user can see their department
@@ -2335,7 +2335,7 @@ private async getSubordinates(manager: any, userRole: string) {
     }
 
     // USER Role: Check level-based permissions
-    if (userRole === 'USER' || userRole === 'MEDICAL_STAFF') {
+    if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
       const position = user.jobPosition?.position;
       const level = position?.level;
 

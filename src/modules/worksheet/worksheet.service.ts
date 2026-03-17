@@ -7,6 +7,13 @@ import { BatchUpdateByHourDto, HourWorkerOutputDto } from './dto/batch-update-by
 import { ShiftType, WorkSheetStatus, WorkRecordStatus } from '@prisma/client';
 import { WorksheetGateway } from './worksheet.gateway';
 
+function getPrimaryRole(user: any): string {
+  const roles: any[] = user?.roles ?? [];
+  if (roles.some((r: any) => r.roleDefinition?.code === 'SUPERADMIN')) return 'SUPERADMIN';
+  if (roles.some((r: any) => r.roleDefinition?.code === 'ADMIN')) return 'ADMIN';
+  return roles[0]?.roleDefinition?.code ?? 'USER';
+}
+
 @Injectable()
 export class WorksheetService {
   constructor(
@@ -36,8 +43,8 @@ export class WorksheetService {
       return true;
     }
 
-    // For USER role, check if they're in the same department as the group
-    if (userRole === 'USER') {
+    // For non-admin roles, check if they're in the same department as the group
+    if (userRole !== 'SUPERADMIN' && userRole !== 'ADMIN') {
       const [user, group] = await Promise.all([
         this.prisma.user.findUnique({
           where: { id: userId },
@@ -280,7 +287,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canUpdate = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
+    const canUpdate = await this.canAccessGroup(user.id, getPrimaryRole(user), groupId, group.leaderId);
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to update this group');
@@ -433,7 +440,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canView = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
+    const canView = await this.canAccessGroup(user.id, getPrimaryRole(user), groupId, group.leaderId);
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -680,7 +687,7 @@ export class WorksheetService {
     // - WORKER with position "CN": Already filtered by groupId in controller
     // - USER (Nhóm trưởng): Can see all worksheets in their department (via departmentId filter)
     // - Note: departmentId filter is already handled above (lines 577-606)
-    if (filters.userRole === 'USER' && filters.userId && !filters.departmentId) {
+    if (filters.userRole !== 'SUPERADMIN' && filters.userRole !== 'ADMIN' && filters.userId && !filters.departmentId) {
       // If USER role but no departmentId filter provided, fall back to group leader logic
       console.log('[WorksheetService] USER role without departmentId - checking group leadership');
       
@@ -866,8 +873,8 @@ export class WorksheetService {
 
     // Check permissions
     const canAccess = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.createdById === user.id ||
       worksheet.group.leader?.id === user.id ||
       worksheet.workerId === user.id;
@@ -924,8 +931,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.createdById === user.id ||
       worksheet.group.leader?.id === user.id;
 
@@ -1064,7 +1071,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canUpdate = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
+    const canUpdate = await this.canAccessGroup(user.id, getPrimaryRole(user), groupId, group.leaderId);
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to bulk update worksheets for this group');
@@ -1199,8 +1206,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
@@ -1263,7 +1270,7 @@ export class WorksheetService {
     }
 
     // Only admin can delete
-    if (user.role !== 'SUPERADMIN' && user.role !== 'ADMIN') {
+    if (getPrimaryRole(user) !== 'SUPERADMIN' && getPrimaryRole(user) !== 'ADMIN') {
       throw new ForbiddenException('Only admin can delete worksheets');
     }
 
@@ -1287,8 +1294,8 @@ export class WorksheetService {
 
     // Check permissions
     const canComplete = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canComplete) {
@@ -1397,8 +1404,8 @@ export class WorksheetService {
 
     // Check permissions
     const canView = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canView) {
@@ -1482,7 +1489,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canView = await this.canAccessGroup(user.id, user.role, groupId, group.leaderId);
+    const canView = await this.canAccessGroup(user.id, getPrimaryRole(user), groupId, group.leaderId);
 
     if (!canView) {
       throw new ForbiddenException('No permission to view this group');
@@ -1564,7 +1571,7 @@ export class WorksheetService {
    */
   async archiveOldWorksheets(beforeDate?: Date, user?: any) {
     // Only admin can archive
-    if (user && user.role !== 'SUPERADMIN' && user.role !== 'ADMIN') {
+    if (user && getPrimaryRole(user) !== 'SUPERADMIN' && getPrimaryRole(user) !== 'ADMIN') {
       throw new ForbiddenException('Only admin can archive worksheets');
     }
 
@@ -1622,8 +1629,8 @@ export class WorksheetService {
 
     // Check permissions
     const canUpdate = 
-      user.role === 'SUPERADMIN' ||
-      user.role === 'ADMIN' ||
+      getPrimaryRole(user) === 'SUPERADMIN' ||
+      getPrimaryRole(user) === 'ADMIN' ||
       worksheet.group.leader?.id === user.id;
 
     if (!canUpdate) {
@@ -1885,7 +1892,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canUpdate = await this.canAccessGroup(user.id, user.role, worksheet.groupId, worksheet.group.leaderId);
+    const canUpdate = await this.canAccessGroup(user.id, getPrimaryRole(user), worksheet.groupId, worksheet.group.leaderId);
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to adjust targets for this group');
@@ -1929,7 +1936,7 @@ export class WorksheetService {
     }
 
     // Check permission using helper
-    const canUpdate = await this.canAccessGroup(user.id, user.role, worksheet.groupId, worksheet.group.leaderId);
+    const canUpdate = await this.canAccessGroup(user.id, getPrimaryRole(user), worksheet.groupId, worksheet.group.leaderId);
 
     if (!canUpdate) {
       throw new ForbiddenException('No permission to copy forward for this group');
@@ -2002,7 +2009,7 @@ export class WorksheetService {
     }
 
     // Role-based filtering
-    if (filters.userRole === 'USER' && filters.userId) {
+    if (filters.userRole !== 'SUPERADMIN' && filters.userRole !== 'ADMIN' && filters.userId) {
       const ledGroups = await this.prisma.group.findMany({
         where: { leaderId: filters.userId },
         select: { id: true }
@@ -2228,7 +2235,7 @@ export class WorksheetService {
     }
 
     // Permission check for regular users (group leaders)
-    if (filters.userRole === 'USER' && filters.userId) {
+    if (filters.userRole !== 'SUPERADMIN' && filters.userRole !== 'ADMIN' && filters.userId) {
       const myGroups = await this.prisma.group.findMany({
         where: { leaderId: filters.userId },
         select: { id: true }
