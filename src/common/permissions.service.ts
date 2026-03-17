@@ -40,7 +40,7 @@ export class PermissionsService {
   // ========== USER PERMISSIONS ==========
 
   /**
-   * Get all permissions for a user (supports multiple roles)
+   * Get all permissions for a user (supports multiple roles + direct overrides)
    */
   async getUserPermissions(userId: string): Promise<UserPermissions> {
     const user = await this.prisma.user.findUnique({
@@ -53,13 +53,14 @@ export class PermissionsService {
               include: {
                 permissions: {
                   where: { isGranted: true },
-                  include: {
-                    permission: true,
-                  },
+                  include: { permission: true },
                 },
               },
             },
           },
+        },
+        directPermissions: {
+          include: { permission: true },
         },
       },
     });
@@ -68,10 +69,9 @@ export class PermissionsService {
       throw new NotFoundException('User not found');
     }
 
-    // Combine role permissions
+    // 1. Aggregate from all assigned roles
     const permissionsMap = new Map<string, boolean>();
 
-    // Get permissions from all assigned roles
     if (user.roles && user.roles.length > 0) {
       user.roles.forEach((userRole) => {
         userRole.roleDefinition.permissions.forEach((rdp) => {
@@ -81,30 +81,28 @@ export class PermissionsService {
       });
     }
 
-    // Build permissions array
+    // 2. Apply direct per-user overrides (can grant OR revoke)
+    if (user.directPermissions && user.directPermissions.length > 0) {
+      user.directPermissions.forEach((up) => {
+        const key = `${up.permission.resource}:${up.permission.action}`;
+        permissionsMap.set(key, up.isGranted); // overrides role-based value
+      });
+    }
+
+    // Build final permissions list
     const permissions = Array.from(permissionsMap.entries())
       .filter(([_, granted]) => granted)
-      .map(([key, _]) => key);
+      .map(([key]) => key);
 
-    // Build resources object for easy frontend access
     const resources: any = {};
     permissions.forEach((perm) => {
       const [resource, action] = perm.split(':');
       if (!resources[resource]) {
-        resources[resource] = {
-          view: false,
-          create: false,
-          update: false,
-          delete: false,
-          approve: false,
-          manage: false,
-          assign: false,
-        };
+        resources[resource] = { view: false, create: false, update: false, delete: false, approve: false, manage: false, assign: false };
       }
       resources[resource][action] = true;
     });
 
-    // Build roles array from user role assignments
     const roles = user.roles.map((userRole) => ({
       id: userRole.roleDefinition.id,
       name: userRole.roleDefinition.name,
@@ -113,11 +111,7 @@ export class PermissionsService {
       isSystem: userRole.roleDefinition.isSystem,
     }));
 
-    return {
-      roles,
-      permissions,
-      resources,
-    };
+    return { roles, permissions, resources };
   }
 
   /**
