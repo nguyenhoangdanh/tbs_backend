@@ -2465,6 +2465,7 @@ private async getSubordinates(manager: any, userRole: string) {
     
     // Initialize position group if not exists
     if (!positionGroups.has(positionKey)) {
+      const isNonManagement = !position.isManagement;
       positionGroups.set(positionKey, {
         position: {
           id: position.id,
@@ -2473,10 +2474,10 @@ private async getSubordinates(manager: any, userRole: string) {
           description: position.description,
           isManagement: position.isManagement
         },
-        // For level 1-6: direct employees array
-        // For level 7: jobPositionGroups Map
-        employees: position.level < 7 ? [] : null,
-        jobPositionGroups: position.level === 7 ? new Map() : null,
+        // For management positions: direct employees array
+        // For non-management positions: jobPositionGroups Map for detailed grouping
+        employees: position.isManagement ? [] : null,
+        jobPositionGroups: isNonManagement ? new Map() : null,
         stats: {
           totalUsers: 0,
           usersWithReports: 0,
@@ -2516,9 +2517,9 @@ private async getSubordinates(manager: any, userRole: string) {
       stats
     };
     
-    // LOGIC PHÂN BIỆT THEO LEVEL
-    if (position.level === 7) {
-      // Level 7 (Nhân viên): Group theo job position chi tiết
+    // LOGIC PHÂN BIỆT THEO isManagement
+    if (!position.isManagement) {
+      // Non-management: Group theo job position chi tiết
       const jobPositionKey = `${jobPosition.id}_${jobPosition.jobName}`;
       
       if (!positionGroup.jobPositionGroups.has(jobPositionKey)) {
@@ -2560,7 +2561,7 @@ private async getSubordinates(manager: any, userRole: string) {
       }
       
     } else {
-      // Level 1-6 (Các cấp quản lý): Chỉ group theo position
+      // Management positions: Group theo position trực tiếp
       positionGroup.employees.push(employeeData);
     }
     
@@ -2583,8 +2584,8 @@ private async getSubordinates(manager: any, userRole: string) {
       ? Math.round((positionGroup.stats.completedTasks / positionGroup.stats.totalTasks) * 100)
       : 0;
     
-    if (positionGroup.position.level === 7) {
-      // Level 7: Convert jobPositionGroups Map to Array
+    if (!positionGroup.position.isManagement) {
+      // Non-management: Convert jobPositionGroups Map to Array
       const jobPositions = Array.from(positionGroup.jobPositionGroups.values()).map((jobPositionGroup: any) => {
         // Calculate task completion rate for each job position
         jobPositionGroup.stats.taskCompletionRate = jobPositionGroup.stats.totalTasks > 0
@@ -2597,14 +2598,14 @@ private async getSubordinates(manager: any, userRole: string) {
       return {
         position: positionGroup.position,
         jobPositions: jobPositions.sort((a: any, b: any) => a.jobPosition.jobName.localeCompare(b.jobPosition.jobName)),
-        employees: null, // Level 7 không có employees trực tiếp
+        employees: null,
         stats: positionGroup.stats
       };
     } else {
-      // Level 1-6: Return with employees array
+      // Management: Return with employees array
       return {
         position: positionGroup.position,
-        jobPositions: null, // Level 1-6 không có jobPositions
+        jobPositions: null,
         employees: positionGroup.employees.sort((a: any, b: any) => a.user.fullName.localeCompare(b.user.fullName)),
         stats: positionGroup.stats
       };
