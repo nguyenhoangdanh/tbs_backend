@@ -15,6 +15,7 @@ import {
   HttpCode,
   HttpStatus,
   Res,
+  Req,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -33,6 +34,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { UsersService } from './users.service';
+import { UserPermissionsService } from './user-permissions.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
@@ -41,7 +43,10 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly userPermissionsService: UserPermissionsService,
+  ) {}
 
   // ========== PROFILE ROUTES (MUST BE BEFORE :id ROUTE) ==========
 
@@ -337,5 +342,36 @@ export class UsersController {
     }
 
     return this.usersService.importUsersFromExcel(file);
+  }
+
+  // ========== USER ROLES & PERMISSIONS ==========
+
+  @Get(':id/permissions')
+  @RequirePermissions('users:view')
+  @ApiOperation({ summary: 'Get user roles and direct permissions' })
+  async getUserPermissions(@Param('id') id: string) {
+    return this.userPermissionsService.getUserRolesAndPermissions(id);
+  }
+
+  @Put(':id/roles')
+  @RequirePermissions('users:manage')
+  @ApiOperation({ summary: 'Assign roles to user (replaces existing)' })
+  async setUserRoles(
+    @Param('id') id: string,
+    @Body() body: { roleDefinitionIds: string[] },
+    @Req() req: any,
+  ) {
+    return this.userPermissionsService.setUserRoles(id, body.roleDefinitionIds, req.user?.id);
+  }
+
+  @Put(':id/direct-permissions')
+  @RequirePermissions('users:manage')
+  @ApiOperation({ summary: 'Set direct per-user permission overrides (replaces existing)' })
+  async setDirectPermissions(
+    @Param('id') id: string,
+    @Body() body: { permissions: { permissionId: string; isGranted: boolean; note?: string }[] },
+    @Req() req: any,
+  ) {
+    return this.userPermissionsService.setDirectPermissions(id, body.permissions, req.user?.id);
   }
 }
