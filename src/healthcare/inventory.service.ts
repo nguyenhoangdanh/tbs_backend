@@ -2510,7 +2510,8 @@ export class InventoryService {
         const medicineName = row[1]?.toString().trim();
         const units = row[5]?.toString().trim();
 
-        if (!stt || !medicineName || !units) {
+        // STT (cột A) phải là số nguyên dương — loại bỏ mọi hàng không phải thuốc
+        if (!stt || !/^\d+$/.test(stt) || !medicineName || !units) {
           skipped++;
           continue;
         }
