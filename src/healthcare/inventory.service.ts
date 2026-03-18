@@ -2465,11 +2465,37 @@ export class InventoryService {
         const secondCell = row[1]?.toString() || '';
 
         const categoryMatch = firstCell.match(
-          /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII)\s*-/,
+          /^(I{1,3}V?|VI{0,3}|IX|XI{0,3}V?|XIV|XVI{0,2}|XVII)\s*[-–]\s*(.+)/,
         );
         if (categoryMatch) {
-          currentCategory = categoryMatch[1];
-          console.log(`\n📁 Category: ${currentCategory} - ${firstCell}`);
+          const catCode = categoryMatch[1].trim();
+          const catName = categoryMatch[2].trim().toUpperCase();
+          currentCategory = catCode;
+          console.log(`\n📁 Category: ${catCode} - ${catName}`);
+
+          // Determine type from name
+          const isEmergency = /CẤP CỨU/i.test(catName);
+          const isEquipment = /VẬT TƯ|DỤNG CỤ|THIẾT BỊ/i.test(catName);
+          const catType = isEmergency
+            ? 'EMERGENCY_SUPPLY'
+            : isEquipment
+              ? 'MEDICAL_EQUIPMENT'
+              : 'MEDICINE';
+
+          // Upsert category so it exists in DB
+          try {
+            const sortOrder = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII'].indexOf(catCode) + 1;
+            await this.prisma.medicineCategory.upsert({
+              where: { code: catCode },
+              update: { name: catName, type: catType as any },
+              create: {
+                code: catCode,
+                name: catName,
+                type: catType as any,
+                sortOrder: sortOrder > 0 ? sortOrder : 99,
+              },
+            });
+          } catch (_e) { /* ignore */ }
           continue;
         }
 
@@ -2612,7 +2638,7 @@ export class InventoryService {
         let itemType = 'MEDICINE' as any;
 
         if (currentCategory) {
-          let category = await this.prisma.medicineCategory.findUnique({
+          const category = await this.prisma.medicineCategory.findUnique({
             where: { code: currentCategory },
           });
 
