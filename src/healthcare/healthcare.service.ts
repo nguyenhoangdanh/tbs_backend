@@ -377,12 +377,13 @@ export class HealthcareService {
               // throw new BadRequestException(`Thuốc không đủ tồn kho. Tồn: ${currentStock.currentStock}, Cần: ${prescription.quantity}`);
             }
 
-            // Tạo transaction xuất kho
+            // Tạo transaction xuất kho - dùng visitDate của đơn khám
             await this.inventoryService.createInventoryTransaction({
               medicineId: prescription.medicineId,
               type: InventoryTransactionTypeDto.EXPORT,
               quantity: prescription.quantity,
               unitPrice: String(currentStock.unitPrice || '0'),
+              transactionDate: medicalRecord.visitDate.toISOString(),
               referenceType: 'MEDICAL_RECORD',
               referenceId: medicalRecord.id,
               notes: `Xuất thuốc theo đơn - BS: ${data.doctorId}`,
@@ -433,7 +434,7 @@ export class HealthcareService {
       // 2. Lấy thông tin BS từ medical record
       const medicalRecord = await prisma.medicalRecord.findUnique({
         where: { id },
-        select: { doctorId: true },
+        select: { doctorId: true, visitDate: true },
       });
 
       // 3. Cập nhật thông tin cơ bản của medical record
@@ -508,6 +509,10 @@ export class HealthcareService {
               type: InventoryTransactionTypeDto.EXPORT,
               quantity: p.quantity,
               unitPrice: String(currentStock.unitPrice || '0'),
+              transactionDate: (data.visitDate
+                ? new Date(data.visitDate)
+                : medicalRecord?.visitDate ?? new Date()
+              ).toISOString(),
               referenceType: 'MEDICAL_RECORD',
               referenceId: id,
               notes: `Xuất thuốc theo đơn (cập nhật) - Đơn #${id.slice(-8)}`,
@@ -737,6 +742,7 @@ export class HealthcareService {
             type: InventoryTransactionTypeDto.EXPORT,
             quantity: prescription.quantity,
             unitPrice: String(currentStock.unitPrice || '0'),
+            transactionDate: medicalRecord.visitDate.toISOString(),
             referenceType: 'MEDICAL_RECORD',
             referenceId: medicalRecord.id,
             notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
