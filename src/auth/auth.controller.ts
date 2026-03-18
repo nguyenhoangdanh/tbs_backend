@@ -77,11 +77,11 @@ export class AuthController {
       const userAgent = request?.headers['user-agent'] || '';
       const isIOSOrMac = /iPad|iPhone|iPod|Macintosh/i.test(userAgent);
 
-      this.logger.log('Login request:', {
-        authMode: isTokenMode ? 'token' : 'cookie',
-        isIOSOrMac,
-        userAgent: userAgent.substring(0, 50),
-      });
+      // this.logger.log('Login request:', {
+      //   authMode: isTokenMode ? 'token' : 'cookie',
+      //   isIOSOrMac,
+      //   userAgent: userAgent.substring(0, 50),
+      // });
 
       const result = await this.authService.login(
         loginDto,

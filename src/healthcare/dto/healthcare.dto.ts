@@ -4,10 +4,18 @@ import {
   IsOptional,
   IsArray,
   IsBoolean,
+  IsEnum,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
+// Medicine type enum (mirrors Prisma MedicalItemType)
+export enum MedicalItemTypeDto {
+  MEDICINE = 'MEDICINE',
+  EMERGENCY_SUPPLY = 'EMERGENCY_SUPPLY',
+  MEDICAL_EQUIPMENT = 'MEDICAL_EQUIPMENT',
+}
 
 // DTOs for Medical Record Management
 export class CreatePrescriptionDto {
@@ -134,15 +142,35 @@ export class CreateMedicineDto {
   @IsString()
   name: string;
 
+  @ApiPropertyOptional({ enum: MedicalItemTypeDto, description: 'Medicine type' })
+  @IsOptional()
+  @IsEnum(MedicalItemTypeDto)
+  type?: MedicalItemTypeDto;
+
+  @ApiPropertyOptional({ description: 'Category ID (nhóm thuốc I–XVII)' })
+  @IsOptional()
+  @IsString()
+  categoryId?: string;
+
+  @ApiPropertyOptional({ description: 'Route of administration (UỐNG, NHỎ MẮT, BÔI...)' })
+  @IsOptional()
+  @IsString()
+  route?: string;
+
+  @ApiPropertyOptional({ description: 'Medicine strength e.g. 500mg' })
+  @IsOptional()
+  @IsString()
+  strength?: string;
+
+  @ApiPropertyOptional({ description: 'Manufacturer' })
+  @IsOptional()
+  @IsString()
+  manufacturer?: string;
+
   @ApiPropertyOptional({ description: 'Dosage instruction' })
   @IsOptional()
   @IsString()
   dosage?: string;
-
-  @ApiPropertyOptional({ description: 'Medicine strength' })
-  @IsOptional()
-  @IsString()
-  strength?: string;
 
   @ApiPropertyOptional({ description: 'Usage frequency' })
   @IsOptional()
@@ -154,9 +182,7 @@ export class CreateMedicineDto {
   @IsString()
   instructions?: string;
 
-  @ApiPropertyOptional({
-    description: 'Units of the medicine, e.g., "tablet", "bottle"',
-  })
+  @ApiPropertyOptional({ description: 'Units e.g. viên, chai, lọ' })
   @IsOptional()
   @IsString()
   units?: string;
@@ -168,15 +194,35 @@ export class UpdateMedicineDto {
   @IsString()
   name?: string;
 
-  @ApiPropertyOptional({ description: 'Dosage instruction' })
+  @ApiPropertyOptional({ enum: MedicalItemTypeDto, description: 'Medicine type' })
+  @IsOptional()
+  @IsEnum(MedicalItemTypeDto)
+  type?: MedicalItemTypeDto;
+
+  @ApiPropertyOptional({ description: 'Category ID' })
   @IsOptional()
   @IsString()
-  dosage?: string;
+  categoryId?: string;
+
+  @ApiPropertyOptional({ description: 'Route of administration' })
+  @IsOptional()
+  @IsString()
+  route?: string;
 
   @ApiPropertyOptional({ description: 'Medicine strength' })
   @IsOptional()
   @IsString()
   strength?: string;
+
+  @ApiPropertyOptional({ description: 'Manufacturer' })
+  @IsOptional()
+  @IsString()
+  manufacturer?: string;
+
+  @ApiPropertyOptional({ description: 'Dosage instruction' })
+  @IsOptional()
+  @IsString()
+  dosage?: string;
 
   @ApiPropertyOptional({ description: 'Usage frequency' })
   @IsOptional()
@@ -188,10 +234,47 @@ export class UpdateMedicineDto {
   @IsString()
   instructions?: string;
 
-  @ApiPropertyOptional({
-    description: 'Units of the medicine, e.g., "tablet", "bottle"',
-  })
+  @ApiPropertyOptional({ description: 'Units e.g. viên, chai, lọ' })
   @IsOptional()
   @IsString()
   units?: string;
+
+  @ApiPropertyOptional({ description: 'Active status' })
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+export class GetMedicalRecordsDto {
+  @ApiPropertyOptional({ description: 'Filter by doctor ID' })
+  @IsOptional()
+  @IsString()
+  doctorId?: string;
+
+  @ApiPropertyOptional({ description: 'Filter by patient employee code' })
+  @IsOptional()
+  @IsString()
+  patientEmployeeCode?: string;
+
+  @ApiPropertyOptional({ description: 'Start date (ISO string)' })
+  @IsOptional()
+  @IsString()
+  startDate?: string;
+
+  @ApiPropertyOptional({ description: 'End date (ISO string)' })
+  @IsOptional()
+  @IsString()
+  endDate?: string;
+
+  @ApiPropertyOptional({ description: 'Page number', default: 1 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  page?: number;
+
+  @ApiPropertyOptional({ description: 'Items per page', default: 20 })
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  limit?: number;
 }

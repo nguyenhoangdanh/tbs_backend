@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { MedicalItemType, Prisma } from '@prisma/client';
 import { PrismaService } from '../common/prisma.service';
 import { InventoryService } from './inventory.service';
 import { InventoryTransactionTypeDto } from './dto/inventory.dto';
@@ -148,19 +149,31 @@ export class HealthcareService {
     return this.prisma.medicine.findMany({
       where,
       orderBy: { name: 'asc' },
+      include: { category: true },
     });
   }
 
   async createMedicine(data: {
     name: string;
+    type?: string;
+    categoryId?: string;
+    route?: string;
     dosage?: string;
     strength?: string;
     frequency?: string;
     instructions?: string;
     units?: string;
+    manufacturer?: string;
   }) {
+    const { type, categoryId, ...rest } = data;
+    const createData: Prisma.MedicineUncheckedCreateInput = {
+      ...rest,
+      ...(type ? { type: type as MedicalItemType } : {}),
+      ...(categoryId ? { categoryId } : {}),
+    };
     return this.prisma.medicine.create({
-      data,
+      data: createData,
+      include: { category: true },
     });
   }
 
@@ -168,16 +181,28 @@ export class HealthcareService {
     id: string,
     data: {
       name?: string;
+      type?: string;
+      categoryId?: string;
+      route?: string;
       dosage?: string;
       strength?: string;
       frequency?: string;
       instructions?: string;
       units?: string;
+      manufacturer?: string;
+      isActive?: boolean;
     },
   ) {
+    const { type, categoryId, ...rest } = data;
+    const updateData: Prisma.MedicineUncheckedUpdateInput = {
+      ...rest,
+      ...(type !== undefined ? { type: type as MedicalItemType } : {}),
+      ...(categoryId !== undefined ? { categoryId } : {}),
+    };
     return this.prisma.medicine.update({
       where: { id },
-      data,
+      data: updateData,
+      include: { category: true },
     });
   }
 
@@ -421,7 +446,7 @@ export class HealthcareService {
       });
 
       // 4. Nếu có cập nhật đơn thuốc → xử lý tồn kho + prescription records
-      if (prescriptions && prescriptions.length > 0) {
+      if (prescriptions !== undefined) {
         // 4a. HOÀN TRẢ tồn kho cho từng thuốc đã được xuất kho trước đó
         //     (chỉ những prescription có isDispensed=true mới được xuất kho)
         for (const old of oldPrescriptions) {
@@ -554,7 +579,17 @@ export class HealthcareService {
       });
     }
 
-    // 2. Đánh dấu đã cấp + tạo giao dịch xuất kho
+    // 2. Validate stock before dispensing
+    const currentStock = await this.inventoryService.getCurrentStock(
+      prescription.medicineId,
+    );
+    if (currentStock.currentStock < prescription.quantity) {
+      throw new Error(
+        `Tồn kho không đủ. Hiện tại: ${currentStock.currentStock}, Cần: ${prescription.quantity}`,
+      );
+    }
+
+    // 3. Đánh dấu đã cấp + tạo giao dịch xuất kho (sequential, errors propagate)
     const updated = await this.prisma.medicalPrescription.update({
       where: { id: prescriptionId },
       data: {
@@ -574,28 +609,16 @@ export class HealthcareService {
       },
     });
 
-    // 3. Tạo giao dịch xuất kho
-    try {
-      const currentStock = await this.inventoryService.getCurrentStock(
-        prescription.medicineId,
-      );
-      await this.inventoryService.createInventoryTransaction({
-        medicineId: prescription.medicineId,
-        type: InventoryTransactionTypeDto.EXPORT,
-        quantity: prescription.quantity,
-        unitPrice: String(currentStock.unitPrice || '0'),
-        referenceType: 'MEDICAL_RECORD',
-        referenceId: prescription.medicalRecordId,
-        notes: `Xuất thuốc thủ công - Người cấp: ${dispenserId}`,
-        createdById: dispenserId,
-      });
-    } catch (err) {
-      console.error(
-        `[dispenseMedicine] Lỗi tạo giao dịch xuất kho cho prescription ${prescriptionId}:`,
-        err,
-      );
-      // Không rollback việc đánh dấu isDispensed, nhưng log lỗi để theo dõi
-    }
+    await this.inventoryService.createInventoryTransaction({
+      medicineId: prescription.medicineId,
+      type: InventoryTransactionTypeDto.EXPORT,
+      quantity: prescription.quantity,
+      unitPrice: String(currentStock.unitPrice || '0'),
+      referenceType: 'MEDICAL_RECORD',
+      referenceId: prescription.medicalRecordId,
+      notes: `Xuất thuốc thủ công - Người cấp: ${dispenserId}`,
+      createdById: dispenserId,
+    });
 
     return updated;
   }
@@ -629,6 +652,26 @@ export class HealthcareService {
     }
 
     const { patientEmployeeCode, prescriptions, ...recordData } = data;
+
+    // Pre-validate stock before entering transaction
+    if (prescriptions && prescriptions.length > 0) {
+      const insufficientItems: string[] = [];
+      for (const prescription of prescriptions) {
+        const stock = await this.inventoryService.getCurrentStock(
+          prescription.medicineId,
+        );
+        if (stock.currentStock < prescription.quantity) {
+          insufficientItems.push(
+            `${prescription.medicineId} (tồn: ${stock.currentStock}, cần: ${prescription.quantity})`,
+          );
+        }
+      }
+      if (insufficientItems.length > 0) {
+        throw new Error(
+          `Tồn kho không đủ cho thuốc: ${insufficientItems.join(', ')}`,
+        );
+      }
+    }
 
     // Prepare prescriptions data with auto-dispensed status
     const prescriptionCreateData =
@@ -682,38 +725,23 @@ export class HealthcareService {
         },
       });
 
-      // 2. Tự động trừ tồn kho cho mỗi prescription
+      // 2. Tự động trừ tồn kho cho mỗi prescription (pre-validation đã pass)
       if (prescriptions && prescriptions.length > 0) {
         for (const prescription of prescriptions) {
-          try {
-            // Lấy thông tin tồn kho hiện tại
-            const currentStock = await this.inventoryService.getCurrentStock(
-              prescription.medicineId,
-            );
-
-            if (currentStock.currentStock < prescription.quantity) {
-              console.warn(
-                `Warning: Medicine ${prescription.medicineId} has insufficient stock. Current: ${currentStock.currentStock}, Required: ${prescription.quantity}`,
-              );
-            }
-
-            // Tạo transaction xuất kho
-            await this.inventoryService.createInventoryTransaction({
-              medicineId: prescription.medicineId,
-              type: InventoryTransactionTypeDto.EXPORT,
-              quantity: prescription.quantity,
-              unitPrice: String(currentStock.unitPrice || '0'),
-              referenceType: 'MEDICAL_RECORD',
-              referenceId: medicalRecord.id,
-              notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
-              createdById: data.doctorId,
-            });
-          } catch (error) {
-            console.error(
-              `Error creating inventory transaction for medicine ${prescription.medicineId}:`,
-              error,
-            );
-          }
+          const currentStock = await this.inventoryService.getCurrentStock(
+            prescription.medicineId,
+          );
+          // Throw on inventory error so the outer transaction rolls back
+          await this.inventoryService.createInventoryTransaction({
+            medicineId: prescription.medicineId,
+            type: InventoryTransactionTypeDto.EXPORT,
+            quantity: prescription.quantity,
+            unitPrice: String(currentStock.unitPrice || '0'),
+            referenceType: 'MEDICAL_RECORD',
+            referenceId: medicalRecord.id,
+            notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
+            createdById: data.doctorId,
+          });
         }
       }
 
@@ -722,6 +750,74 @@ export class HealthcareService {
   }
 
   // Statistics and Analytics Methods
+
+  async getMedicalRecords(filters: {
+    doctorId?: string;
+    patientEmployeeCode?: string;
+    startDate?: string;
+    endDate?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { doctorId, patientEmployeeCode, startDate, endDate, page = 1, limit = 20 } = filters;
+
+    const where: any = {};
+    if (doctorId) where.doctorId = doctorId;
+    if (patientEmployeeCode) {
+      where.patient = { employeeCode: patientEmployeeCode };
+    }
+    if (startDate || endDate) {
+      where.visitDate = {
+        ...(startDate ? { gte: new Date(startDate) } : {}),
+        ...(endDate ? { lte: new Date(endDate) } : {}),
+      };
+    }
+
+    const skip = (page - 1) * limit;
+    const [total, records] = await Promise.all([
+      this.prisma.medicalRecord.count({ where }),
+      this.prisma.medicalRecord.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { visitDate: 'desc' },
+        include: {
+          patient: { select: { firstName: true, lastName: true, employeeCode: true } },
+          doctor: { select: { firstName: true, lastName: true, employeeCode: true } },
+          prescriptions: { include: { medicine: { include: { category: true } } } },
+        },
+      }),
+    ]);
+
+    return { data: records, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  async deleteMedicalRecord(id: string) {
+    return this.prisma.$transaction(async (prisma) => {
+      // Reverse inventory for all dispensed prescriptions
+      const prescriptions = await prisma.medicalPrescription.findMany({
+        where: { medicalRecordId: id },
+        select: { medicineId: true, quantity: true, isDispensed: true },
+      });
+
+      for (const p of prescriptions) {
+        if (p.isDispensed) {
+          try {
+            await this.inventoryService.reverseExportTransaction(p.medicineId, id);
+          } catch (err) {
+            // Log but continue — the record deletion takes priority
+            console.error(`[deleteMedicalRecord] Lỗi hoàn trả tồn kho ${p.medicineId}:`, err);
+          }
+        }
+      }
+
+      // Delete prescriptions first (FK constraint), then record
+      await prisma.medicalPrescription.deleteMany({ where: { medicalRecordId: id } });
+      return prisma.medicalRecord.delete({ where: { id } });
+    });
+  }
+
+
   async getMedicineUsageStatistics(
     period: 'day' | 'week' | 'month' = 'month',
     startDate?: string,
