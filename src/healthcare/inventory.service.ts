@@ -23,6 +23,15 @@ function D(v: unknown): Prisma.Decimal {
   return new Prisma.Decimal(String(v));
 }
 
+/**
+ * Round a unit-price Decimal to 10 decimal places.
+ * Prevents float64 Excel artifact drift and Decimal.js 20-sig-digit accumulation
+ * across repeated import/propagation cycles.
+ */
+function roundP(d: Prisma.Decimal): Prisma.Decimal {
+  return d.toDecimalPlaces(10, Prisma.Decimal.ROUND_HALF_UP);
+}
+
 /** Serialize one MedicineInventory row for API response:
  *  - Quantities returned as Number (integers / simple decimals)
  *  - Unit-prices and amounts returned as STRING to preserve up to 20 d.p.
@@ -228,10 +237,10 @@ export class InventoryService {
 
       updateData = {
         monthlyImportQuantity: newMonthImportQty.toFixed(),
-        monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+        monthlyImportUnitPrice: roundP(newMonthImportPrice).toFixed(),
         monthlyImportAmount: newMonthImportAmount.toFixed(),
         yearlyImportQuantity: newYearImportQty.toFixed(),
-        yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+        yearlyImportUnitPrice: roundP(newYearImportPrice).toFixed(),
         yearlyImportAmount: newYearImportAmount.toFixed(),
         ...(expiryDate ? { expiryDate } : {}),
       };
@@ -252,10 +261,10 @@ export class InventoryService {
 
       updateData = {
         monthlyExportQuantity: newMonthExportQty.toFixed(),
-        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportUnitPrice: roundP(newMonthExportPrice).toFixed(),
         monthlyExportAmount: newMonthExportAmount.toFixed(),
         yearlyExportQuantity: newYearExportQty.toFixed(),
-        yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+        yearlyExportUnitPrice: roundP(newYearExportPrice).toFixed(),
         yearlyExportAmount: newYearExportAmount.toFixed(),
       };
     } else if (transactionType === InventoryTransactionTypeDto.ADJUSTMENT) {
@@ -280,10 +289,10 @@ export class InventoryService {
 
         updateData = {
           monthlyImportQuantity: newMonthImportQty.toFixed(),
-          monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+          monthlyImportUnitPrice: roundP(newMonthImportPrice).toFixed(),
           monthlyImportAmount: newMonthImportAmount.toFixed(),
           yearlyImportQuantity: newYearImportQty.toFixed(),
-          yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+          yearlyImportUnitPrice: roundP(newYearImportPrice).toFixed(),
           yearlyImportAmount: newYearImportAmount.toFixed(),
         };
       } else {
@@ -310,10 +319,10 @@ export class InventoryService {
 
         updateData = {
           monthlyExportQuantity: newMonthExportQty.toFixed(),
-          monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+          monthlyExportUnitPrice: roundP(newMonthExportPrice).toFixed(),
           monthlyExportAmount: newMonthExportAmount.toFixed(),
           yearlyExportQuantity: newYearExportQty.toFixed(),
-          yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+          yearlyExportUnitPrice: roundP(newYearExportPrice).toFixed(),
           yearlyExportAmount: newYearExportAmount.toFixed(),
         };
       }
@@ -349,7 +358,7 @@ export class InventoryService {
     const closingAmount = closingQty.times(closingPrice);
 
     updateData.closingQuantity = closingQty.toFixed();
-    updateData.closingUnitPrice = closingPrice.toFixed();
+    updateData.closingUnitPrice = roundP(closingPrice).toFixed();
     updateData.closingTotalAmount = closingAmount.toFixed();
 
     const updated = await this.prisma.medicineInventory.update({
@@ -947,25 +956,25 @@ export class InventoryService {
                 year,
                 expiryDate: parsedExpiry ?? null,
                 openingQuantity: dOpenQty.toFixed(),
-                openingUnitPrice: dOpenPrice.toFixed(),
+                openingUnitPrice: roundP(dOpenPrice).toFixed(),
                 openingTotalAmount: dOpenAmt.toFixed(),
                 monthlyImportQuantity: dImportQty.toFixed(),
-                monthlyImportUnitPrice: dImportPrice.toFixed(),
+                monthlyImportUnitPrice: roundP(dImportPrice).toFixed(),
                 monthlyImportAmount: dImportAmt.toFixed(),
                 monthlyExportQuantity: dExportQty.toFixed(),
-                monthlyExportUnitPrice: dExportPrice.toFixed(),
+                monthlyExportUnitPrice: roundP(dExportPrice).toFixed(),
                 monthlyExportAmount: dExportAmt.toFixed(),
                 closingQuantity: dClosingQty.toFixed(),
-                closingUnitPrice: dClosingPrice.toFixed(),
+                closingUnitPrice: roundP(dClosingPrice).toFixed(),
                 closingTotalAmount: dClosingAmt.toFixed(),
                 yearlyImportQuantity: dYtdImportQty.toFixed(),
-                yearlyImportUnitPrice: dYtdImportPr.toFixed(),
+                yearlyImportUnitPrice: roundP(dYtdImportPr).toFixed(),
                 yearlyImportAmount: dYtdImportAmt.toFixed(),
                 yearlyExportQuantity: dYtdExportQty.toFixed(),
-                yearlyExportUnitPrice: dYtdExportPr.toFixed(),
+                yearlyExportUnitPrice: roundP(dYtdExportPr).toFixed(),
                 yearlyExportAmount: dYtdExportAmt.toFixed(),
                 suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
-                suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
+                suggestedPurchaseUnitPrice: roundP(D(suggestedPrice)).toFixed(),
                 suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
               },
             });
@@ -1031,26 +1040,26 @@ export class InventoryService {
                 ...(parsedExpiry ? { expiryDate: parsedExpiry } : {}),
                 // CẬP NHẬT: Opening từ tháng trước để đảm bảo tính lũy kế
                 openingQuantity: dCurrOpen.toFixed(),
-                openingUnitPrice: dCurrOpenPr.toFixed(),
+                openingUnitPrice: roundP(dCurrOpenPr).toFixed(),
                 openingTotalAmount: dCurrOpenAm.toFixed(),
                 // CHỈ CẬP NHẬT: Nhập phát sinh (từ user input) - lưu dạng string Decimal
                 monthlyImportQuantity: dNewImportQty.toFixed(),
-                monthlyImportUnitPrice: dNewImportPr.toFixed(),
+                monthlyImportUnitPrice: roundP(dNewImportPr).toFixed(),
                 monthlyImportAmount: dNewImportAmt.toFixed(),
                 // CHỈ CẬP NHẬT: Đề nghị mua (từ user input)
                 suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
-                suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
+                suggestedPurchaseUnitPrice: roundP(D(suggestedPrice)).toFixed(),
                 suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
                 // TÁI TÍNH: Tồn cuối kỳ bằng Decimal
                 closingQuantity: dNewClosingQty.toFixed(),
-                closingUnitPrice: dNewClosingPr.toFixed(),
+                closingUnitPrice: roundP(dNewClosingPr).toFixed(),
                 closingTotalAmount: dNewClosingAmt.toFixed(),
                 // CẬP NHẬT: Lũy kế năm (tái tính từ monthly data để đảm bảo chính xác)
                 yearlyImportQuantity: dNewYtdImportQty.toFixed(),
-                yearlyImportUnitPrice: dNewYtdImportPr.toFixed(),
+                yearlyImportUnitPrice: roundP(dNewYtdImportPr).toFixed(),
                 yearlyImportAmount: dNewYtdImportAmt.toFixed(),
                 yearlyExportQuantity: dNewYtdExportQty.toFixed(),
-                yearlyExportUnitPrice: dNewYtdExportPr.toFixed(),
+                yearlyExportUnitPrice: roundP(dNewYtdExportPr).toFixed(),
                 yearlyExportAmount: dNewYtdExportAmt.toFixed(),
               },
             });
@@ -2216,13 +2225,13 @@ export class InventoryService {
       where: { medicineId_month_year: { medicineId, month, year } },
       data: {
         monthlyExportQuantity: newMonthExportQty.toFixed(),
-        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportUnitPrice: roundP(newMonthExportPrice).toFixed(),
         monthlyExportAmount: newMonthExportAmount.toFixed(),
         yearlyExportQuantity: newYearExportQty.toFixed(),
-        yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+        yearlyExportUnitPrice: roundP(newYearExportPrice).toFixed(),
         yearlyExportAmount: newYearExportAmount.toFixed(),
         closingQuantity: closingQty.toFixed(),
-        closingUnitPrice: closingPrice.toFixed(),
+        closingUnitPrice: roundP(closingPrice).toFixed(),
         closingTotalAmount: closingAmount.toFixed(),
       },
     });
@@ -2286,13 +2295,13 @@ export class InventoryService {
       },
       update: {
         openingQuantity: openingQty.toFixed(),
-        openingUnitPrice: openingPrice.toFixed(),
+        openingUnitPrice: roundP(openingPrice).toFixed(),
         openingTotalAmount: openingAmount.toFixed(),
         suggestedPurchaseQuantity: suggestedQty.toFixed(),
-        suggestedPurchaseUnitPrice: suggestedPrice.toFixed(),
+        suggestedPurchaseUnitPrice: roundP(suggestedPrice).toFixed(),
         suggestedPurchaseAmount: suggestedAmount.toFixed(),
         closingQuantity: closingQty.toFixed(),
-        closingUnitPrice: closingPrice.toFixed(),
+        closingUnitPrice: roundP(closingPrice).toFixed(),
         closingTotalAmount: closingAmount.toFixed(),
         ...(data.expiryDate ? { expiryDate: new Date(data.expiryDate) } : {}),
       },
@@ -2302,13 +2311,13 @@ export class InventoryService {
         year,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
         openingQuantity: openingQty.toFixed(),
-        openingUnitPrice: openingPrice.toFixed(),
+        openingUnitPrice: roundP(openingPrice).toFixed(),
         openingTotalAmount: openingAmount.toFixed(),
         suggestedPurchaseQuantity: suggestedQty.toFixed(),
-        suggestedPurchaseUnitPrice: suggestedPrice.toFixed(),
+        suggestedPurchaseUnitPrice: roundP(suggestedPrice).toFixed(),
         suggestedPurchaseAmount: suggestedAmount.toFixed(),
         closingQuantity: closingQty.toFixed(),
-        closingUnitPrice: closingPrice.toFixed(),
+        closingUnitPrice: roundP(closingPrice).toFixed(),
         closingTotalAmount: closingAmount.toFixed(),
       },
       include: {
@@ -2569,24 +2578,27 @@ export class InventoryService {
         // Parse numeric columns — dùng D() để giữ đủ độ chính xác thập phân
         const _n = (v: any) =>
           v !== undefined && v !== null && v !== '' ? D(v).toFixed() : '0';
+        // _p: parse a price value from Excel, round to 10 dp to avoid float64 artifact drift
+        const _p = (v: any) =>
+          v !== undefined && v !== null && v !== '' ? roundP(D(v)).toFixed() : '0';
         const _q = (v: any) => Number(D(_n(v)).toFixed());
 
         const openingQty = _q(row[6]);
-        const openingPrice = _n(row[7]);
+        const openingPrice = _p(row[7]);
         const openingAmount =
           row[8] != null && row[8] !== ''
             ? _n(row[8])
             : D(openingQty).times(D(openingPrice)).toFixed();
 
         const monthlyImportQty = _q(row[9]);
-        const monthlyImportPrice = _n(row[10]);
+        const monthlyImportPrice = _p(row[10]);
         const monthlyImportAmount =
           row[11] != null && row[11] !== ''
             ? _n(row[11])
             : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
         const monthlyExportQty = _q(row[12]);
-        const monthlyExportPrice = _n(row[13]);
+        const monthlyExportPrice = _p(row[13]);
         const monthlyExportAmount =
           row[14] != null && row[14] !== ''
             ? _n(row[14])
@@ -2595,7 +2607,7 @@ export class InventoryService {
         // Recompute closing from opening + import - export for guaranteed accuracy
         const closingQty =
           _q(row[15]) || openingQty + monthlyImportQty - monthlyExportQty;
-        const closingPrice = _n(row[16]) || openingPrice;
+        const closingPrice = row[16] != null && row[16] !== '' ? _p(row[16]) : openingPrice;
         const closingAmount = (() => {
           const computedClosingQty = D(openingQty)
             .plus(D(monthlyImportQty))
@@ -2605,7 +2617,7 @@ export class InventoryService {
             .plus(D(monthlyImportAmount))
             .minus(D(monthlyExportAmount));
           const computedPrice = computedClosingQty.gt(0)
-            ? totalVal.div(computedClosingQty)
+            ? roundP(totalVal.div(computedClosingQty))
             : D(closingPrice);
           return computedClosingQty.times(computedPrice).toFixed();
         })();
@@ -2613,21 +2625,21 @@ export class InventoryService {
         const expiryStr = row[18]?.toString().trim();
 
         const yearlyImportQty = _q(row[19]);
-        const yearlyImportPrice = _n(row[20]);
+        const yearlyImportPrice = _p(row[20]);
         const yearlyImportAmount =
           row[21] != null && row[21] !== ''
             ? _n(row[21])
             : D(yearlyImportQty).times(D(yearlyImportPrice)).toFixed();
 
         const yearlyExportQty = _q(row[22]);
-        const yearlyExportPrice = _n(row[23]);
+        const yearlyExportPrice = _p(row[23]);
         const yearlyExportAmount =
           row[24] != null && row[24] !== ''
             ? _n(row[24])
             : D(yearlyExportQty).times(D(yearlyExportPrice)).toFixed();
 
         const suggestedQty = _q(row[25]);
-        const suggestedPrice = _n(row[26]);
+        const suggestedPrice = _p(row[26]);
         const suggestedAmount =
           row[27] != null && row[27] !== ''
             ? _n(row[27])
@@ -2971,7 +2983,7 @@ export class InventoryService {
           month,
           year,
           openingQuantity: dOpenQty.toFixed(),
-          openingUnitPrice: dOpenPrice.toFixed(),
+          openingUnitPrice: roundP(dOpenPrice).toFixed(),
           openingTotalAmount: dOpenAmt.toFixed(),
           monthlyImportQuantity: '0',
           monthlyImportUnitPrice: '0',
@@ -2980,13 +2992,13 @@ export class InventoryService {
           monthlyExportUnitPrice: '0',
           monthlyExportAmount: '0',
           closingQuantity: dOpenQty.toFixed(),
-          closingUnitPrice: dOpenPrice.toFixed(),
+          closingUnitPrice: roundP(dOpenPrice).toFixed(),
           closingTotalAmount: dOpenAmt.toFixed(),
           yearlyImportQuantity: dYtdImportQty.toFixed(),
-          yearlyImportUnitPrice: dYtdImportPr.toFixed(),
+          yearlyImportUnitPrice: roundP(dYtdImportPr).toFixed(),
           yearlyImportAmount: dYtdImportAmt.toFixed(),
           yearlyExportQuantity: dYtdExportQty.toFixed(),
-          yearlyExportUnitPrice: dYtdExportPr.toFixed(),
+          yearlyExportUnitPrice: roundP(dYtdExportPr).toFixed(),
           yearlyExportAmount: dYtdExportAmt.toFixed(),
           suggestedPurchaseQuantity: '0',
           suggestedPurchaseUnitPrice: '0',
@@ -3095,23 +3107,23 @@ export class InventoryService {
           },
           data: {
             openingQuantity: dOpenQty.toFixed(),
-            openingUnitPrice: dOpenPrice.toFixed(),
+            openingUnitPrice: roundP(dOpenPrice).toFixed(),
             openingTotalAmount: dOpenAmt.toFixed(),
             closingQuantity: dClosingQty.toFixed(),
-            closingUnitPrice: dClosingPrice.toFixed(),
+            closingUnitPrice: roundP(dClosingPrice).toFixed(),
             closingTotalAmount: dClosingAmt.toFixed(),
             yearlyImportQuantity: ytdImportQty.toFixed(),
-            yearlyImportUnitPrice: ytdImportPr.toFixed(),
+            yearlyImportUnitPrice: roundP(ytdImportPr).toFixed(),
             yearlyImportAmount: ytdImportAmt.toFixed(),
             yearlyExportQuantity: ytdExportQty.toFixed(),
-            yearlyExportUnitPrice: ytdExportPr.toFixed(),
+            yearlyExportUnitPrice: roundP(ytdExportPr).toFixed(),
             yearlyExportAmount: ytdExportAmt.toFixed(),
           },
         });
 
         // Ghi ngược closing đã tính lại vào mảng để bản ghi kế tiếp dùng đúng
         (records[i] as any).closingQuantity = dClosingQty.toFixed();
-        (records[i] as any).closingUnitPrice = dClosingPrice.toFixed();
+        (records[i] as any).closingUnitPrice = roundP(dClosingPrice).toFixed();
 
         totalRecords++;
       }
@@ -3226,9 +3238,9 @@ export class InventoryService {
       const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
       const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
       // Giá bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
-      const dClosingPrice = dClosingQty.gt(0)
+      const dClosingPrice = roundP(dClosingQty.gt(0)
         ? totalVal.div(dClosingQty)
-        : dOpenPrice;
+        : dOpenPrice);
       const dClosingAmt = dClosingQty.times(dClosingPrice);
 
       // ── E. Tính lũy kế năm = lũy kế tháng trước + tháng này ─────────
@@ -3236,12 +3248,12 @@ export class InventoryService {
       const newYtdImportAmt = ytdImportAmt.plus(dImportAmt);
       const newYtdExportQty = ytdExportQty.plus(dExportQty);
       const newYtdExportAmt = ytdExportAmt.plus(dExportAmt);
-      const newYtdImportPr = newYtdImportQty.gt(0)
+      const newYtdImportPr = roundP(newYtdImportQty.gt(0)
         ? newYtdImportAmt.div(newYtdImportQty)
-        : dOpenPrice;
-      const newYtdExportPr = newYtdExportQty.gt(0)
+        : dOpenPrice);
+      const newYtdExportPr = roundP(newYtdExportQty.gt(0)
         ? newYtdExportAmt.div(newYtdExportQty)
-        : new Prisma.Decimal(0);
+        : new Prisma.Decimal(0));
 
       // ── F. Kiểm tra xem có thay đổi thực sự không (tối ưu write) ─────
       const openingUnchanged =
@@ -3267,16 +3279,16 @@ export class InventoryService {
         },
         data: {
           openingQuantity: dOpenQty.toFixed(),
-          openingUnitPrice: dOpenPrice.toFixed(),
+          openingUnitPrice: roundP(dOpenPrice).toFixed(),
           openingTotalAmount: dOpenAmt.toFixed(),
           closingQuantity: dClosingQty.toFixed(),
-          closingUnitPrice: dClosingPrice.toFixed(),
+          closingUnitPrice: roundP(dClosingPrice).toFixed(),
           closingTotalAmount: dClosingAmt.toFixed(),
           yearlyImportQuantity: newYtdImportQty.toFixed(),
-          yearlyImportUnitPrice: newYtdImportPr.toFixed(),
+          yearlyImportUnitPrice: roundP(newYtdImportPr).toFixed(),
           yearlyImportAmount: newYtdImportAmt.toFixed(),
           yearlyExportQuantity: newYtdExportQty.toFixed(),
-          yearlyExportUnitPrice: newYtdExportPr.toFixed(),
+          yearlyExportUnitPrice: roundP(newYtdExportPr).toFixed(),
           yearlyExportAmount: newYtdExportAmt.toFixed(),
         },
       });
