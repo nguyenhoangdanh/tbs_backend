@@ -2450,6 +2450,7 @@ export class InventoryService {
     let skipped = 0;
     let errors: any[] = [];
     let currentCategory: string | undefined;
+    const importedMedicineIds = new Set<string>(); // track for next-month seeding
 
     for (const row of data) {
       try {
@@ -2796,6 +2797,7 @@ export class InventoryService {
         });
         // Cascade opening to subsequent months after each medicine import
         await this.propagateOpeningForward(medicine.id, month, year);
+        importedMedicineIds.add(medicine.id);
       } catch (error) {
         errors.push({
           row: row[0],
@@ -2811,6 +2813,54 @@ export class InventoryService {
     console.log(`   - Skipped: ${skipped} rows`);
     if (errors.length > 0) {
       console.log(`   - Errors: ${errors.length}`);
+    }
+
+    // ── Seed opening balance for the next month ──────────────────────────────
+    // After importing month M/YYYY, create (or leave untouched if exists)
+    // the inventory record for month M+1 so the opening balance is visible
+    // immediately in the Detailed Yearly tab.
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    let seeded = 0;
+    for (const medicineId of importedMedicineIds) {
+      try {
+        const existing = await this.prisma.medicineInventory.findUnique({
+          where: {
+            medicineId_month_year: { medicineId, month: nextMonth, year: nextYear },
+          },
+        });
+        if (existing) continue; // Don't overwrite records that already have real data
+
+        const current = await this.prisma.medicineInventory.findUnique({
+          where: { medicineId_month_year: { medicineId, month, year } },
+        });
+        if (!current) continue;
+
+        await this.prisma.medicineInventory.create({
+          data: {
+            medicineId,
+            month: nextMonth,
+            year: nextYear,
+            expiryDate: current.expiryDate,
+            openingQuantity: current.closingQuantity,
+            openingUnitPrice: current.closingUnitPrice,
+            openingTotalAmount: current.closingTotalAmount,
+            // Yearly accumulators: reset for new year, carry over for same year
+            yearlyImportQuantity: nextYear !== year ? 0 : current.yearlyImportQuantity,
+            yearlyImportUnitPrice: nextYear !== year ? 0 : current.yearlyImportUnitPrice,
+            yearlyImportAmount: nextYear !== year ? 0 : current.yearlyImportAmount,
+            yearlyExportQuantity: nextYear !== year ? 0 : current.yearlyExportQuantity,
+            yearlyExportUnitPrice: nextYear !== year ? 0 : current.yearlyExportUnitPrice,
+            yearlyExportAmount: nextYear !== year ? 0 : current.yearlyExportAmount,
+          },
+        });
+        seeded++;
+      } catch (_e) {
+        // Ignore duplicate/constraint errors — record may have been created concurrently
+      }
+    }
+    if (seeded > 0) {
+      console.log(`   - Seeded opening balance for ${seeded} medicines in ${nextMonth}/${nextYear}`);
     }
 
     return {
