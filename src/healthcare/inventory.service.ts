@@ -239,18 +239,17 @@ export class InventoryService {
       };
     } else if (transactionType === InventoryTransactionTypeDto.EXPORT) {
       // ĐG xuất = IFERROR((G*H + J*K)/(G+J), 0)
-      // Excel dùng G*H (qty × unitPrice), KHÔNG dùng col I (openingTotalAmount)
-      // Sau khi tính phải normalize toPrecision(15) để khớp với float64 của Excel
-      const openQty = D(inventory.openingQuantity);
-      const openPrice = D(inventory.openingUnitPrice);
-      const importQty = D(inventory.monthlyImportQuantity);
-      const importPrice = D(inventory.monthlyImportUnitPrice);
-      const totalQtyForPrice = openQty.plus(importQty);
-      const weightedAvgPrice = totalQtyForPrice.gt(0)
-        ? D(openQty.times(openPrice).plus(importQty.times(importPrice))
-            .div(totalQtyForPrice)
-            .toPrecision(15))  // normalize to Excel float64 precision
-        : dPrice; // fallback sang giá đơn thuốc nếu chưa có tồn
+      // Phải dùng float64 arithmetic (như Excel) rồi toPrecision(15)
+      // Decimal.js exact decimal cho kết quả khác vì DB string '556.554313421927'
+      // ≠ float64(556.554313421927) = 556.55431342192696320
+      const G = Number(inventory.openingQuantity);
+      const H = Number(inventory.openingUnitPrice);
+      const J = Number(inventory.monthlyImportQuantity);
+      const K = Number(inventory.monthlyImportUnitPrice);
+      const totalQtyForPrice = G + J;
+      const weightedAvgPrice = totalQtyForPrice > 0
+        ? D(((G * H + J * K) / totalQtyForPrice).toPrecision(15))
+        : dPrice;
 
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
       const thisExportAmt = dQty.times(weightedAvgPrice);
@@ -304,16 +303,14 @@ export class InventoryService {
       } else {
         const adjQty = dQty.abs();
 
-        // ADJUSTMENT xuất: dùng G*H+J*K / (G+J) như EXPORT, normalize toPrecision(15)
-        const openQtyAdj = D(inventory.openingQuantity);
-        const openPriceAdj = D(inventory.openingUnitPrice);
-        const importQtyAdj = D(inventory.monthlyImportQuantity);
-        const importPriceAdj = D(inventory.monthlyImportUnitPrice);
-        const totalQtyAdj = openQtyAdj.plus(importQtyAdj);
-        const weightedAvgAdj = totalQtyAdj.gt(0)
-          ? D(openQtyAdj.times(openPriceAdj).plus(importQtyAdj.times(importPriceAdj))
-              .div(totalQtyAdj)
-              .toPrecision(15))
+        // ADJUSTMENT xuất: float64 arithmetic như Excel, rồi toPrecision(15)
+        const Gadj = Number(inventory.openingQuantity);
+        const Hadj = Number(inventory.openingUnitPrice);
+        const Jadj = Number(inventory.monthlyImportQuantity);
+        const Kadj = Number(inventory.monthlyImportUnitPrice);
+        const totalQtyAdj = Gadj + Jadj;
+        const weightedAvgAdj = totalQtyAdj > 0
+          ? D(((Gadj * Hadj + Jadj * Kadj) / totalQtyAdj).toPrecision(15))
           : dPrice.abs();
 
         const adjAmount = adjQty.times(weightedAvgAdj);
@@ -2618,16 +2615,14 @@ export class InventoryService {
         // ĐG xuất (col N): đọc trực tiếp từ file (Excel đã tính sẵn theo
         // IFERROR((G*H+J*K)/(G+J),0)). Chỉ tính lại khi col N trống/null.
         const _weightedAvgPrice = () => {
-          const dOpenQty = D(openingQty);
-          const dOpenPrice = D(openingPrice);
-          const dImportQty = D(monthlyImportQty);
-          const dImportPrice = D(monthlyImportPrice);
-          const totalQty = dOpenQty.plus(dImportQty);
-          if (totalQty.isZero()) return '0';
-          return dOpenQty.times(dOpenPrice)
-            .plus(dImportQty.times(dImportPrice))
-            .div(totalQty)
-            .toFixed();
+          // Dùng float64 (như Excel) rồi toPrecision(15) để khớp chính xác
+          const G = Number(openingQty);
+          const H = Number(openingPrice);
+          const J = Number(monthlyImportQty);
+          const K = Number(monthlyImportPrice);
+          const total = G + J;
+          if (total === 0) return '0';
+          return D(((G * H + J * K) / total).toPrecision(15)).toFixed();
         };
         const monthlyExportPrice =
           row[13] != null && row[13] !== '' && row[13] !== 0
