@@ -3266,11 +3266,14 @@ export class InventoryService {
 
       // ── D. Tái tính closing với opening mới ──────────────────────────
       const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
-      // Dùng balance sheet: TT = openAmt + importAmt - exportAmt (chính xác hơn qty*price)
+      // TT = openAmt + importAmt - exportAmt (balance sheet)
       const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
-      // ĐG bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
-      const dClosingPrice = dClosingQty.gt(0)
-        ? dClosingAmt.div(dClosingQty)
+      // ĐG tồn cuối = ĐG xuất = IFERROR((G*H+J*K)/(G+J), 0) dùng float64 như Excel
+      const _G = Number(dOpenQty), _H = Number(dOpenPrice);
+      const _J = Number(dImportQty), _K = Number(D(rec.monthlyImportUnitPrice));
+      const _totalQP = _G + _J;
+      const dClosingPrice = _totalQP > 0
+        ? D(((_G * _H + _J * _K) / _totalQP).toPrecision(15))
         : dOpenPrice;
 
       // ── E. Tính lũy kế năm = lũy kế tháng trước + tháng này ─────────
@@ -3278,12 +3281,17 @@ export class InventoryService {
       const newYtdImportAmt = ytdImportAmt.plus(dImportAmt);
       const newYtdExportQty = ytdExportQty.plus(dExportQty);
       const newYtdExportAmt = ytdExportAmt.plus(dExportAmt);
+      // ĐG lũy kế = TotalAmount / TotalQty; nếu qty=0 thì giữ lũy kế từ tháng trước (không dùng openPrice)
       const newYtdImportPr = newYtdImportQty.gt(0)
-        ? newYtdImportAmt.div(newYtdImportQty)
-        : dOpenPrice;
+        ? D(Number(newYtdImportAmt.div(newYtdImportQty)).toPrecision(15))
+        : ytdImportQty.gt(0)
+          ? D(Number(ytdImportAmt.div(ytdImportQty)).toPrecision(15))
+          : new Prisma.Decimal(0);
       const newYtdExportPr = newYtdExportQty.gt(0)
-        ? newYtdExportAmt.div(newYtdExportQty)
-        : new Prisma.Decimal(0);
+        ? D(Number(newYtdExportAmt.div(newYtdExportQty)).toPrecision(15))
+        : ytdExportQty.gt(0)
+          ? D(Number(ytdExportAmt.div(ytdExportQty)).toPrecision(15))
+          : new Prisma.Decimal(0);
 
       // ── F. Kiểm tra xem có thay đổi thực sự không (tối ưu write) ─────
       const openingUnchanged =
