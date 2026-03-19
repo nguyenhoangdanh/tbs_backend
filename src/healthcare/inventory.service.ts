@@ -356,10 +356,11 @@ export class InventoryService {
     const closingAmount = D(inventory.openingTotalAmount)
       .plus(finalImportAmount)
       .minus(finalExportAmount);
-    // ĐG bình quân = TT / SL; nếu tồn = 0 giữ giá cũ
-    const closingPrice = closingQty.gt(0)
-      ? closingAmount.div(closingQty)
-      : new Prisma.Decimal(0);
+    // ĐG tồn cuối = ĐG xuất (col N) = IFERROR((G*H+J*K)/(G+J),0)
+    // Lấy từ updateData nếu vừa tính (EXPORT/ADJUSTMENT), fallback từ inventory
+    const closingPrice = D(
+      updateData.monthlyExportUnitPrice ?? inventory.monthlyExportUnitPrice,
+    );
 
     updateData.closingQuantity = closingQty.toFixed();
     updateData.closingUnitPrice = closingPrice.toFixed();
