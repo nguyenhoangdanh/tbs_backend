@@ -3219,6 +3219,8 @@ export class InventoryService {
     // Bước 3: Khởi tạo các biến carry-forward từ startRecord
     let prevClosingQty = D(startRecord.closingQuantity);
     let prevClosingPrice = D(startRecord.closingUnitPrice);
+    // Dùng closingTotalAmount trực tiếp để tránh sai số qty*price
+    let prevClosingAmt = D(startRecord.closingTotalAmount);
     let prevYear = startYear;
     // YTD tích lũy: bắt đầu từ giá trị yearlyXxx của startRecord (đúng với cùng năm)
     let ytdImportQty = D(startRecord.yearlyImportQuantity);
@@ -3239,7 +3241,8 @@ export class InventoryService {
       // ── B. Tính opening mới = closing của tháng trước ─────────────────
       const dOpenQty = prevClosingQty;
       const dOpenPrice = prevClosingPrice;
-      const dOpenAmt = dOpenQty.times(dOpenPrice);
+      // Dùng giá trị đã lưu, KHÔNG tính lại qty*price (tránh sai số float)
+      const dOpenAmt = prevClosingAmt;
 
       // ── C. Monthly data của tháng này (giữ nguyên, không thay đổi) ────
       const dImportQty = D(rec.monthlyImportQuantity);
@@ -3249,12 +3252,12 @@ export class InventoryService {
 
       // ── D. Tái tính closing với opening mới ──────────────────────────
       const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
-      const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
-      // Giá bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
+      // Dùng balance sheet: TT = openAmt + importAmt - exportAmt (chính xác hơn qty*price)
+      const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+      // ĐG bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
       const dClosingPrice = dClosingQty.gt(0)
-        ? totalVal.div(dClosingQty)
+        ? dClosingAmt.div(dClosingQty)
         : dOpenPrice;
-      const dClosingAmt = dClosingQty.times(dClosingPrice);
 
       // ── E. Tính lũy kế năm = lũy kế tháng trước + tháng này ─────────
       const newYtdImportQty = ytdImportQty.plus(dImportQty);
@@ -3271,7 +3274,8 @@ export class InventoryService {
       // ── F. Kiểm tra xem có thay đổi thực sự không (tối ưu write) ─────
       const openingUnchanged =
         D(rec.openingQuantity).eq(dOpenQty) &&
-        D(rec.openingUnitPrice).eq(dOpenPrice);
+        D(rec.openingUnitPrice).eq(dOpenPrice) &&
+        D(rec.openingTotalAmount).eq(dOpenAmt);
       const ytdUnchanged =
         D(rec.yearlyImportQuantity).eq(newYtdImportQty) &&
         D(rec.yearlyExportQuantity).eq(newYtdExportQty);
@@ -3309,6 +3313,7 @@ export class InventoryService {
       // ── H. Cập nhật carry-forward cho tháng tiếp theo ─────────────────
       prevClosingQty = dClosingQty;
       prevClosingPrice = dClosingPrice;
+      prevClosingAmt = dClosingAmt;
       ytdImportQty = newYtdImportQty;
       ytdImportAmt = newYtdImportAmt;
       ytdExportQty = newYtdExportQty;
