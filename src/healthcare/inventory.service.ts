@@ -2593,9 +2593,9 @@ export class InventoryService {
             : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
         const monthlyExportQty = _q(row[12]);
-        // ĐG xuất (col N) = IFERROR((G×H + J×K)/(G+J), 0)
-        // Công thức bình quân gia quyền: tồn đầu + nhập trong tháng
-        const monthlyExportPrice = (() => {
+        // ĐG xuất (col N): đọc trực tiếp từ file (Excel đã tính sẵn theo
+        // IFERROR((G*H+J*K)/(G+J),0)). Chỉ tính lại khi col N trống/null.
+        const _weightedAvgPrice = () => {
           const dOpenQty = D(openingQty);
           const dOpenPrice = D(openingPrice);
           const dImportQty = D(monthlyImportQty);
@@ -2606,23 +2606,34 @@ export class InventoryService {
             .plus(dImportQty.times(dImportPrice))
             .div(totalQty)
             .toFixed();
-        })();
+        };
+        const monthlyExportPrice =
+          row[13] != null && row[13] !== '' && row[13] !== 0
+            ? _n(row[13])
+            : _weightedAvgPrice();
         const monthlyExportAmount =
           row[14] != null && row[14] !== ''
             ? _n(row[14])
             : D(monthlyExportQty).times(D(monthlyExportPrice)).toFixed();
 
-        // Tồn cuối kỳ - dùng giá bình quân xuất (cùng công thức weighted avg)
+        // Tồn cuối kỳ
         const closingQty =
           _q(row[15]) || openingQty + monthlyImportQty - monthlyExportQty;
-        // ĐG tồn cuối = ĐG xuất (weighted avg của tồn đầu + nhập)
-        const closingPrice = monthlyExportPrice;
-        const closingAmount = (() => {
-          const computedClosingQty = D(openingQty)
-            .plus(D(monthlyImportQty))
-            .minus(D(monthlyExportQty));
-          return computedClosingQty.times(D(closingPrice)).toFixed();
-        })();
+        // ĐG tồn cuối (col Q): đọc từ file nếu có, fallback sang weighted avg
+        const closingPrice =
+          row[16] != null && row[16] !== '' && row[16] !== 0
+            ? _n(row[16])
+            : _weightedAvgPrice();
+        // TT tồn cuối (col R): đọc từ file nếu có, fallback tính lại
+        const closingAmount =
+          row[17] != null && row[17] !== ''
+            ? _n(row[17])
+            : (() => {
+                const computedClosingQty = D(openingQty)
+                  .plus(D(monthlyImportQty))
+                  .minus(D(monthlyExportQty));
+                return computedClosingQty.times(D(closingPrice)).toFixed();
+              })();
 
         const expiryStr = row[18]?.toString().trim();
 
