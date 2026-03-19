@@ -2569,13 +2569,13 @@ export class InventoryService {
         const manufacturer = row[4]?.toString().trim() || null;
 
         // Parse numeric columns — dùng D() để giữ đủ độ chính xác thập phân
-        // For JS `number` values from XLSX (float64), toFixed(12) strips float64 noise:
-        // Excel stores float64 internally and displays 15 sig digits. The float64
-        // 556.6246675954075 has exact decimal 556.6246675954074…, so toFixed(12)
-        // correctly gives "556.624667595407" (matching what Excel displays).
+        // For JS `number` values from XLSX (float64), use toPrecision(15) to match Excel's
+        // 15-significant-digit display precision. This correctly handles both prices (many
+        // decimal places, few integer digits) and amounts (few decimal places, many integer
+        // digits). toFixed(N) would fail for one or the other group.
         const _n = (v: any) => {
           if (v === undefined || v === null || v === '') return '0';
-          if (typeof v === 'number') return D(v.toFixed(12)).toFixed();
+          if (typeof v === 'number') return D(v.toPrecision(15)).toFixed();
           return D(v).toFixed();
         };
                 const _q = (v: any) => Number(D(_n(v)).toFixed());
