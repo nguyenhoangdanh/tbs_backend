@@ -666,22 +666,31 @@ export class InventoryService {
     const prevYear = month === 1 ? year - 1 : year;
 
     // Helper to parse expiry date strings (accepts ISO or DD/MM/YYYY)
+    // Helper to parse expiry date strings.
+    // Supports: ISO (YYYY-MM-DD), DD/MM/YYYY, D/M/YYYY.
+    // IMPORTANT: never pass slash-separated strings to new Date() — JS parses
+    // "11/08/2028" as MM/DD/YYYY (November 8), not DD/MM/YYYY (August 11).
     function parseDateString(input?: string | null) {
       if (!input) return null;
       const s = String(input).trim();
       if (!s) return null;
 
-      // Try native Date first (ISO or other recognized formats)
-      const d1 = new Date(s);
-      if (!Number.isNaN(d1.getTime())) return d1;
+      // If it looks like YYYY-MM-DD (ISO), parse safely via new Date()
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const d = new Date(s);
+        if (!Number.isNaN(d.getTime())) return d;
+      }
 
-      // Try DD/MM/YYYY or D/M/YYYY
-      const parts = s.split(/[\/\.-]/).map((p) => p.trim());
+      // DD/MM/YYYY or D/M/YYYY — explicit parse to avoid MM/DD ambiguity
+      const parts = s.split(/[\/\.\-]/).map((p) => p.trim());
       if (parts.length === 3) {
         const day = Number(parts[0]);
         const month = Number(parts[1]);
         const year = Number(parts[2]);
-        if (!Number.isNaN(day) && !Number.isNaN(month) && !Number.isNaN(year)) {
+        if (
+          !Number.isNaN(day) && !Number.isNaN(month) && !Number.isNaN(year) &&
+          day >= 1 && day <= 31 && month >= 1 && month <= 12 && year >= 1900
+        ) {
           const d2 = new Date(year, month - 1, day);
           if (!Number.isNaN(d2.getTime())) return d2;
         }
