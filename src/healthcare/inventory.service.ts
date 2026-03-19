@@ -339,16 +339,14 @@ export class InventoryService {
       .plus(finalImportQty)
       .minus(finalExportQty);
 
-    // Giá trị tổng = (Tồn đầu × ĐG đầu) + Nhập - Xuất
-    const totalValue = D(inventory.openingQuantity)
-      .times(D(inventory.openingUnitPrice))
+    // TT tổng = TT tồn đầu (đã lưu) + Nhập - Xuất  (balance sheet, chính xác)
+    const closingAmount = D(inventory.openingTotalAmount)
       .plus(finalImportAmount)
       .minus(finalExportAmount);
-
+    // ĐG bình quân = TT / SL; nếu tồn = 0 giữ giá cũ
     const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
+      ? closingAmount.div(closingQty)
       : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
 
     updateData.closingQuantity = closingQty.toFixed();
     updateData.closingUnitPrice = closingPrice.toFixed();
@@ -2203,15 +2201,13 @@ export class InventoryService {
       .plus(D(inv.monthlyImportQuantity))
       .minus(newMonthExportQty);
 
-    const totalValue = D(inv.openingQuantity)
-      .times(D(inv.openingUnitPrice))
+    // TT tổng = TT tồn đầu (đã lưu) + Nhập - Xuất  (balance sheet, chính xác)
+    const closingAmount2 = D(inv.openingTotalAmount)
       .plus(D(inv.monthlyImportAmount))
       .minus(newMonthExportAmount);
-
-    const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
+    const closingPrice2 = closingQty.gt(0)
+      ? closingAmount2.div(closingQty)
       : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
 
     // 8. Cập nhật MedicineInventory
     await this.prisma.medicineInventory.update({
@@ -2224,8 +2220,8 @@ export class InventoryService {
         yearlyExportUnitPrice: newYearExportPrice.toFixed(),
         yearlyExportAmount: newYearExportAmount.toFixed(),
         closingQuantity: closingQty.toFixed(),
-        closingUnitPrice: closingPrice.toFixed(),
-        closingTotalAmount: closingAmount.toFixed(),
+        closingUnitPrice: closingPrice2.toFixed(),
+        closingTotalAmount: closingAmount2.toFixed(),
       },
     });
     // Cascade opening forward so subsequent months stay in sync
@@ -2272,11 +2268,13 @@ export class InventoryService {
     const exportAmount = D(existing?.monthlyExportAmount ?? 0);
 
     const closingQty = openingQty.plus(importQty).minus(exportQty);
-    const totalValue = openingAmount.plus(importAmount).minus(exportAmount);
+    // TT tổng = TT tồn đầu + Nhập - Xuất (balance sheet)
+    // Với manual update: openingAmount = openingQty * openingPrice (user input)
+    const closingTotalValue = openingAmount.plus(importAmount).minus(exportAmount);
     const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
+      ? closingTotalValue.div(closingQty)
       : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
+    const closingAmount = closingTotalValue;
 
     const result = await this.prisma.medicineInventory.upsert({
       where: {
