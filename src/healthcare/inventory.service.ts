@@ -253,11 +253,12 @@ export class InventoryService {
       const normPrice = D(rawPrice.toPrecision(15)); // lưu unit price (15 sig digits)
 
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
-      // TT = qty × rawPrice (float64, khớp với Excel internal), rồi normalize
+      // TT tháng = totalQty × rawPrice (float64), normalize 15 sig để khớp Excel display
       const newMonthExportAmount = D((Number(newMonthExportQty) * rawPrice).toPrecision(15));
 
       const newYearExportQty = D(inventory.yearlyExportQuantity).plus(dQty);
-      const addedExportAmt = D((Number(dQty) * rawPrice).toPrecision(15));
+      // Yearly amount: dùng rawPrice (KHÔNG toPrecision(15)) để tránh mất precision khi chia lại
+      const addedExportAmt = D(Number(dQty) * rawPrice);
       const newYearExportAmount = D(inventory.yearlyExportAmount).plus(addedExportAmt);
       const newYearExportPrice = newYearExportQty.gt(0)
         ? D(Number(newYearExportAmount.div(newYearExportQty)).toPrecision(15))
@@ -317,7 +318,7 @@ export class InventoryService {
         const newMonthExportAmount = D((Number(newMonthExportQty) * rawPriceAdj).toPrecision(15));
 
         const newYearExportQty = D(inventory.yearlyExportQuantity).plus(adjQty);
-        const addedExportAmtAdj = D((Number(adjQty) * rawPriceAdj).toPrecision(15));
+        const addedExportAmtAdj = D(Number(adjQty) * rawPriceAdj); // no toPrecision → yearly chia lại đúng
         const newYearExportAmount = D(inventory.yearlyExportAmount).plus(addedExportAmtAdj);
         const newYearExportPrice = newYearExportQty.gt(0)
           ? D(Number(newYearExportAmount.div(newYearExportQty)).toPrecision(15))
