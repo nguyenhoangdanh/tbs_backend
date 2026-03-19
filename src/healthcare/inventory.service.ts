@@ -530,10 +530,11 @@ export class InventoryService {
           const closingPrice = D(
             medicineData.closingUnitPrice ?? medicineData.openingUnitPrice,
           ).toFixed();
+          // TT tồn cuối = TT tồn đầu + TT nhập - TT xuất (balance sheet, tránh round-trip error)
           const closingAmount =
             medicineData.closingTotalAmount !== undefined
               ? D(medicineData.closingTotalAmount).toFixed()
-              : D(closingQty).times(D(closingPrice)).toFixed();
+              : D(openingAmount).plus(D(monthlyImportAmount)).minus(D(monthlyExportAmount)).toFixed();
 
           const yearlyImportQty =
             Number(medicineData.yearlyImportQuantity) || 0;
@@ -892,7 +893,10 @@ export class InventoryService {
             // ── Dùng Decimal để giữ toàn bộ chữ số thập phân ──
             const dOpenQty = D(prevInventory?.closingQuantity);
             const dOpenPrice = D(prevInventory?.closingUnitPrice);
-            const dOpenAmt = dOpenQty.times(dOpenPrice);
+            // Dùng closingTotalAmount đã lưu thay vì tính lại qty*price
+            const dOpenAmt = prevInventory
+              ? D(prevInventory.closingTotalAmount)
+              : new Prisma.Decimal(0);
 
             const dImportQty = D(importQty);
             const dImportPrice = D(importPrice);
@@ -916,16 +920,14 @@ export class InventoryService {
             const dExportPrice = dOpenPrice.gt(0) ? dOpenPrice : dImportPrice;
             const dExportAmt = dExportQty.times(dExportPrice);
 
-            // Tồn cuối kỳ = Tồn đầu + Nhập - Xuất
+            // Tồn cuối kỳ = Tồn đầu + Nhập - Xuất (balance sheet)
             const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
-            // Giá bình quân gia quyền
-            const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+            const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
             const dClosingPrice = dClosingQty.gt(0)
-              ? totalVal.div(dClosingQty)
+              ? dClosingAmt.div(dClosingQty)
               : dImportPrice.gt(0)
                 ? dImportPrice
                 : dOpenPrice;
-            const dClosingAmt = dClosingQty.times(dClosingPrice);
 
             // Lũy kế năm = tháng trước + tháng này
             const dYtdImportQty = dPrevYtdImportQty.plus(dImportQty);
@@ -983,7 +985,10 @@ export class InventoryService {
             const dCurrOpenPr = prevRecForOpen
               ? D(prevRecForOpen.closingUnitPrice)
               : D(existingInventory.openingUnitPrice);
-            const dCurrOpenAm = dCurrOpen.times(dCurrOpenPr);
+            // Dùng closingTotalAmount đã lưu thay vì tính lại qty*price
+            const dCurrOpenAm = prevRecForOpen
+              ? D(prevRecForOpen.closingTotalAmount)
+              : D(existingInventory.openingTotalAmount);
             const dCurrExport = D(existingInventory.monthlyExportQuantity);
             const dCurrExpAmt = D(existingInventory.monthlyExportAmount);
 
@@ -991,19 +996,18 @@ export class InventoryService {
             const dNewImportPr = D(importPrice);
             const dNewImportAmt = D(importAmount);
 
-            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (bằng Decimal)
+            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (balance sheet)
             const dNewClosingQty = dCurrOpen
               .plus(dNewImportQty)
               .minus(dCurrExport);
-            const totalValNew = dCurrOpenAm
+            const dNewClosingAmt = dCurrOpenAm
               .plus(dNewImportAmt)
               .minus(dCurrExpAmt);
             const dNewClosingPr = dNewClosingQty.gt(0)
-              ? totalValNew.div(dNewClosingQty)
+              ? dNewClosingAmt.div(dNewClosingQty)
               : dNewImportPr.gt(0)
                 ? dNewImportPr
                 : dCurrOpenPr;
-            const dNewClosingAmt = dNewClosingQty.times(dNewClosingPr);
 
             // Lũy kế năm = tháng trước + tháng này (export giữ nguyên từ DB)
             const dNewYtdImportQty = dPrevYtdImportQty.plus(dNewImportQty);
