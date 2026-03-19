@@ -247,9 +247,9 @@ export class InventoryService {
       const J = Number(inventory.monthlyImportQuantity);
       const K = Number(inventory.monthlyImportUnitPrice);
       const totalQtyForPrice = G + J;
-      const rawPrice = totalQtyForPrice > 0
-        ? (G * H + J * K) / totalQtyForPrice
-        : Number(dPrice);
+      const formulaPrice = totalQtyForPrice > 0 ? (G * H + J * K) / totalQtyForPrice : 0;
+      // Fallback sang dPrice khi formula = 0 (H=0 và K=0 → chưa có giá trong DB)
+      const rawPrice = formulaPrice > 0 ? formulaPrice : Number(dPrice);
       const normPrice = D(rawPrice.toPrecision(15)); // lưu unit price (15 sig digits)
 
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
@@ -309,9 +309,8 @@ export class InventoryService {
         const Jadj = Number(inventory.monthlyImportQuantity);
         const Kadj = Number(inventory.monthlyImportUnitPrice);
         const totalQtyAdj = Gadj + Jadj;
-        const rawPriceAdj = totalQtyAdj > 0
-          ? (Gadj * Hadj + Jadj * Kadj) / totalQtyAdj
-          : Number(dPrice.abs());
+        const formulaPriceAdj = totalQtyAdj > 0 ? (Gadj * Hadj + Jadj * Kadj) / totalQtyAdj : 0;
+        const rawPriceAdj = formulaPriceAdj > 0 ? formulaPriceAdj : Number(dPrice.abs());
         const normPriceAdj = D(rawPriceAdj.toPrecision(15));
 
         const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(adjQty);
