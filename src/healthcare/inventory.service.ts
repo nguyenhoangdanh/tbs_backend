@@ -2582,10 +2582,8 @@ export class InventoryService {
 
         const openingQty = _q(row[6]);
         const openingPrice = _n(row[7]);
-        const openingAmount =
-          row[8] != null && row[8] !== ''
-            ? _n(row[8])
-            : D(openingQty).times(D(openingPrice)).toFixed();
+        // Tồn đầu kỳ TT (col I) - lấy trực tiếp từ file, không tính lại ĐG×SL
+        const openingAmount = _n(row[8]);
 
         const monthlyImportQty = _q(row[9]);
         const monthlyImportPrice = _n(row[10]);
@@ -2595,28 +2593,35 @@ export class InventoryService {
             : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
         const monthlyExportQty = _q(row[12]);
-        const monthlyExportPrice = _n(row[13]);
+        // ĐG xuất (col N) = IFERROR((G×H + J×K)/(G+J), 0)
+        // Công thức bình quân gia quyền: tồn đầu + nhập trong tháng
+        const monthlyExportPrice = (() => {
+          const dOpenQty = D(openingQty);
+          const dOpenPrice = D(openingPrice);
+          const dImportQty = D(monthlyImportQty);
+          const dImportPrice = D(monthlyImportPrice);
+          const totalQty = dOpenQty.plus(dImportQty);
+          if (totalQty.isZero()) return '0';
+          return dOpenQty.times(dOpenPrice)
+            .plus(dImportQty.times(dImportPrice))
+            .div(totalQty)
+            .toFixed();
+        })();
         const monthlyExportAmount =
           row[14] != null && row[14] !== ''
             ? _n(row[14])
             : D(monthlyExportQty).times(D(monthlyExportPrice)).toFixed();
 
-        // Recompute closing from opening + import - export for guaranteed accuracy
+        // Tồn cuối kỳ - dùng giá bình quân xuất (cùng công thức weighted avg)
         const closingQty =
           _q(row[15]) || openingQty + monthlyImportQty - monthlyExportQty;
-        const closingPrice = row[16] != null && row[16] !== '' ? _n(row[16]) : openingPrice;
+        // ĐG tồn cuối = ĐG xuất (weighted avg của tồn đầu + nhập)
+        const closingPrice = monthlyExportPrice;
         const closingAmount = (() => {
           const computedClosingQty = D(openingQty)
             .plus(D(monthlyImportQty))
             .minus(D(monthlyExportQty));
-          const totalVal = D(openingQty)
-            .times(D(openingPrice))
-            .plus(D(monthlyImportAmount))
-            .minus(D(monthlyExportAmount));
-          const computedPrice = computedClosingQty.gt(0)
-            ? totalVal.div(computedClosingQty)
-            : D(closingPrice);
-          return computedClosingQty.times(computedPrice).toFixed();
+          return computedClosingQty.times(D(closingPrice)).toFixed();
         })();
 
         const expiryStr = row[18]?.toString().trim();
