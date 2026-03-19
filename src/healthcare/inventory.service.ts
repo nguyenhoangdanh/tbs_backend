@@ -1569,24 +1569,46 @@ export class InventoryService {
       ],
     });
 
-    // Lấy tồn cuối năm trước (tháng 12 của năm trước)
-    const previousYearClosing = await this.prisma.medicineInventory.findMany({
+    // Tồn đầu năm = tồn cuối kỳ tháng 12 năm trước.
+    // Fallback: nếu không có tháng 12 năm trước thì lấy tồn đầu kỳ tháng 1 năm hiện tại
+    // (hai giá trị này phải bằng nhau nếu dữ liệu liên tục).
+    const dec31PrevYear = await this.prisma.medicineInventory.findMany({
       where: {
         month: 12,
         year: year - 1,
-        ...(categoryId && {
-          medicine: {
-            categoryId,
-          },
-        }),
+        ...(categoryId && { medicine: { categoryId } }),
       },
-      include: {
-        medicine: {
-          include: {
-            category: true,
-          },
-        },
+      include: { medicine: { include: { category: true } } },
+    });
+
+    const jan1CurrYear = await this.prisma.medicineInventory.findMany({
+      where: {
+        month: 1,
+        year,
+        ...(categoryId && { medicine: { categoryId } }),
       },
+      include: { medicine: { include: { category: true } } },
+    });
+
+    // Build a map: medicineId → previousYearClosing (prefer Dec31 source)
+    const prevYearMap = new Map<string, { quantity: number; unitPrice: string; totalAmount: string }>();
+
+    // Populate from January opening first (lower priority)
+    jan1CurrYear.forEach((inv) => {
+      prevYearMap.set(inv.medicineId, {
+        quantity: Number(inv.openingQuantity || 0),
+        unitPrice: D(inv.openingUnitPrice).toFixed(),
+        totalAmount: D(inv.openingTotalAmount).toFixed(),
+      });
+    });
+
+    // Override with December closing (higher priority — more accurate source)
+    dec31PrevYear.forEach((inv) => {
+      prevYearMap.set(inv.medicineId, {
+        quantity: Number(inv.closingQuantity || 0),
+        unitPrice: D(inv.closingUnitPrice).toFixed(),
+        totalAmount: D(inv.closingTotalAmount).toFixed(),
+      });
     });
 
     // Group by medicine
@@ -1634,15 +1656,11 @@ export class InventoryService {
       }
     });
 
-    // Add previous year closing
-    previousYearClosing.forEach((inv) => {
-      if (medicineGroups.has(inv.medicineId)) {
-        const data = medicineGroups.get(inv.medicineId);
-        data.previousYearClosing = {
-          quantity: Number(inv.closingQuantity || 0),
-          unitPrice: D(inv.closingUnitPrice).toFixed(),
-          totalAmount: D(inv.closingTotalAmount).toFixed(),
-        };
+    // Populate previousYearClosing for each medicine in the current year
+    medicineGroups.forEach((data, medicineId) => {
+      const prev = prevYearMap.get(medicineId);
+      if (prev) {
+        data.previousYearClosing = prev;
       }
     });
 
