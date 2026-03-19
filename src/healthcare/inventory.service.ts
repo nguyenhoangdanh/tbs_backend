@@ -239,9 +239,11 @@ export class InventoryService {
       };
     } else if (transactionType === InventoryTransactionTypeDto.EXPORT) {
       // ĐG xuất = IFERROR((G*H + J*K)/(G+J), 0)
-      // Phải dùng float64 arithmetic (như Excel) rồi toPrecision(15)
-      // Decimal.js exact decimal cho kết quả khác vì DB string '556.554313421927'
-      // ≠ float64(556.554313421927) = 556.55431342192696320
+      // Dùng float64 arithmetic (như Excel) + toPrecision(15) để khớp chính xác.
+      // monthlyExportUnitPrice luôn = weightedAvgPrice (không average tích lũy)
+      // vì (G*H+J*K)/(G+J) là hằng số trong tháng (G, H, J, K không đổi).
+      // monthlyExportAmount = newQty × weightedAvgPrice (recompute từ fresh price)
+      // để tránh nhiễu từ data cũ tích lũy sai.
       const G = Number(inventory.openingQuantity);
       const H = Number(inventory.openingUnitPrice);
       const J = Number(inventory.monthlyImportQuantity);
@@ -252,21 +254,19 @@ export class InventoryService {
         : dPrice;
 
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
-      const thisExportAmt = dQty.times(weightedAvgPrice);
-      const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(thisExportAmt);
-      const newMonthExportPrice = newMonthExportQty.gt(0)
-        ? D(newMonthExportAmount.div(newMonthExportQty).toPrecision(15))
-        : weightedAvgPrice;
+      // Recompute toàn bộ monthlyExportAmount = totalQty × weightedAvg (luôn đúng)
+      const newMonthExportAmount = newMonthExportQty.times(weightedAvgPrice);
 
       const newYearExportQty = D(inventory.yearlyExportQuantity).plus(dQty);
-      const newYearExportAmount = D(inventory.yearlyExportAmount).plus(thisExportAmt);
+      const addedExportAmt = dQty.times(weightedAvgPrice);
+      const newYearExportAmount = D(inventory.yearlyExportAmount).plus(addedExportAmt);
       const newYearExportPrice = newYearExportQty.gt(0)
         ? D(newYearExportAmount.div(newYearExportQty).toPrecision(15))
         : weightedAvgPrice;
 
       updateData = {
         monthlyExportQuantity: newMonthExportQty.toFixed(),
-        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportUnitPrice: weightedAvgPrice.toFixed(),  // luôn dùng công thức, không tích lũy
         monthlyExportAmount: newMonthExportAmount.toFixed(),
         yearlyExportQuantity: newYearExportQty.toFixed(),
         yearlyExportUnitPrice: newYearExportPrice.toFixed(),
@@ -313,23 +313,19 @@ export class InventoryService {
           ? D(((Gadj * Hadj + Jadj * Kadj) / totalQtyAdj).toPrecision(15))
           : dPrice.abs();
 
-        const adjAmount = adjQty.times(weightedAvgAdj);
-
         const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(adjQty);
-        const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(adjAmount);
-        const newMonthExportPrice = newMonthExportQty.gt(0)
-          ? D(newMonthExportAmount.div(newMonthExportQty).toPrecision(15))
-          : weightedAvgAdj;
+        // Recompute toàn bộ monthlyExportAmount = totalQty × weightedAvg
+        const newMonthExportAmount = newMonthExportQty.times(weightedAvgAdj);
 
         const newYearExportQty = D(inventory.yearlyExportQuantity).plus(adjQty);
-        const newYearExportAmount = D(inventory.yearlyExportAmount).plus(adjAmount);
+        const newYearExportAmount = D(inventory.yearlyExportAmount).plus(adjQty.times(weightedAvgAdj));
         const newYearExportPrice = newYearExportQty.gt(0)
           ? D(newYearExportAmount.div(newYearExportQty).toPrecision(15))
           : weightedAvgAdj;
 
         updateData = {
           monthlyExportQuantity: newMonthExportQty.toFixed(),
-          monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+          monthlyExportUnitPrice: weightedAvgAdj.toFixed(),
           monthlyExportAmount: newMonthExportAmount.toFixed(),
           yearlyExportQuantity: newYearExportQty.toFixed(),
           yearlyExportUnitPrice: newYearExportPrice.toFixed(),
