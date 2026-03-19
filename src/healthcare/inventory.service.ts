@@ -2334,9 +2334,15 @@ export class InventoryService {
   }
 
   /**
-   * Extract month and year from Excel title
-   * Format: "QT THUỐC THÁNG 09 NĂM 2025 _ ĐỀ NGHỊ MUA THUỐC THÁNG 10 NĂM 2025"
-   * Returns: { currentMonth: 9, currentYear: 2025, suggestedMonth: 10, suggestedYear: 2025 }
+   * Extract month and year from Excel title.
+   * Supported formats (case-insensitive):
+   *   1. "QT THUỐC THÁNG 09 NĂM 2025 _ ĐỀ NGHỊ MUA THUỐC THÁNG 10 NĂM 2025"
+   *   2. "QUYẾT TOÁN THUỐC THÁNG 01 NĂM 2026"                (no suggested)
+   *   3. "QUYẾT TOÁN THUỐC THÁNG 02 MUA MỚI THUỐC THÁNG 03 NĂM 2026"
+   *
+   * Rules:
+   *   - currentMonth/Year: first THÁNG XX NĂM YYYY found in title
+   *   - suggestedMonth/Year: second THÁNG … found, else currentMonth+1
    */
   private extractMonthYearFromTitle(title: string): {
     currentMonth: number;
@@ -2346,38 +2352,67 @@ export class InventoryService {
   } | null {
     if (!title) return null;
 
-    // Normalize title: remove extra spaces, normalize Vietnamese characters
-    const normalizedTitle = title.replace(/\s+/g, ' ').trim().toUpperCase();
-    console.log(`🔍 Normalized title: ${normalizedTitle}`);
+    // Normalize: collapse whitespace, uppercase
+    const t = title.replace(/\s+/g, ' ').trim().toUpperCase();
+    console.log(`🔍 Normalized title: ${t}`);
 
-    // Pattern: QT THUỐC THÁNG XX NĂM YYYY (flexible spacing)
-    const currentMatch = normalizedTitle.match(
-      /QT\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/,
-    );
-    const suggestedMatch = normalizedTitle.match(
-      /[DĐ][EỀ]\s+NGH[IỊ]\s+MUA\s+THU[OỐ]C\s+TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/,
-    );
+    // Strategy:
+    //   1. Collect all "THÁNG XX NĂM YYYY" tokens (fully qualified).
+    //   2. Also collect bare "THÁNG XX" tokens that are NOT immediately
+    //      followed by NĂM — these inherit the year from the last NĂM YYYY
+    //      found anywhere in the title.
+    //   3. Merge into ordered list by position → first = current, second = suggested.
 
-    if (!currentMatch) {
-      console.warn(
-        '⚠️ Could not extract current month/year from title:',
-        normalizedTitle,
-      );
-      console.warn('⚠️ Expected format: "QT THUỐC THÁNG XX NĂM YYYY"');
+    // Step 1: extract the year(s) present in the title (for bare-month fallback)
+    const yearMatches = [...t.matchAll(/N[AĂ]M\s+(\d{4})/g)];
+    const lastYear = yearMatches.length > 0
+      ? parseInt(yearMatches[yearMatches.length - 1][1])
+      : new Date().getFullYear();
+
+    // Step 2: collect all THÁNG tokens with their position
+    type MonthToken = { pos: number; month: number; year: number };
+    const tokens: MonthToken[] = [];
+
+    // Full: THÁNG XX NĂM YYYY
+    const fullRe = /TH[AÁ]NG\s+(\d{1,2})\s+N[AĂ]M\s+(\d{4})/g;
+    let fm: RegExpExecArray | null;
+    while ((fm = fullRe.exec(t)) !== null) {
+      tokens.push({ pos: fm.index, month: parseInt(fm[1]), year: parseInt(fm[2]) });
+    }
+
+    // Bare: THÁNG XX (not followed by NĂM — look-ahead via exclusion)
+    const bareRe = /TH[AÁ]NG\s+(\d{1,2})(?!\s+N[AĂ]M)/g;
+    let bm: RegExpExecArray | null;
+    while ((bm = bareRe.exec(t)) !== null) {
+      const month = parseInt(bm[1]);
+      // Avoid duplicates already captured by fullRe
+      if (!tokens.some((tok) => tok.pos === bm!.index)) {
+        tokens.push({ pos: bm.index, month, year: lastYear });
+      }
+    }
+
+    if (tokens.length === 0) {
+      console.warn('⚠️ Could not find any THÁNG XX in title:', t);
       return null;
     }
 
-    const currentMonth = parseInt(currentMatch[1]);
-    const currentYear = parseInt(currentMatch[2]);
-    let suggestedMonth = currentMonth + 1;
-    let suggestedYear = currentYear;
+    // Sort by position in the title string
+    tokens.sort((a, b) => a.pos - b.pos);
 
-    // If suggested month/year found in title, use it
-    if (suggestedMatch) {
-      suggestedMonth = parseInt(suggestedMatch[1]);
-      suggestedYear = parseInt(suggestedMatch[2]);
+    const currentMonth = tokens[0].month;
+    const currentYear = tokens[0].year;
+
+    let suggestedMonth: number;
+    let suggestedYear: number;
+
+    if (tokens.length >= 2) {
+      // Second token is the suggested purchase month
+      suggestedMonth = tokens[1].month;
+      suggestedYear = tokens[1].year;
     } else {
-      // Calculate next month if not found
+      // No explicit suggested month — default to next calendar month
+      suggestedMonth = currentMonth + 1;
+      suggestedYear = currentYear;
       if (suggestedMonth > 12) {
         suggestedMonth = 1;
         suggestedYear++;
@@ -2388,12 +2423,7 @@ export class InventoryService {
       `📅 Detected from title: Current ${currentMonth}/${currentYear}, Suggested ${suggestedMonth}/${suggestedYear}`,
     );
 
-    return {
-      currentMonth,
-      currentYear,
-      suggestedMonth,
-      suggestedYear,
-    };
+    return { currentMonth, currentYear, suggestedMonth, suggestedYear };
   }
 
   /**
@@ -2419,14 +2449,17 @@ export class InventoryService {
 
     console.log(`📋 Sheet name: ${sheetName}`);
 
-    // Read title row (row 1) - search in cells A1, B1, C1, etc. for merged cells
+    // Read title row (row 1) — search first non-empty cell in row that
+    // looks like an inventory title (contains THÁNG + NĂM keywords)
     let title = '';
     const possibleTitleCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1'];
     for (const cellRef of possibleTitleCells) {
       const cell = worksheet[cellRef];
       if (cell?.v || cell?.w) {
         const cellValue = (cell.v || cell.w || '').toString();
-        if (cellValue.includes('QT') && cellValue.includes('THUỐC')) {
+        const upper = cellValue.toUpperCase();
+        // Accept any title that contains THÁNG … NĂM (the canonical keywords)
+        if (upper.includes('TH') && upper.includes('NG') && upper.includes('N') && upper.includes('M') && /TH[AÁ]NG\s+\d/.test(upper)) {
           title = cellValue;
           break;
         }
@@ -2439,7 +2472,7 @@ export class InventoryService {
     const dateInfo = this.extractMonthYearFromTitle(title);
     if (!dateInfo) {
       throw new Error(
-        'Không thể xác định tháng/năm từ tiêu đề Excel. Format yêu cầu: "QT THUỐC THÁNG XX NĂM YYYY _ ĐỀ NGHỊ MUA THUỐC THÁNG YY NĂM YYYY"',
+        'Không thể xác định tháng/năm từ tiêu đề Excel. Tiêu đề phải chứa "THÁNG XX NĂM YYYY" (ví dụ: QUYẾT TOÁN THUỐC THÁNG 01 NĂM 2026).',
       );
     }
 
