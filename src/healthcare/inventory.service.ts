@@ -239,27 +239,30 @@ export class InventoryService {
       };
     } else if (transactionType === InventoryTransactionTypeDto.EXPORT) {
       // ĐG xuất = IFERROR((G*H + J*K)/(G+J), 0)
-      // Weighted average của tồn đầu kỳ + nhập trong tháng (không dùng giá đơn thuốc)
+      // Excel dùng G*H (qty × unitPrice), KHÔNG dùng col I (openingTotalAmount)
+      // Sau khi tính phải normalize toPrecision(15) để khớp với float64 của Excel
       const openQty = D(inventory.openingQuantity);
-      const openAmt = D(inventory.openingTotalAmount);
+      const openPrice = D(inventory.openingUnitPrice);
       const importQty = D(inventory.monthlyImportQuantity);
-      const importAmt = D(inventory.monthlyImportAmount);
+      const importPrice = D(inventory.monthlyImportUnitPrice);
       const totalQtyForPrice = openQty.plus(importQty);
       const weightedAvgPrice = totalQtyForPrice.gt(0)
-        ? openAmt.plus(importAmt).div(totalQtyForPrice)
+        ? D(openQty.times(openPrice).plus(importQty.times(importPrice))
+            .div(totalQtyForPrice)
+            .toPrecision(15))  // normalize to Excel float64 precision
         : dPrice; // fallback sang giá đơn thuốc nếu chưa có tồn
 
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
       const thisExportAmt = dQty.times(weightedAvgPrice);
       const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(thisExportAmt);
       const newMonthExportPrice = newMonthExportQty.gt(0)
-        ? newMonthExportAmount.div(newMonthExportQty)
+        ? D(newMonthExportAmount.div(newMonthExportQty).toPrecision(15))
         : weightedAvgPrice;
 
       const newYearExportQty = D(inventory.yearlyExportQuantity).plus(dQty);
       const newYearExportAmount = D(inventory.yearlyExportAmount).plus(thisExportAmt);
       const newYearExportPrice = newYearExportQty.gt(0)
-        ? newYearExportAmount.div(newYearExportQty)
+        ? D(newYearExportAmount.div(newYearExportQty).toPrecision(15))
         : weightedAvgPrice;
 
       updateData = {
@@ -301,14 +304,16 @@ export class InventoryService {
       } else {
         const adjQty = dQty.abs();
 
-        // ADJUSTMENT xuất: dùng weighted avg (G*H+J*K)/(G+J) như EXPORT
+        // ADJUSTMENT xuất: dùng G*H+J*K / (G+J) như EXPORT, normalize toPrecision(15)
         const openQtyAdj = D(inventory.openingQuantity);
-        const openAmtAdj = D(inventory.openingTotalAmount);
+        const openPriceAdj = D(inventory.openingUnitPrice);
         const importQtyAdj = D(inventory.monthlyImportQuantity);
-        const importAmtAdj = D(inventory.monthlyImportAmount);
+        const importPriceAdj = D(inventory.monthlyImportUnitPrice);
         const totalQtyAdj = openQtyAdj.plus(importQtyAdj);
         const weightedAvgAdj = totalQtyAdj.gt(0)
-          ? openAmtAdj.plus(importAmtAdj).div(totalQtyAdj)
+          ? D(openQtyAdj.times(openPriceAdj).plus(importQtyAdj.times(importPriceAdj))
+              .div(totalQtyAdj)
+              .toPrecision(15))
           : dPrice.abs();
 
         const adjAmount = adjQty.times(weightedAvgAdj);
@@ -316,13 +321,13 @@ export class InventoryService {
         const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(adjQty);
         const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(adjAmount);
         const newMonthExportPrice = newMonthExportQty.gt(0)
-          ? newMonthExportAmount.div(newMonthExportQty)
+          ? D(newMonthExportAmount.div(newMonthExportQty).toPrecision(15))
           : weightedAvgAdj;
 
         const newYearExportQty = D(inventory.yearlyExportQuantity).plus(adjQty);
         const newYearExportAmount = D(inventory.yearlyExportAmount).plus(adjAmount);
         const newYearExportPrice = newYearExportQty.gt(0)
-          ? newYearExportAmount.div(newYearExportQty)
+          ? D(newYearExportAmount.div(newYearExportQty).toPrecision(15))
           : weightedAvgAdj;
 
         updateData = {
