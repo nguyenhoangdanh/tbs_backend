@@ -2569,8 +2569,15 @@ export class InventoryService {
         const manufacturer = row[4]?.toString().trim() || null;
 
         // Parse numeric columns — dùng D() để giữ đủ độ chính xác thập phân
-        const _n = (v: any) =>
-          v !== undefined && v !== null && v !== '' ? D(v).toFixed() : '0';
+        // For JS `number` values from XLSX (float64), toFixed(12) strips float64 noise:
+        // Excel stores float64 internally and displays 15 sig digits. The float64
+        // 556.6246675954075 has exact decimal 556.6246675954074…, so toFixed(12)
+        // correctly gives "556.624667595407" (matching what Excel displays).
+        const _n = (v: any) => {
+          if (v === undefined || v === null || v === '') return '0';
+          if (typeof v === 'number') return D(v.toFixed(12)).toFixed();
+          return D(v).toFixed();
+        };
                 const _q = (v: any) => Number(D(_n(v)).toFixed());
 
         const openingQty = _q(row[6]);
