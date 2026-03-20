@@ -1048,7 +1048,8 @@ export class HealthcareService {
           periodEnd = new Date(periodStart);
           periodEnd.setHours(23, 59, 59, 999);
           if (periodStart > end) break;
-          label = `${periodStart.getDate()}/${periodStart.getMonth() + 1}`;
+          // Just show day number — month is already known from the filter context
+          label = `${periodStart.getDate()}`;
           break;
         }
 
