@@ -948,35 +948,37 @@ export class InventoryService {
               ? dYtdExportAmt.div(dYtdExportQty)
               : new Prisma.Decimal(0);
 
-            // Tạo mới inventory record
-            await prisma.medicineInventory.create({
-              data: {
-                medicineId: medicine.id,
-                month,
-                year,
-                expiryDate: parsedExpiry ?? null,
-                openingQuantity: dOpenQty.toFixed(),
-                openingUnitPrice: dOpenPrice.toFixed(),
-                openingTotalAmount: dOpenAmt.toFixed(),
-                monthlyImportQuantity: dImportQty.toFixed(),
-                monthlyImportUnitPrice: dImportPrice.toFixed(),
-                monthlyImportAmount: dImportAmt.toFixed(),
-                monthlyExportQuantity: dExportQty.toFixed(),
-                monthlyExportUnitPrice: dExportPrice.toFixed(),
-                monthlyExportAmount: dExportAmt.toFixed(),
-                closingQuantity: dClosingQty.toFixed(),
-                closingUnitPrice: dClosingPrice.toFixed(),
-                closingTotalAmount: dClosingAmt.toFixed(),
-                yearlyImportQuantity: dYtdImportQty.toFixed(),
-                yearlyImportUnitPrice: dYtdImportPr.toFixed(),
-                yearlyImportAmount: dYtdImportAmt.toFixed(),
-                yearlyExportQuantity: dYtdExportQty.toFixed(),
-                yearlyExportUnitPrice: dYtdExportPr.toFixed(),
-                yearlyExportAmount: dYtdExportAmt.toFixed(),
-                suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
-                suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
-                suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
+            // Tạo mới hoặc ghi đè inventory record (upsert để tránh unique constraint khi re-import)
+            const inventoryData = {
+              expiryDate: parsedExpiry ?? null,
+              openingQuantity: dOpenQty.toFixed(),
+              openingUnitPrice: dOpenPrice.toFixed(),
+              openingTotalAmount: dOpenAmt.toFixed(),
+              monthlyImportQuantity: dImportQty.toFixed(),
+              monthlyImportUnitPrice: dImportPrice.toFixed(),
+              monthlyImportAmount: dImportAmt.toFixed(),
+              monthlyExportQuantity: dExportQty.toFixed(),
+              monthlyExportUnitPrice: dExportPrice.toFixed(),
+              monthlyExportAmount: dExportAmt.toFixed(),
+              closingQuantity: dClosingQty.toFixed(),
+              closingUnitPrice: dClosingPrice.toFixed(),
+              closingTotalAmount: dClosingAmt.toFixed(),
+              yearlyImportQuantity: dYtdImportQty.toFixed(),
+              yearlyImportUnitPrice: dYtdImportPr.toFixed(),
+              yearlyImportAmount: dYtdImportAmt.toFixed(),
+              yearlyExportQuantity: dYtdExportQty.toFixed(),
+              yearlyExportUnitPrice: dYtdExportPr.toFixed(),
+              yearlyExportAmount: dYtdExportAmt.toFixed(),
+              suggestedPurchaseQuantity: D(suggestedQty).toFixed(),
+              suggestedPurchaseUnitPrice: D(suggestedPrice).toFixed(),
+              suggestedPurchaseAmount: D(suggestedAmount).toFixed(),
+            };
+            await prisma.medicineInventory.upsert({
+              where: {
+                medicineId_month_year: { medicineId: medicine.id, month, year },
               },
+              create: { medicineId: medicine.id, month, year, ...inventoryData },
+              update: inventoryData,
             });
           } else {
             // 3.5. Nếu đã có record: CẬP NHẬT import + suggested, tái tính closing bằng Decimal
