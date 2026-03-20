@@ -205,7 +205,7 @@ export class HealthcareController {
     description: 'Medicine usage statistics retrieved successfully',
   })
   async getMedicineUsageStatistics(
-    @Query('period') period: 'day' | 'week' | 'month' = 'month',
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
@@ -224,7 +224,7 @@ export class HealthcareController {
     description: 'Prescription trends retrieved successfully',
   })
   async getPrescriptionTrends(
-    @Query('period') period: 'day' | 'week' | 'month' = 'month',
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 12,
   ) {
     return this.healthcareService.getPrescriptionTrends(period, limit);
@@ -259,7 +259,7 @@ export class HealthcareController {
     description: 'Top medicines retrieved successfully',
   })
   async getTopPrescribedMedicines(
-    @Query('period') period: 'day' | 'week' | 'month' = 'month',
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 10,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
