@@ -25,8 +25,34 @@ export class HealthcareService {
     private inventoryService: InventoryService,
   ) {}
 
+  /**
+   * Parse a date-only string (YYYY-MM-DD from <input type="date">) as
+   * Vietnam local noon (UTC+7 12:00 = UTC 05:00:00).
+   *
+   * Why noon, not midnight?
+   * - `new Date("2026-02-15")` is parsed as UTC midnight → displays as
+   *   07:00 Vietnam time, which is confusing.
+   * - Noon UTC+7 = 05:00 UTC, safely within the correct calendar day in
+   *   both UTC and UTC±12 timezones → getUTCMonth()/getUTCFullYear() always
+   *   returns the correct month/year for inventory ledger calculations.
+   */
+  private parseVisitDate(dateStr: string): Date {
+    return new Date(`${dateStr}T12:00:00+07:00`);
+  }
+
   // Dashboard statistics for healthcare
   async getDashboardStats() {
+    // "Today" boundaries in Vietnam time (UTC+7): midnight to 23:59:59
+    const nowVN = new Date();
+    const todayStartVN = new Date(nowVN);
+    todayStartVN.setUTCHours(todayStartVN.getUTCHours() - 7); // shift to UTC+7 context
+    // Simpler: just use UTC dates aligned with Vietnam day boundaries
+    // VN midnight = UTC 17:00 (previous day). Use visitDate range: [today 00:00 VN, today 23:59 VN]
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0); // local server midnight (UTC if server is UTC)
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
     const [
       uniquePatients,
       totalMedicalRecords,
@@ -51,12 +77,13 @@ export class HealthcareService {
         where: { isActive: true },
       }),
 
-      // Today's medical records (đơn thuốc hôm nay)
+      // Today's medical records — filter by visitDate not createdAt
+      // (users may create records with past visit dates; visitDate is the clinical date)
       this.prisma.medicalRecord.count({
         where: {
-          createdAt: {
-            gte: new Date(new Date().setHours(0, 0, 0, 0)),
-            lt: new Date(new Date().setHours(23, 59, 59, 999)),
+          visitDate: {
+            gte: todayStart,
+            lte: todayEnd,
           },
         },
       }),
@@ -337,7 +364,7 @@ export class HealthcareService {
       const medicalRecord = await prisma.medicalRecord.create({
         data: {
           ...recordData,
-          visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
+          visitDate: data.visitDate ? this.parseVisitDate(data.visitDate) : new Date(),
           prescriptions:
             prescriptionCreateData.length > 0
               ? {
@@ -442,7 +469,7 @@ export class HealthcareService {
         where: { id },
         data: {
           ...recordData,
-          ...(data.visitDate && { visitDate: new Date(data.visitDate) }),
+          ...(data.visitDate && { visitDate: this.parseVisitDate(data.visitDate) }),
         },
       });
 
@@ -510,7 +537,7 @@ export class HealthcareService {
               quantity: p.quantity,
               unitPrice: String(currentStock.unitPrice || '0'),
               transactionDate: (data.visitDate
-                ? new Date(data.visitDate)
+                ? this.parseVisitDate(data.visitDate)
                 : medicalRecord?.visitDate ?? new Date()
               ).toISOString(),
               referenceType: 'MEDICAL_RECORD',
@@ -699,7 +726,7 @@ export class HealthcareService {
         data: {
           ...recordData,
           patientId: patient.id,
-          visitDate: data.visitDate ? new Date(data.visitDate) : new Date(),
+          visitDate: data.visitDate ? this.parseVisitDate(data.visitDate) : new Date(),
           prescriptions:
             prescriptionCreateData.length > 0
               ? {
@@ -843,13 +870,17 @@ export class HealthcareService {
       start.setHours(0, 0, 0, 0);
     }
 
-    // Get prescriptions and medical records data
+    // Get prescriptions (filtered by visitDate through medicalRecord join) and medical records
     const [prescriptions, medicalRecords] = await Promise.all([
       this.prisma.medicalPrescription.findMany({
         where: {
-          createdAt: {
-            gte: start,
-            lte: end,
+          // Filter by visitDate of the parent medicalRecord, not createdAt of prescription
+          // This ensures consistency: a record created today with a past visitDate is counted correctly
+          medicalRecord: {
+            visitDate: {
+              gte: start,
+              lte: end,
+            },
           },
         },
         include: {
@@ -927,24 +958,14 @@ export class HealthcareService {
       endDate,
     );
 
-    // Get accurate total counts for the entire period
+    // Get accurate total counts for the entire period — filter by visitDate (consistent with above)
     const totalStats = await Promise.all([
       this.prisma.medicalPrescription.groupBy({
         by: ['medicineId'],
-        where: {
-          createdAt: {
-            gte: start,
-            lte: end,
-          },
-        },
+        where: { medicalRecord: { visitDate: { gte: start, lte: end } } },
       }),
       this.prisma.medicalPrescription.count({
-        where: {
-          createdAt: {
-            gte: start,
-            lte: end,
-          },
-        },
+        where: { medicalRecord: { visitDate: { gte: start, lte: end } } },
       }),
     ]);
 
@@ -1053,9 +1074,11 @@ export class HealthcareService {
           }),
           this.prisma.medicalPrescription.aggregate({
             where: {
-              createdAt: {
-                gte: periodStart,
-                lte: periodEnd,
+              medicalRecord: {
+                visitDate: {
+                  gte: periodStart,
+                  lte: periodEnd,
+                },
               },
             },
             _sum: {
@@ -1074,8 +1097,9 @@ export class HealthcareService {
         });
 
         const filteredPrescriptions = prescriptions.filter((p) => {
-          const createdAt = new Date(p.createdAt);
-          return createdAt >= periodStart && createdAt <= periodEnd;
+          // Use visitDate from the joined medicalRecord (consistent with DB query above)
+          const visitDate = new Date(p.medicalRecord.visitDate);
+          return visitDate >= periodStart && visitDate <= periodEnd;
         });
 
         periodExaminations = filteredRecords.length;

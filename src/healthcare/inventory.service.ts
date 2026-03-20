@@ -109,8 +109,10 @@ export class InventoryService {
     const transactionDate = data.transactionDate
       ? new Date(data.transactionDate)
       : new Date();
-    const month = transactionDate.getMonth() + 1;
-    const year = transactionDate.getFullYear();
+    // Use UTC methods: dates are stored in UTC in the DB. getUTCMonth()/getUTCFullYear()
+    // ensures month/year assignment is correct regardless of the server's local timezone.
+    const month = transactionDate.getUTCMonth() + 1;
+    const year = transactionDate.getUTCFullYear();
 
     return this.prisma.$transaction(async (prisma) => {
       // 1. Tạo transaction record – lưu amount dạng string Decimal
@@ -2222,10 +2224,10 @@ export class InventoryService {
       where: { medicineId, referenceId, type: 'EXPORT' },
     });
 
-    // 4. Xác định month/year từ transaction đầu tiên
+    // 4. Xác định month/year từ transaction đầu tiên — use UTC to match createInventoryTransaction
     const txDate = oldTx[0].transactionDate;
-    const month = txDate.getMonth() + 1;
-    const year = txDate.getFullYear();
+    const month = txDate.getUTCMonth() + 1;
+    const year = txDate.getUTCFullYear();
 
     // 5. Đọc inventory record của tháng đó
     const inv = await this.prisma.medicineInventory.findUnique({

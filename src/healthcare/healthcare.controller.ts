@@ -121,14 +121,12 @@ export class HealthcareController {
     @Request() req: any,
   ) {
     const user = req.user;
-    console.log('Authenticated user:', user);
     const userRoles: string[] = (user.roles ?? []).map(
       (r: any) => r.roleDefinition?.code ?? r.role?.code ?? r.code ?? r,
     );
     const isStaff = userRoles.some((r) =>
       ['MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN'].includes(r),
     );
-    console.log('User roles:', userRoles, 'Is staff:', isStaff);
     if (!isStaff && user.employeeCode !== employeeCode) {
       throw new ForbiddenException('Không có quyền xem hồ sơ y tế của nhân viên khác');
     }
