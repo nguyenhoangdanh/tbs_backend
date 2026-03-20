@@ -733,21 +733,39 @@ export class InventoryService {
             continue;
           }
 
-          // Try to find existing medicine by name
+          // Try to find existing medicine by name, but only if it doesn't already
+          // have an inventory record for this (month, year). If it does, treat as
+          // a new entry (e.g. duplicate-name rows in the same Excel file for
+          // different batches / sub-items).
           console.log(
             `\n🔍 Searching for medicine by name: ${medicineData.name}`,
           );
-          medicine = await this.prisma.medicine.findFirst({
-            where: {
-              name: medicineData.name,
-              isActive: true,
-            },
+          const candidateByName = await this.prisma.medicine.findFirst({
+            where: { name: medicineData.name, isActive: true },
           });
 
-          if (medicine) {
-            console.log(
-              `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
-            );
+          if (candidateByName) {
+            const alreadyHasInventory =
+              await this.prisma.medicineInventory.findUnique({
+                where: {
+                  medicineId_month_year: {
+                    medicineId: candidateByName.id,
+                    month,
+                    year,
+                  },
+                },
+                select: { medicineId: true },
+              });
+            if (!alreadyHasInventory) {
+              medicine = candidateByName;
+              console.log(
+                `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
+              );
+            } else {
+              console.log(
+                `📋 Medicine "${medicineData.name}" already has inventory for ${month}/${year}, creating new entry`,
+              );
+            }
           } else {
             console.log(
               `🆕 Medicine not found, will create new: ${medicineData.name}`,
