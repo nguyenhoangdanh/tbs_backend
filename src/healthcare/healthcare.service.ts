@@ -852,7 +852,7 @@ export class HealthcareService {
 
 
   async getMedicineUsageStatistics(
-    period: 'day' | 'week' | 'month' = 'month',
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
     startDate?: string,
     endDate?: string,
   ) {
@@ -987,7 +987,7 @@ export class HealthcareService {
   private async generateTrendsData(
     medicalRecords: any[],
     prescriptions: any[],
-    period: 'day' | 'week' | 'month',
+    period: 'day' | 'week' | 'month' | 'year',
     start: Date,
     end: Date,
   ) {
@@ -999,8 +999,11 @@ export class HealthcareService {
       const diffTime = end.getTime() - start.getTime();
       const diffDays = Math.ceil(diffTime / (24 * 60 * 60 * 1000));
       limit = Math.min(diffDays + 1, 31); // Max 31 days, +1 to include both start and end dates
+    } else if (period === 'week') {
+      limit = 7;
     } else {
-      limit = period === 'week' ? 7 : 12;
+      // 'month' or 'year' — show months (up to 12)
+      limit = 12;
     }
 
     for (let i = 0; i < limit; i++) {
@@ -1034,7 +1037,8 @@ export class HealthcareService {
           break;
         }
 
-        case 'month': {
+        case 'month':
+        case 'year': {
           const reverseIndex = limit - 1 - i; // Reverse index for month counting
           const monthDate = new Date(
             end.getFullYear(),
@@ -1122,7 +1126,7 @@ export class HealthcareService {
   }
 
   async getPrescriptionTrends(
-    period: 'day' | 'week' | 'month' = 'month',
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
     limit: number = 12,
   ) {
     const start = this.getDefaultStartDate(period, limit);
@@ -1155,7 +1159,7 @@ export class HealthcareService {
   }
 
   async getTopPrescribedMedicines(
-    period: 'day' | 'week' | 'month' = 'month',
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
     limit: number = 10,
     startDate?: string,
     endDate?: string,
@@ -1226,7 +1230,7 @@ export class HealthcareService {
 
   // Helper methods for date calculations - from working old code
   private getDefaultStartDate(
-    period: 'day' | 'week' | 'month',
+    period: 'day' | 'week' | 'month' | 'year',
     endDate?: Date | number,
   ): Date {
     const now = endDate
@@ -1265,7 +1269,7 @@ export class HealthcareService {
 
   private groupByPeriod(
     prescriptions: any[],
-    period: 'day' | 'week' | 'month',
+    period: 'day' | 'week' | 'month' | 'year',
     limit: number,
   ) {
     const trends = [];
