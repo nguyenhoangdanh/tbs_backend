@@ -699,9 +699,11 @@ export class InventoryService {
       return null;
     }
 
-    // Track medicineIds already claimed in this import run so that duplicate-
-    // name rows in the same Excel file each get a distinct medicine record.
-    const claimedMedicineIds = new Set<string>();
+    // Positional mapping for duplicate-name rows:
+    // Track how many times each name has been seen so far in this import.
+    // The Nth occurrence of a name maps to candidates[N-1] (ordered by createdAt).
+    // This is deterministic and idempotent across re-imports.
+    const nameOccurrenceCounter = new Map<string, number>();
 
     for (const medicineData of medicines) {
       try {
@@ -720,7 +722,6 @@ export class InventoryService {
             );
             // Don't continue - try to create below if name is provided
           } else {
-            claimedMedicineIds.add(medicine.id);
             console.log(
               `\n🔄 Processing existing medicine: ${medicine.name} (ID: ${medicine.id})`,
             );
@@ -738,55 +739,29 @@ export class InventoryService {
             continue;
           }
 
-          // Try to find existing medicine by name.
-          // Use findMany so that duplicate-name rows in the same Excel file each
-          // get matched to a distinct medicine record.
-          // Algorithm: among all medicines with this name, pick the first one that
-          // does NOT yet have an inventory record for (month, year).
-          // If all existing medicines already have inventory → create a new medicine.
+          // Positional lookup: the Nth occurrence of this name in the Excel file
+          // maps to the Nth existing medicine with that name (ordered by createdAt).
+          // If N exceeds the number of existing medicines, a new one will be created.
+          const occurrenceIndex = nameOccurrenceCounter.get(medicineData.name) ?? 0;
+          nameOccurrenceCounter.set(medicineData.name, occurrenceIndex + 1);
+
           console.log(
-            `\n🔍 Searching for medicine by name: ${medicineData.name}`,
+            `\n🔍 Searching for medicine by name: ${medicineData.name} (occurrence #${occurrenceIndex + 1})`,
           );
           const candidatesByName = await this.prisma.medicine.findMany({
             where: { name: medicineData.name, isActive: true },
             orderBy: { createdAt: 'asc' },
           });
 
-          for (const candidate of candidatesByName) {
-            // Skip candidates already claimed by a previous row in this import
-            if (claimedMedicineIds.has(candidate.id)) continue;
-
-            const hasInventory =
-              await this.prisma.medicineInventory.findUnique({
-                where: {
-                  medicineId_month_year: {
-                    medicineId: candidate.id,
-                    month,
-                    year,
-                  },
-                },
-                select: { medicineId: true },
-              });
-            if (!hasInventory) {
-              medicine = candidate;
-              claimedMedicineIds.add(candidate.id);
-              console.log(
-                `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
-              );
-              break;
-            }
-          }
-
-          if (!medicine) {
-            if (candidatesByName.length > 0) {
-              console.log(
-                `📋 All medicines named "${medicineData.name}" already have inventory for ${month}/${year}, creating new entry`,
-              );
-            } else {
-              console.log(
-                `🆕 Medicine not found, will create new: ${medicineData.name}`,
-              );
-            }
+          if (occurrenceIndex < candidatesByName.length) {
+            medicine = candidatesByName[occurrenceIndex];
+            console.log(
+              `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
+            );
+          } else {
+            console.log(
+              `🆕 No medicine at position ${occurrenceIndex} for name "${medicineData.name}", will create new`,
+            );
           }
         }
 
