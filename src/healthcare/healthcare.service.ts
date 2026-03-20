@@ -40,6 +40,24 @@ export class HealthcareService {
     return new Date(`${dateStr}T12:00:00+07:00`);
   }
 
+  // For CREATE: if visitDate is today (VN), use actual current time; otherwise noon
+  private parseVisitDateForCreate(dateStr: string): Date {
+    const nowVN = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Ho_Chi_Minh' }));
+    const todayVN = `${nowVN.getFullYear()}-${String(nowVN.getMonth() + 1).padStart(2, '0')}-${String(nowVN.getDate()).padStart(2, '0')}`;
+    if (dateStr === todayVN) {
+      return new Date(); // actual current timestamp
+    }
+    return this.parseVisitDate(dateStr); // past/future date → noon
+  }
+
+  // For UPDATE: keep existing time, only change the date portion
+  private mergeVisitDateTime(newDateStr: string, existingDate: Date): Date {
+    const noon = this.parseVisitDate(newDateStr);
+    // Replace date portion but keep existing time
+    noon.setUTCHours(existingDate.getUTCHours(), existingDate.getUTCMinutes(), existingDate.getUTCSeconds(), 0);
+    return noon;
+  }
+
   // Dashboard statistics for healthcare
   async getDashboardStats() {
     // "Today" boundaries in Vietnam time (UTC+7): midnight to 23:59:59
@@ -364,7 +382,7 @@ export class HealthcareService {
       const medicalRecord = await prisma.medicalRecord.create({
         data: {
           ...recordData,
-          visitDate: data.visitDate ? this.parseVisitDate(data.visitDate) : new Date(),
+          visitDate: data.visitDate ? this.parseVisitDateForCreate(data.visitDate) : new Date(),
           prescriptions:
             prescriptionCreateData.length > 0
               ? {
@@ -464,12 +482,16 @@ export class HealthcareService {
         select: { doctorId: true, visitDate: true },
       });
 
-      // 3. Cập nhật thông tin cơ bản của medical record
+      // 3. Cập nhật thông tin cơ bản của medical record — giữ nguyên giờ khám gốc
+      const newVisitDate = data.visitDate && medicalRecord
+        ? this.mergeVisitDateTime(data.visitDate, medicalRecord.visitDate)
+        : undefined;
+
       await prisma.medicalRecord.update({
         where: { id },
         data: {
           ...recordData,
-          ...(data.visitDate && { visitDate: this.parseVisitDate(data.visitDate) }),
+          ...(newVisitDate && { visitDate: newVisitDate }),
         },
       });
 
@@ -536,10 +558,7 @@ export class HealthcareService {
               type: InventoryTransactionTypeDto.EXPORT,
               quantity: p.quantity,
               unitPrice: String(currentStock.unitPrice || '0'),
-              transactionDate: (data.visitDate
-                ? this.parseVisitDate(data.visitDate)
-                : medicalRecord?.visitDate ?? new Date()
-              ).toISOString(),
+              transactionDate: (newVisitDate ?? medicalRecord?.visitDate ?? new Date()).toISOString(),
               referenceType: 'MEDICAL_RECORD',
               referenceId: id,
               notes: `Xuất thuốc theo đơn (cập nhật) - Đơn #${id.slice(-8)}`,
@@ -726,7 +745,7 @@ export class HealthcareService {
         data: {
           ...recordData,
           patientId: patient.id,
-          visitDate: data.visitDate ? this.parseVisitDate(data.visitDate) : new Date(),
+          visitDate: data.visitDate ? this.parseVisitDateForCreate(data.visitDate) : new Date(),
           prescriptions:
             prescriptionCreateData.length > 0
               ? {
