@@ -993,16 +993,20 @@ export class HealthcareService {
   ) {
     const trends = [];
 
-    // For day filter with custom date range, calculate actual days between start and end
+    // Calculate limit based on period
     let limit: number;
     if (period === 'day') {
       const diffTime = end.getTime() - start.getTime();
       const diffDays = Math.ceil(diffTime / (24 * 60 * 60 * 1000));
-      limit = Math.min(diffDays + 1, 31); // Max 31 days, +1 to include both start and end dates
+      limit = Math.min(diffDays + 1, 31);
     } else if (period === 'week') {
       limit = 7;
+    } else if (period === 'month') {
+      // Show every day in the month
+      const daysInMonth = new Date(start.getFullYear(), start.getMonth() + 1, 0).getDate();
+      limit = daysInMonth;
     } else {
-      // 'month' or 'year' — show months (up to 12)
+      // 'year' — show 12 months
       limit = 12;
     }
 
@@ -1037,9 +1041,19 @@ export class HealthcareService {
           break;
         }
 
-        case 'month':
+        case 'month': {
+          // Each day of the month
+          periodStart = new Date(start.getTime() + i * 24 * 60 * 60 * 1000);
+          periodStart.setHours(0, 0, 0, 0);
+          periodEnd = new Date(periodStart);
+          periodEnd.setHours(23, 59, 59, 999);
+          if (periodStart > end) break;
+          label = `${periodStart.getDate()}/${periodStart.getMonth() + 1}`;
+          break;
+        }
+
         case 'year': {
-          const reverseIndex = limit - 1 - i; // Reverse index for month counting
+          const reverseIndex = limit - 1 - i;
           const monthDate = new Date(
             end.getFullYear(),
             end.getMonth() - reverseIndex,
@@ -1060,13 +1074,12 @@ export class HealthcareService {
           continue;
       }
 
-      // For day filter, we need to fetch data for each day from database
-      // For week/month, use filtered data as before
+      // day/week/month: fetch per-day from DB; year: filter in-memory from pre-loaded data
       let periodExaminations = 0;
       let medicinesDispensed = 0;
 
-      if (period === 'day' || period === 'week') {
-        // Fetch actual data for this specific day from database (both day and week use daily data)
+      if (period === 'day' || period === 'week' || period === 'month') {
+        // Fetch actual data for this specific day from database
         const [dayRecords, dayPrescriptions] = await Promise.all([
           this.prisma.medicalRecord.count({
             where: {
@@ -1094,14 +1107,13 @@ export class HealthcareService {
         periodExaminations = dayRecords;
         medicinesDispensed = dayPrescriptions._sum.quantity || 0;
       } else {
-        // For month: use filtered data as before
+        // year: filter in-memory by month bucket
         const filteredRecords = medicalRecords.filter((record) => {
           const visitDate = new Date(record.visitDate);
           return visitDate >= periodStart && visitDate <= periodEnd;
         });
 
         const filteredPrescriptions = prescriptions.filter((p) => {
-          // Use visitDate from the joined medicalRecord (consistent with DB query above)
           const visitDate = new Date(p.medicalRecord.visitDate);
           return visitDate >= periodStart && visitDate <= periodEnd;
         });
@@ -1256,11 +1268,15 @@ export class HealthcareService {
         return startOfWeek;
       }
       case 'month': {
-        // Start of month based on endDate
+        // Start of current month (daily breakdown)
         const startOfMonth = new Date(now);
         startOfMonth.setDate(1);
         startOfMonth.setHours(0, 0, 0, 0);
         return startOfMonth;
+      }
+      case 'year': {
+        // Start of current year (monthly breakdown)
+        return new Date(now.getFullYear(), 0, 1);
       }
       default:
         return new Date(now.getFullYear(), now.getMonth() - 1, 1);
