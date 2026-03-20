@@ -713,9 +713,11 @@ export class InventoryService {
       return null;
     }
 
-    // Track medicineIds already claimed in this import run so that duplicate-
-    // name rows in the same Excel file each get a distinct medicine record.
-    const claimedMedicineIds = new Set<string>();
+    // Positional mapping for duplicate-name rows:
+    // Track how many times each name has been seen so far in this import.
+    // The Nth occurrence of a name maps to candidates[N-1] (ordered by createdAt).
+    // This is deterministic and idempotent across re-imports.
+    const nameOccurrenceCounter = new Map<string, number>();
 
     for (const medicineData of medicines) {
       try {
@@ -734,7 +736,6 @@ export class InventoryService {
             );
             // Don't continue - try to create below if name is provided
           } else {
-            claimedMedicineIds.add(medicine.id);
             console.log(
               `\n🔄 Processing existing medicine: ${medicine.name} (ID: ${medicine.id})`,
             );
@@ -752,55 +753,29 @@ export class InventoryService {
             continue;
           }
 
-          // Try to find existing medicine by name.
-          // Use findMany so that duplicate-name rows in the same Excel file each
-          // get matched to a distinct medicine record.
-          // Algorithm: among all medicines with this name, pick the first one that
-          // does NOT yet have an inventory record for (month, year).
-          // If all existing medicines already have inventory → create a new medicine.
+          // Positional lookup: the Nth occurrence of this name in the Excel file
+          // maps to the Nth existing medicine with that name (ordered by createdAt).
+          // If N exceeds the number of existing medicines, a new one will be created.
+          const occurrenceIndex = nameOccurrenceCounter.get(medicineData.name) ?? 0;
+          nameOccurrenceCounter.set(medicineData.name, occurrenceIndex + 1);
+
           console.log(
-            `\n🔍 Searching for medicine by name: ${medicineData.name}`,
+            `\n🔍 Searching for medicine by name: ${medicineData.name} (occurrence #${occurrenceIndex + 1})`,
           );
           const candidatesByName = await this.prisma.medicine.findMany({
             where: { name: medicineData.name, isActive: true },
             orderBy: { createdAt: 'asc' },
           });
 
-          for (const candidate of candidatesByName) {
-            // Skip candidates already claimed by a previous row in this import
-            if (claimedMedicineIds.has(candidate.id)) continue;
-
-            const hasInventory =
-              await this.prisma.medicineInventory.findUnique({
-                where: {
-                  medicineId_month_year: {
-                    medicineId: candidate.id,
-                    month,
-                    year,
-                  },
-                },
-                select: { medicineId: true },
-              });
-            if (!hasInventory) {
-              medicine = candidate;
-              claimedMedicineIds.add(candidate.id);
-              console.log(
-                `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
-              );
-              break;
-            }
-          }
-
-          if (!medicine) {
-            if (candidatesByName.length > 0) {
-              console.log(
-                `📋 All medicines named "${medicineData.name}" already have inventory for ${month}/${year}, creating new entry`,
-              );
-            } else {
-              console.log(
-                `🆕 Medicine not found, will create new: ${medicineData.name}`,
-              );
-            }
+          if (occurrenceIndex < candidatesByName.length) {
+            medicine = candidatesByName[occurrenceIndex];
+            console.log(
+              `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
+            );
+          } else {
+            console.log(
+              `🆕 No medicine at position ${occurrenceIndex} for name "${medicineData.name}", will create new`,
+            );
           }
         }
 
@@ -1623,24 +1598,46 @@ export class InventoryService {
       ],
     });
 
-    // Lấy tồn cuối năm trước (tháng 12 của năm trước)
-    const previousYearClosing = await this.prisma.medicineInventory.findMany({
+    // Tồn đầu năm = tồn cuối kỳ tháng 12 năm trước.
+    // Fallback: nếu không có tháng 12 năm trước thì lấy tồn đầu kỳ tháng 1 năm hiện tại
+    // (hai giá trị này phải bằng nhau nếu dữ liệu liên tục).
+    const dec31PrevYear = await this.prisma.medicineInventory.findMany({
       where: {
         month: 12,
         year: year - 1,
-        ...(categoryId && {
-          medicine: {
-            categoryId,
-          },
-        }),
+        ...(categoryId && { medicine: { categoryId } }),
       },
-      include: {
-        medicine: {
-          include: {
-            category: true,
-          },
-        },
+      include: { medicine: { include: { category: true } } },
+    });
+
+    const jan1CurrYear = await this.prisma.medicineInventory.findMany({
+      where: {
+        month: 1,
+        year,
+        ...(categoryId && { medicine: { categoryId } }),
       },
+      include: { medicine: { include: { category: true } } },
+    });
+
+    // Build a map: medicineId → previousYearClosing (prefer Dec31 source)
+    const prevYearMap = new Map<string, { quantity: number; unitPrice: string; totalAmount: string }>();
+
+    // Populate from January opening first (lower priority)
+    jan1CurrYear.forEach((inv) => {
+      prevYearMap.set(inv.medicineId, {
+        quantity: Number(inv.openingQuantity || 0),
+        unitPrice: D(inv.openingUnitPrice).toFixed(),
+        totalAmount: D(inv.openingTotalAmount).toFixed(),
+      });
+    });
+
+    // Override with December closing (higher priority — more accurate source)
+    dec31PrevYear.forEach((inv) => {
+      prevYearMap.set(inv.medicineId, {
+        quantity: Number(inv.closingQuantity || 0),
+        unitPrice: D(inv.closingUnitPrice).toFixed(),
+        totalAmount: D(inv.closingTotalAmount).toFixed(),
+      });
     });
 
     // Group by medicine
@@ -1688,15 +1685,11 @@ export class InventoryService {
       }
     });
 
-    // Add previous year closing
-    previousYearClosing.forEach((inv) => {
-      if (medicineGroups.has(inv.medicineId)) {
-        const data = medicineGroups.get(inv.medicineId);
-        data.previousYearClosing = {
-          quantity: Number(inv.closingQuantity || 0),
-          unitPrice: D(inv.closingUnitPrice).toFixed(),
-          totalAmount: D(inv.closingTotalAmount).toFixed(),
-        };
+    // Populate previousYearClosing for each medicine in the current year
+    medicineGroups.forEach((data, medicineId) => {
+      const prev = prevYearMap.get(medicineId);
+      if (prev) {
+        data.previousYearClosing = prev;
       }
     });
 
@@ -2393,6 +2386,10 @@ export class InventoryService {
    *   1. "QT THUỐC THÁNG 09 NĂM 2025 _ ĐỀ NGHỊ MUA THUỐC THÁNG 10 NĂM 2025"
    *   2. "QUYẾT TOÁN THUỐC THÁNG 01 NĂM 2026"                (no suggested)
    *   3. "QUYẾT TOÁN THUỐC THÁNG 02 MUA MỚI THUỐC THÁNG 03 NĂM 2026"
+   *
+   * Rules:
+   *   - currentMonth/Year: first THÁNG XX NĂM YYYY found in title
+   *   - suggestedMonth/Year: second THÁNG … found, else currentMonth+1
    */
   private extractMonthYearFromTitle(title: string): {
     currentMonth: number;
@@ -2406,13 +2403,20 @@ export class InventoryService {
     const t = title.replace(/\s+/g, ' ').trim().toUpperCase();
     console.log(`🔍 Normalized title: ${t}`);
 
-    // Step 1: find the last NĂM YYYY in the title for bare-month year fallback
+    // Strategy:
+    //   1. Collect all "THÁNG XX NĂM YYYY" tokens (fully qualified).
+    //   2. Also collect bare "THÁNG XX" tokens that are NOT immediately
+    //      followed by NĂM — these inherit the year from the last NĂM YYYY
+    //      found anywhere in the title.
+    //   3. Merge into ordered list by position → first = current, second = suggested.
+
+    // Step 1: extract the year(s) present in the title (for bare-month fallback)
     const yearMatches = [...t.matchAll(/N[AĂ]M\s+(\d{4})/g)];
     const lastYear = yearMatches.length > 0
       ? parseInt(yearMatches[yearMatches.length - 1][1])
       : new Date().getFullYear();
 
-    // Step 2: collect all THÁNG tokens with position
+    // Step 2: collect all THÁNG tokens with their position
     type MonthToken = { pos: number; month: number; year: number };
     const tokens: MonthToken[] = [];
 
@@ -2423,12 +2427,14 @@ export class InventoryService {
       tokens.push({ pos: fm.index, month: parseInt(fm[1]), year: parseInt(fm[2]) });
     }
 
-    // Bare: THÁNG XX (not immediately followed by NĂM)
+    // Bare: THÁNG XX (not followed by NĂM — look-ahead via exclusion)
     const bareRe = /TH[AÁ]NG\s+(\d{1,2})(?!\s+N[AĂ]M)/g;
     let bm: RegExpExecArray | null;
     while ((bm = bareRe.exec(t)) !== null) {
+      const month = parseInt(bm[1]);
+      // Avoid duplicates already captured by fullRe
       if (!tokens.some((tok) => tok.pos === bm!.index)) {
-        tokens.push({ pos: bm.index, month: parseInt(bm[1]), year: lastYear });
+        tokens.push({ pos: bm.index, month, year: lastYear });
       }
     }
 
@@ -2437,6 +2443,7 @@ export class InventoryService {
       return null;
     }
 
+    // Sort by position in the title string
     tokens.sort((a, b) => a.pos - b.pos);
 
     const currentMonth = tokens[0].month;
@@ -2446,9 +2453,11 @@ export class InventoryService {
     let suggestedYear: number;
 
     if (tokens.length >= 2) {
+      // Second token is the suggested purchase month
       suggestedMonth = tokens[1].month;
       suggestedYear = tokens[1].year;
     } else {
+      // No explicit suggested month — default to next calendar month
       suggestedMonth = currentMonth + 1;
       suggestedYear = currentYear;
       if (suggestedMonth > 12) {
