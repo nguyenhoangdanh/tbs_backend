@@ -713,6 +713,10 @@ export class InventoryService {
       return null;
     }
 
+    // Track medicineIds already claimed in this import run so that duplicate-
+    // name rows in the same Excel file each get a distinct medicine record.
+    const claimedMedicineIds = new Set<string>();
+
     for (const medicineData of medicines) {
       try {
         // Support both medicineId (for updates) and name (for new imports)
@@ -730,6 +734,7 @@ export class InventoryService {
             );
             // Don't continue - try to create below if name is provided
           } else {
+            claimedMedicineIds.add(medicine.id);
             console.log(
               `\n🔄 Processing existing medicine: ${medicine.name} (ID: ${medicine.id})`,
             );
@@ -762,6 +767,9 @@ export class InventoryService {
           });
 
           for (const candidate of candidatesByName) {
+            // Skip candidates already claimed by a previous row in this import
+            if (claimedMedicineIds.has(candidate.id)) continue;
+
             const hasInventory =
               await this.prisma.medicineInventory.findUnique({
                 where: {
@@ -775,6 +783,7 @@ export class InventoryService {
               });
             if (!hasInventory) {
               medicine = candidate;
+              claimedMedicineIds.add(candidate.id);
               console.log(
                 `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
               );
