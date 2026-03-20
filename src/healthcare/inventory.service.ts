@@ -23,6 +23,8 @@ function D(v: unknown): Prisma.Decimal {
   return new Prisma.Decimal(String(v));
 }
 
+/**
+
 /** Serialize one MedicineInventory row for API response:
  *  - Quantities returned as Number (integers / simple decimals)
  *  - Unit-prices and amounts returned as STRING to preserve up to 20 d.p.
@@ -107,8 +109,10 @@ export class InventoryService {
     const transactionDate = data.transactionDate
       ? new Date(data.transactionDate)
       : new Date();
-    const month = transactionDate.getMonth() + 1;
-    const year = transactionDate.getFullYear();
+    // Use UTC methods: dates are stored in UTC in the DB. getUTCMonth()/getUTCFullYear()
+    // ensures month/year assignment is correct regardless of the server's local timezone.
+    const month = transactionDate.getUTCMonth() + 1;
+    const year = transactionDate.getUTCFullYear();
 
     return this.prisma.$transaction(async (prisma) => {
       // 1. Tạo transaction record – lưu amount dạng string Decimal
@@ -236,23 +240,35 @@ export class InventoryService {
         ...(expiryDate ? { expiryDate } : {}),
       };
     } else if (transactionType === InventoryTransactionTypeDto.EXPORT) {
+      // ĐG xuất = IFERROR((G*H + J*K)/(G+J), 0)
+      // rawPrice: float64 arithmetic như Excel (dùng để tính TT)
+      // normPrice: toPrecision(15) để lưu unit price (khớp với giá Excel hiển thị)
+      // Tách 2 giá trị vì: qty * normPrice ≠ qty * rawPrice (sai số float64 tích lũy)
+      const G = Number(inventory.openingQuantity);
+      const H = Number(inventory.openingUnitPrice);
+      const J = Number(inventory.monthlyImportQuantity);
+      const K = Number(inventory.monthlyImportUnitPrice);
+      const totalQtyForPrice = G + J;
+      const formulaPrice = totalQtyForPrice > 0 ? (G * H + J * K) / totalQtyForPrice : 0;
+      // Fallback sang dPrice khi formula = 0 (H=0 và K=0 → chưa có giá trong DB)
+      const rawPrice = formulaPrice > 0 ? formulaPrice : Number(dPrice);
+      const normPrice = D(rawPrice.toPrecision(15)); // lưu unit price (15 sig digits)
+
       const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(dQty);
-      const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(
-        dAmount,
-      );
-      const newMonthExportPrice = newMonthExportQty.gt(0)
-        ? newMonthExportAmount.div(newMonthExportQty)
-        : dPrice;
+      // TT tháng = totalQty × rawPrice (float64), normalize 15 sig để khớp Excel display
+      const newMonthExportAmount = D((Number(newMonthExportQty) * rawPrice).toPrecision(15));
 
       const newYearExportQty = D(inventory.yearlyExportQuantity).plus(dQty);
-      const newYearExportAmount = D(inventory.yearlyExportAmount).plus(dAmount);
+      // Yearly amount: dùng rawPrice (KHÔNG toPrecision(15)) để tránh mất precision khi chia lại
+      const addedExportAmt = D(Number(dQty) * rawPrice);
+      const newYearExportAmount = D(inventory.yearlyExportAmount).plus(addedExportAmt);
       const newYearExportPrice = newYearExportQty.gt(0)
-        ? newYearExportAmount.div(newYearExportQty)
-        : dPrice;
+        ? D(Number(newYearExportAmount.div(newYearExportQty)).toPrecision(15))
+        : normPrice;
 
       updateData = {
         monthlyExportQuantity: newMonthExportQty.toFixed(),
-        monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+        monthlyExportUnitPrice: normPrice.toFixed(),
         monthlyExportAmount: newMonthExportAmount.toFixed(),
         yearlyExportQuantity: newYearExportQty.toFixed(),
         yearlyExportUnitPrice: newYearExportPrice.toFixed(),
@@ -288,29 +304,30 @@ export class InventoryService {
         };
       } else {
         const adjQty = dQty.abs();
-        const adjAmount = dAmount.abs();
 
-        const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(
-          adjQty,
-        );
-        const newMonthExportAmount = D(inventory.monthlyExportAmount).plus(
-          adjAmount,
-        );
-        const newMonthExportPrice = newMonthExportQty.gt(0)
-          ? newMonthExportAmount.div(newMonthExportQty)
-          : dPrice.abs();
+        // ADJUSTMENT xuất: float64 arithmetic như Excel, rồi toPrecision(15)
+        const Gadj = Number(inventory.openingQuantity);
+        const Hadj = Number(inventory.openingUnitPrice);
+        const Jadj = Number(inventory.monthlyImportQuantity);
+        const Kadj = Number(inventory.monthlyImportUnitPrice);
+        const totalQtyAdj = Gadj + Jadj;
+        const formulaPriceAdj = totalQtyAdj > 0 ? (Gadj * Hadj + Jadj * Kadj) / totalQtyAdj : 0;
+        const rawPriceAdj = formulaPriceAdj > 0 ? formulaPriceAdj : Number(dPrice.abs());
+        const normPriceAdj = D(rawPriceAdj.toPrecision(15));
+
+        const newMonthExportQty = D(inventory.monthlyExportQuantity).plus(adjQty);
+        const newMonthExportAmount = D((Number(newMonthExportQty) * rawPriceAdj).toPrecision(15));
 
         const newYearExportQty = D(inventory.yearlyExportQuantity).plus(adjQty);
-        const newYearExportAmount = D(inventory.yearlyExportAmount).plus(
-          adjAmount,
-        );
+        const addedExportAmtAdj = D(Number(adjQty) * rawPriceAdj); // no toPrecision → yearly chia lại đúng
+        const newYearExportAmount = D(inventory.yearlyExportAmount).plus(addedExportAmtAdj);
         const newYearExportPrice = newYearExportQty.gt(0)
-          ? newYearExportAmount.div(newYearExportQty)
-          : dPrice.abs();
+          ? D(Number(newYearExportAmount.div(newYearExportQty)).toPrecision(15))
+          : normPriceAdj;
 
         updateData = {
           monthlyExportQuantity: newMonthExportQty.toFixed(),
-          monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+          monthlyExportUnitPrice: normPriceAdj.toFixed(),
           monthlyExportAmount: newMonthExportAmount.toFixed(),
           yearlyExportQuantity: newYearExportQty.toFixed(),
           yearlyExportUnitPrice: newYearExportPrice.toFixed(),
@@ -337,16 +354,15 @@ export class InventoryService {
       .plus(finalImportQty)
       .minus(finalExportQty);
 
-    // Giá trị tổng = (Tồn đầu × ĐG đầu) + Nhập - Xuất
-    const totalValue = D(inventory.openingQuantity)
-      .times(D(inventory.openingUnitPrice))
+    // TT tổng = TT tồn đầu (đã lưu) + Nhập - Xuất  (balance sheet, chính xác)
+    const closingAmount = D(inventory.openingTotalAmount)
       .plus(finalImportAmount)
       .minus(finalExportAmount);
-
-    const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
-      : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
+    // ĐG tồn cuối = ĐG xuất (col N) = IFERROR((G*H+J*K)/(G+J),0)
+    // Lấy từ updateData nếu vừa tính (EXPORT/ADJUSTMENT), fallback từ inventory
+    const closingPrice = D(
+      updateData.monthlyExportUnitPrice ?? inventory.monthlyExportUnitPrice,
+    );
 
     updateData.closingQuantity = closingQty.toFixed();
     updateData.closingUnitPrice = closingPrice.toFixed();
@@ -530,10 +546,11 @@ export class InventoryService {
           const closingPrice = D(
             medicineData.closingUnitPrice ?? medicineData.openingUnitPrice,
           ).toFixed();
+          // TT tồn cuối = TT tồn đầu + TT nhập - TT xuất (balance sheet, tránh round-trip error)
           const closingAmount =
             medicineData.closingTotalAmount !== undefined
               ? D(medicineData.closingTotalAmount).toFixed()
-              : D(closingQty).times(D(closingPrice)).toFixed();
+              : D(openingAmount).plus(D(monthlyImportAmount)).minus(D(monthlyExportAmount)).toFixed();
 
           const yearlyImportQty =
             Number(medicineData.yearlyImportQuantity) || 0;
@@ -665,7 +682,6 @@ export class InventoryService {
     const prevMonth = month === 1 ? 12 : month - 1;
     const prevYear = month === 1 ? year - 1 : year;
 
-    // Helper to parse expiry date strings (accepts ISO or DD/MM/YYYY)
     // Helper to parse expiry date strings.
     // Supports: ISO (YYYY-MM-DD), DD/MM/YYYY, D/M/YYYY.
     // IMPORTANT: never pass slash-separated strings to new Date() — JS parses
@@ -911,7 +927,10 @@ export class InventoryService {
             // ── Dùng Decimal để giữ toàn bộ chữ số thập phân ──
             const dOpenQty = D(prevInventory?.closingQuantity);
             const dOpenPrice = D(prevInventory?.closingUnitPrice);
-            const dOpenAmt = dOpenQty.times(dOpenPrice);
+            // Dùng closingTotalAmount đã lưu thay vì tính lại qty*price
+            const dOpenAmt = prevInventory
+              ? D(prevInventory.closingTotalAmount)
+              : new Prisma.Decimal(0);
 
             const dImportQty = D(importQty);
             const dImportPrice = D(importPrice);
@@ -935,16 +954,14 @@ export class InventoryService {
             const dExportPrice = dOpenPrice.gt(0) ? dOpenPrice : dImportPrice;
             const dExportAmt = dExportQty.times(dExportPrice);
 
-            // Tồn cuối kỳ = Tồn đầu + Nhập - Xuất
+            // Tồn cuối kỳ = Tồn đầu + Nhập - Xuất (balance sheet)
             const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
-            // Giá bình quân gia quyền
-            const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+            const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
             const dClosingPrice = dClosingQty.gt(0)
-              ? totalVal.div(dClosingQty)
+              ? dClosingAmt.div(dClosingQty)
               : dImportPrice.gt(0)
                 ? dImportPrice
                 : dOpenPrice;
-            const dClosingAmt = dClosingQty.times(dClosingPrice);
 
             // Lũy kế năm = tháng trước + tháng này
             const dYtdImportQty = dPrevYtdImportQty.plus(dImportQty);
@@ -1004,7 +1021,10 @@ export class InventoryService {
             const dCurrOpenPr = prevRecForOpen
               ? D(prevRecForOpen.closingUnitPrice)
               : D(existingInventory.openingUnitPrice);
-            const dCurrOpenAm = dCurrOpen.times(dCurrOpenPr);
+            // Dùng closingTotalAmount đã lưu thay vì tính lại qty*price
+            const dCurrOpenAm = prevRecForOpen
+              ? D(prevRecForOpen.closingTotalAmount)
+              : D(existingInventory.openingTotalAmount);
             const dCurrExport = D(existingInventory.monthlyExportQuantity);
             const dCurrExpAmt = D(existingInventory.monthlyExportAmount);
 
@@ -1012,19 +1032,18 @@ export class InventoryService {
             const dNewImportPr = D(importPrice);
             const dNewImportAmt = D(importAmount);
 
-            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (bằng Decimal)
+            // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (balance sheet)
             const dNewClosingQty = dCurrOpen
               .plus(dNewImportQty)
               .minus(dCurrExport);
-            const totalValNew = dCurrOpenAm
+            const dNewClosingAmt = dCurrOpenAm
               .plus(dNewImportAmt)
               .minus(dCurrExpAmt);
             const dNewClosingPr = dNewClosingQty.gt(0)
-              ? totalValNew.div(dNewClosingQty)
+              ? dNewClosingAmt.div(dNewClosingQty)
               : dNewImportPr.gt(0)
                 ? dNewImportPr
                 : dCurrOpenPr;
-            const dNewClosingAmt = dNewClosingQty.times(dNewClosingPr);
 
             // Lũy kế năm = tháng trước + tháng này (export giữ nguyên từ DB)
             const dNewYtdImportQty = dPrevYtdImportQty.plus(dNewImportQty);
@@ -2205,10 +2224,10 @@ export class InventoryService {
       where: { medicineId, referenceId, type: 'EXPORT' },
     });
 
-    // 4. Xác định month/year từ transaction đầu tiên
+    // 4. Xác định month/year từ transaction đầu tiên — use UTC to match createInventoryTransaction
     const txDate = oldTx[0].transactionDate;
-    const month = txDate.getMonth() + 1;
-    const year = txDate.getFullYear();
+    const month = txDate.getUTCMonth() + 1;
+    const year = txDate.getUTCFullYear();
 
     // 5. Đọc inventory record của tháng đó
     const inv = await this.prisma.medicineInventory.findUnique({
@@ -2240,15 +2259,13 @@ export class InventoryService {
       .plus(D(inv.monthlyImportQuantity))
       .minus(newMonthExportQty);
 
-    const totalValue = D(inv.openingQuantity)
-      .times(D(inv.openingUnitPrice))
+    // TT tổng = TT tồn đầu (đã lưu) + Nhập - Xuất  (balance sheet, chính xác)
+    const closingAmount2 = D(inv.openingTotalAmount)
       .plus(D(inv.monthlyImportAmount))
       .minus(newMonthExportAmount);
-
-    const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
+    const closingPrice2 = closingQty.gt(0)
+      ? closingAmount2.div(closingQty)
       : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
 
     // 8. Cập nhật MedicineInventory
     await this.prisma.medicineInventory.update({
@@ -2261,8 +2278,8 @@ export class InventoryService {
         yearlyExportUnitPrice: newYearExportPrice.toFixed(),
         yearlyExportAmount: newYearExportAmount.toFixed(),
         closingQuantity: closingQty.toFixed(),
-        closingUnitPrice: closingPrice.toFixed(),
-        closingTotalAmount: closingAmount.toFixed(),
+        closingUnitPrice: closingPrice2.toFixed(),
+        closingTotalAmount: closingAmount2.toFixed(),
       },
     });
     // Cascade opening forward so subsequent months stay in sync
@@ -2309,11 +2326,13 @@ export class InventoryService {
     const exportAmount = D(existing?.monthlyExportAmount ?? 0);
 
     const closingQty = openingQty.plus(importQty).minus(exportQty);
-    const totalValue = openingAmount.plus(importAmount).minus(exportAmount);
+    // TT tổng = TT tồn đầu + Nhập - Xuất (balance sheet)
+    // Với manual update: openingAmount = openingQty * openingPrice (user input)
+    const closingTotalValue = openingAmount.plus(importAmount).minus(exportAmount);
     const closingPrice = closingQty.gt(0)
-      ? totalValue.div(closingQty)
+      ? closingTotalValue.div(closingQty)
       : new Prisma.Decimal(0);
-    const closingAmount = closingQty.times(closingPrice);
+    const closingAmount = closingTotalValue;
 
     const result = await this.prisma.medicineInventory.upsert({
       where: {
@@ -2479,24 +2498,32 @@ export class InventoryService {
 
     console.log(`📋 Sheet name: ${sheetName}`);
 
-    // Read title row (row 1) — search first non-empty cell in row that
-    // looks like an inventory title (contains THÁNG + NĂM keywords)
+    // Read title — search rows 1–3, columns A–AB for the cell containing
+    // "THÁNG XX NĂM YYYY" (the canonical inventory title keywords).
+    // Merged cells in Excel only populate the top-left cell of the merge,
+    // so we cast a wide net rather than assuming a fixed cell address.
     let title = '';
-    const possibleTitleCells = ['A1', 'B1', 'C1', 'D1', 'E1', 'F1'];
-    for (const cellRef of possibleTitleCells) {
-      const cell = worksheet[cellRef];
-      if (cell?.v || cell?.w) {
-        const cellValue = (cell.v || cell.w || '').toString();
+    const cols = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').concat(
+      ['AA', 'AB'],
+    );
+    outer: for (let row = 1; row <= 3; row++) {
+      for (const col of cols) {
+        const cell = worksheet[`${col}${row}`];
+        if (!cell) continue;
+        const cellValue = (cell.v ?? cell.w ?? '').toString().trim();
+        if (!cellValue) continue;
         const upper = cellValue.toUpperCase();
-        // Accept any title that contains THÁNG … NĂM (the canonical keywords)
-        if (upper.includes('TH') && upper.includes('NG') && upper.includes('N') && upper.includes('M') && /TH[AÁ]NG\s+\d/.test(upper)) {
+        // Accept any cell that contains a THÁNG XX pattern (the required keyword)
+        if (/TH[AÁ]NG\s+\d/.test(upper)) {
           title = cellValue;
-          break;
+          console.log(`📋 Title found in cell ${col}${row}: ${title}`);
+          break outer;
         }
       }
     }
-
-    console.log(`📋 Title found: ${title}`);
+    if (!title) {
+      console.warn('⚠️ No title cell found in rows 1–3. All A1-AB3 cells scanned.');
+    }
 
     // Extract month/year from title
     const dateInfo = this.extractMonthYearFromTitle(title);
@@ -2522,6 +2549,7 @@ export class InventoryService {
     let skipped = 0;
     let errors: any[] = [];
     let currentCategory: string | undefined;
+    const importedMedicineIds = new Set<string>(); // track for next-month seeding
 
     // Positional mapping: count occurrences of each (categoryCode:name) pair
     // so duplicate-name rows within the same category map to distinct medicine records.
@@ -2540,11 +2568,37 @@ export class InventoryService {
         const secondCell = row[1]?.toString() || '';
 
         const categoryMatch = firstCell.match(
-          /^(I|II|III|IV|V|VI|VII|VIII|IX|X|XI|XII|XIII|XIV|XV|XVI|XVII)\s*-/,
+          /^(I{1,3}V?|VI{0,3}|IX|XI{0,3}V?|XIV|XVI{0,2}|XVII)\s*[-–]\s*(.+)/,
         );
         if (categoryMatch) {
-          currentCategory = categoryMatch[1];
-          console.log(`\n📁 Category: ${currentCategory} - ${firstCell}`);
+          const catCode = categoryMatch[1].trim();
+          const catName = categoryMatch[2].trim().toUpperCase();
+          currentCategory = catCode;
+          console.log(`\n📁 Category: ${catCode} - ${catName}`);
+
+          // Determine type from name
+          const isEmergency = /CẤP CỨU/i.test(catName);
+          const isEquipment = /VẬT TƯ|DỤNG CỤ|THIẾT BỊ/i.test(catName);
+          const catType = isEmergency
+            ? 'EMERGENCY_SUPPLY'
+            : isEquipment
+              ? 'MEDICAL_EQUIPMENT'
+              : 'MEDICINE';
+
+          // Upsert category so it exists in DB
+          try {
+            const sortOrder = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII'].indexOf(catCode) + 1;
+            await this.prisma.medicineCategory.upsert({
+              where: { code: catCode },
+              update: { name: catName, type: catType as any },
+              create: {
+                code: catCode,
+                name: catName,
+                type: catType as any,
+                sortOrder: sortOrder > 0 ? sortOrder : 99,
+              },
+            });
+          } catch (_e) { /* ignore */ }
           continue;
         }
 
@@ -2586,7 +2640,8 @@ export class InventoryService {
         const medicineName = row[1]?.toString().trim();
         const units = row[5]?.toString().trim();
 
-        if (!stt || !medicineName || !units) {
+        // STT (cột A) phải là số nguyên dương — loại bỏ mọi hàng không phải thuốc
+        if (!stt || !/^\d+$/.test(stt) || !medicineName || !units) {
           skipped++;
           continue;
         }
@@ -2615,16 +2670,21 @@ export class InventoryService {
         const manufacturer = row[4]?.toString().trim() || null;
 
         // Parse numeric columns — dùng D() để giữ đủ độ chính xác thập phân
-        const _n = (v: any) =>
-          v !== undefined && v !== null && v !== '' ? D(v).toFixed() : '0';
-        const _q = (v: any) => Number(D(_n(v)).toFixed());
+        // For JS `number` values from XLSX (float64), use toPrecision(15) to match Excel's
+        // 15-significant-digit display precision. This correctly handles both prices (many
+        // decimal places, few integer digits) and amounts (few decimal places, many integer
+        // digits). toFixed(N) would fail for one or the other group.
+        const _n = (v: any) => {
+          if (v === undefined || v === null || v === '') return '0';
+          if (typeof v === 'number') return D(v.toPrecision(15)).toFixed();
+          return D(v).toFixed();
+        };
+                const _q = (v: any) => Number(D(_n(v)).toFixed());
 
         const openingQty = _q(row[6]);
         const openingPrice = _n(row[7]);
-        const openingAmount =
-          row[8] != null && row[8] !== ''
-            ? _n(row[8])
-            : D(openingQty).times(D(openingPrice)).toFixed();
+        // Tồn đầu kỳ TT (col I) - lấy trực tiếp từ file, không tính lại ĐG×SL
+        const openingAmount = _n(row[8]);
 
         const monthlyImportQty = _q(row[9]);
         const monthlyImportPrice = _n(row[10]);
@@ -2634,29 +2694,45 @@ export class InventoryService {
             : D(monthlyImportQty).times(D(monthlyImportPrice)).toFixed();
 
         const monthlyExportQty = _q(row[12]);
-        const monthlyExportPrice = _n(row[13]);
+        // ĐG xuất (col N): đọc trực tiếp từ file (Excel đã tính sẵn theo
+        // IFERROR((G*H+J*K)/(G+J),0)). Chỉ tính lại khi col N trống/null.
+        const _weightedAvgPrice = () => {
+          // Dùng float64 (như Excel) rồi toPrecision(15) để khớp chính xác
+          const G = Number(openingQty);
+          const H = Number(openingPrice);
+          const J = Number(monthlyImportQty);
+          const K = Number(monthlyImportPrice);
+          const total = G + J;
+          if (total === 0) return '0';
+          return D(((G * H + J * K) / total).toPrecision(15)).toFixed();
+        };
+        const monthlyExportPrice =
+          row[13] != null && row[13] !== '' && row[13] !== 0
+            ? _n(row[13])
+            : _weightedAvgPrice();
         const monthlyExportAmount =
           row[14] != null && row[14] !== ''
             ? _n(row[14])
             : D(monthlyExportQty).times(D(monthlyExportPrice)).toFixed();
 
-        // Recompute closing from opening + import - export for guaranteed accuracy
+        // Tồn cuối kỳ
         const closingQty =
           _q(row[15]) || openingQty + monthlyImportQty - monthlyExportQty;
-        const closingPrice = _n(row[16]) || openingPrice;
-        const closingAmount = (() => {
-          const computedClosingQty = D(openingQty)
-            .plus(D(monthlyImportQty))
-            .minus(D(monthlyExportQty));
-          const totalVal = D(openingQty)
-            .times(D(openingPrice))
-            .plus(D(monthlyImportAmount))
-            .minus(D(monthlyExportAmount));
-          const computedPrice = computedClosingQty.gt(0)
-            ? totalVal.div(computedClosingQty)
-            : D(closingPrice);
-          return computedClosingQty.times(computedPrice).toFixed();
-        })();
+        // ĐG tồn cuối (col Q): đọc từ file nếu có, fallback sang weighted avg
+        const closingPrice =
+          row[16] != null && row[16] !== '' && row[16] !== 0
+            ? _n(row[16])
+            : _weightedAvgPrice();
+        // TT tồn cuối (col R): đọc từ file nếu có, fallback tính lại
+        const closingAmount =
+          row[17] != null && row[17] !== ''
+            ? _n(row[17])
+            : (() => {
+                const computedClosingQty = D(openingQty)
+                  .plus(D(monthlyImportQty))
+                  .minus(D(monthlyExportQty));
+                return computedClosingQty.times(D(closingPrice)).toFixed();
+              })();
 
         const expiryStr = row[18]?.toString().trim();
 
@@ -2686,7 +2762,7 @@ export class InventoryService {
         let itemType = 'MEDICINE' as any;
 
         if (currentCategory) {
-          let category = await this.prisma.medicineCategory.findUnique({
+          const category = await this.prisma.medicineCategory.findUnique({
             where: { code: currentCategory },
           });
 
@@ -2880,6 +2956,7 @@ export class InventoryService {
         });
         // Cascade opening to subsequent months after each medicine import
         await this.propagateOpeningForward(medicine.id, month, year);
+        importedMedicineIds.add(medicine.id);
       } catch (error) {
         errors.push({
           row: row[0],
@@ -2895,6 +2972,54 @@ export class InventoryService {
     console.log(`   - Skipped: ${skipped} rows`);
     if (errors.length > 0) {
       console.log(`   - Errors: ${errors.length}`);
+    }
+
+    // ── Seed opening balance for the next month ──────────────────────────────
+    // After importing month M/YYYY, create (or leave untouched if exists)
+    // the inventory record for month M+1 so the opening balance is visible
+    // immediately in the Detailed Yearly tab.
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    let seeded = 0;
+    for (const medicineId of importedMedicineIds) {
+      try {
+        const existing = await this.prisma.medicineInventory.findUnique({
+          where: {
+            medicineId_month_year: { medicineId, month: nextMonth, year: nextYear },
+          },
+        });
+        if (existing) continue; // Don't overwrite records that already have real data
+
+        const current = await this.prisma.medicineInventory.findUnique({
+          where: { medicineId_month_year: { medicineId, month, year } },
+        });
+        if (!current) continue;
+
+        await this.prisma.medicineInventory.create({
+          data: {
+            medicineId,
+            month: nextMonth,
+            year: nextYear,
+            expiryDate: current.expiryDate,
+            openingQuantity: current.closingQuantity,
+            openingUnitPrice: current.closingUnitPrice,
+            openingTotalAmount: current.closingTotalAmount,
+            // Yearly accumulators: reset for new year, carry over for same year
+            yearlyImportQuantity: nextYear !== year ? 0 : current.yearlyImportQuantity,
+            yearlyImportUnitPrice: nextYear !== year ? 0 : current.yearlyImportUnitPrice,
+            yearlyImportAmount: nextYear !== year ? 0 : current.yearlyImportAmount,
+            yearlyExportQuantity: nextYear !== year ? 0 : current.yearlyExportQuantity,
+            yearlyExportUnitPrice: nextYear !== year ? 0 : current.yearlyExportUnitPrice,
+            yearlyExportAmount: nextYear !== year ? 0 : current.yearlyExportAmount,
+          },
+        });
+        seeded++;
+      } catch (_e) {
+        // Ignore duplicate/constraint errors — record may have been created concurrently
+      }
+    }
+    if (seeded > 0) {
+      console.log(`   - Seeded opening balance for ${seeded} medicines in ${nextMonth}/${nextYear}`);
     }
 
     return {
@@ -3202,6 +3327,8 @@ export class InventoryService {
     // Bước 3: Khởi tạo các biến carry-forward từ startRecord
     let prevClosingQty = D(startRecord.closingQuantity);
     let prevClosingPrice = D(startRecord.closingUnitPrice);
+    // Dùng closingTotalAmount trực tiếp để tránh sai số qty*price
+    let prevClosingAmt = D(startRecord.closingTotalAmount);
     let prevYear = startYear;
     // YTD tích lũy: bắt đầu từ giá trị yearlyXxx của startRecord (đúng với cùng năm)
     let ytdImportQty = D(startRecord.yearlyImportQuantity);
@@ -3222,7 +3349,8 @@ export class InventoryService {
       // ── B. Tính opening mới = closing của tháng trước ─────────────────
       const dOpenQty = prevClosingQty;
       const dOpenPrice = prevClosingPrice;
-      const dOpenAmt = dOpenQty.times(dOpenPrice);
+      // Dùng giá trị đã lưu, KHÔNG tính lại qty*price (tránh sai số float)
+      const dOpenAmt = prevClosingAmt;
 
       // ── C. Monthly data của tháng này (giữ nguyên, không thay đổi) ────
       const dImportQty = D(rec.monthlyImportQuantity);
@@ -3232,29 +3360,38 @@ export class InventoryService {
 
       // ── D. Tái tính closing với opening mới ──────────────────────────
       const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
-      const totalVal = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
-      // Giá bình quân gia quyền; nếu tồn = 0 giữ giá cũ để tham chiếu
-      const dClosingPrice = dClosingQty.gt(0)
-        ? totalVal.div(dClosingQty)
+      // TT = openAmt + importAmt - exportAmt (balance sheet)
+      const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+      // ĐG tồn cuối = ĐG xuất = IFERROR((G*H+J*K)/(G+J), 0) dùng float64 như Excel
+      const _G = Number(dOpenQty), _H = Number(dOpenPrice);
+      const _J = Number(dImportQty), _K = Number(D(rec.monthlyImportUnitPrice));
+      const _totalQP = _G + _J;
+      const dClosingPrice = _totalQP > 0
+        ? D(((_G * _H + _J * _K) / _totalQP).toPrecision(15))
         : dOpenPrice;
-      const dClosingAmt = dClosingQty.times(dClosingPrice);
 
       // ── E. Tính lũy kế năm = lũy kế tháng trước + tháng này ─────────
       const newYtdImportQty = ytdImportQty.plus(dImportQty);
       const newYtdImportAmt = ytdImportAmt.plus(dImportAmt);
       const newYtdExportQty = ytdExportQty.plus(dExportQty);
       const newYtdExportAmt = ytdExportAmt.plus(dExportAmt);
+      // ĐG lũy kế = TotalAmount / TotalQty; nếu qty=0 thì giữ lũy kế từ tháng trước (không dùng openPrice)
       const newYtdImportPr = newYtdImportQty.gt(0)
-        ? newYtdImportAmt.div(newYtdImportQty)
-        : dOpenPrice;
+        ? D(Number(newYtdImportAmt.div(newYtdImportQty)).toPrecision(15))
+        : ytdImportQty.gt(0)
+          ? D(Number(ytdImportAmt.div(ytdImportQty)).toPrecision(15))
+          : new Prisma.Decimal(0);
       const newYtdExportPr = newYtdExportQty.gt(0)
-        ? newYtdExportAmt.div(newYtdExportQty)
-        : new Prisma.Decimal(0);
+        ? D(Number(newYtdExportAmt.div(newYtdExportQty)).toPrecision(15))
+        : ytdExportQty.gt(0)
+          ? D(Number(ytdExportAmt.div(ytdExportQty)).toPrecision(15))
+          : new Prisma.Decimal(0);
 
       // ── F. Kiểm tra xem có thay đổi thực sự không (tối ưu write) ─────
       const openingUnchanged =
         D(rec.openingQuantity).eq(dOpenQty) &&
-        D(rec.openingUnitPrice).eq(dOpenPrice);
+        D(rec.openingUnitPrice).eq(dOpenPrice) &&
+        D(rec.openingTotalAmount).eq(dOpenAmt);
       const ytdUnchanged =
         D(rec.yearlyImportQuantity).eq(newYtdImportQty) &&
         D(rec.yearlyExportQuantity).eq(newYtdExportQty);
@@ -3292,6 +3429,7 @@ export class InventoryService {
       // ── H. Cập nhật carry-forward cho tháng tiếp theo ─────────────────
       prevClosingQty = dClosingQty;
       prevClosingPrice = dClosingPrice;
+      prevClosingAmt = dClosingAmt;
       ytdImportQty = newYtdImportQty;
       ytdImportAmt = newYtdImportAmt;
       ytdExportQty = newYtdExportQty;

@@ -11,6 +11,8 @@ import {
   UsePipes,
   ValidationPipe,
   Patch,
+  Request,
+  ForbiddenException,
 } from '@nestjs/common';
 import {
   ApiTags,
@@ -28,8 +30,8 @@ import {
   UpdateMedicalRecordDto,
   CreateMedicineDto,
   UpdateMedicineDto,
+  GetMedicalRecordsDto,
 } from './dto/healthcare.dto';
-import { Public } from 'src/common/decorators/public.decorator';
 
 @ApiTags('healthcare')
 @Controller('healthcare')
@@ -111,15 +113,34 @@ export class HealthcareController {
     return this.healthcareService.deleteMedicine(id);
   }
 
-  // Patient History Lookup (Available to all users)
+  // Patient History Lookup (requires auth — user can view own history, staff can view all)
   @Get('patient-history/:employeeCode')
-  @Public()
   @ApiOperation({ summary: 'Get patient medical history by employee code' })
-  async getPatientHistory(@Param('employeeCode') employeeCode: string) {
+  async getPatientHistory(
+    @Param('employeeCode') employeeCode: string,
+    @Request() req: any,
+  ) {
+    const user = req.user;
+    const userRoles: string[] = (user.roles ?? []).map(
+      (r: any) => r.roleDefinition?.code ?? r.role?.code ?? r.code ?? r,
+    );
+    const isStaff = userRoles.some((r) =>
+      ['MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN'].includes(r),
+    );
+    if (!isStaff && user.employeeCode !== employeeCode) {
+      throw new ForbiddenException('Không có quyền xem hồ sơ y tế của nhân viên khác');
+    }
     return this.healthcareService.getPatientHistory(employeeCode);
   }
 
   // Medical Record Management
+  @Get('medical-records')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({ summary: 'List medical records with filters and pagination' })
+  async getMedicalRecords(@Query() query: GetMedicalRecordsDto) {
+    return this.healthcareService.getMedicalRecords(query);
+  }
+
   @Post('medical-records')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @RequirePermissions('healthcare:create')
@@ -151,6 +172,14 @@ export class HealthcareController {
     @Body() data: UpdateMedicalRecordDto,
   ) {
     return this.healthcareService.updateMedicalRecord(id, data);
+  }
+
+  @Delete('medical-records/:id')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @RequirePermissions('healthcare:delete')
+  @ApiOperation({ summary: 'Delete medical record and reverse inventory' })
+  async deleteMedicalRecord(@Param('id') id: string) {
+    return this.healthcareService.deleteMedicalRecord(id);
   }
 
   @Post('prescriptions/:id/dispense')
