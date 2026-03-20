@@ -2523,6 +2523,10 @@ export class InventoryService {
     let errors: any[] = [];
     let currentCategory: string | undefined;
 
+    // Positional mapping: count occurrences of each (categoryCode:name) pair
+    // so duplicate-name rows within the same category map to distinct medicine records.
+    const categoryNameCounter = new Map<string, number>();
+
     for (const row of data) {
       try {
         // Skip empty rows
@@ -2692,13 +2696,22 @@ export class InventoryService {
           }
         }
 
-        // Find or create medicine
-        let medicine = await this.prisma.medicine.findFirst({
-          where: {
-            name: medicineName,
-            isActive: true,
-          },
+        // Find or create medicine using positional mapping.
+        // The Nth occurrence of (categoryCode + name) in the file maps to the
+        // Nth existing medicine with that category+name (ordered by createdAt).
+        // If N exceeds existing records, create a new medicine.
+        const posKey = `${currentCategory ?? ''}:${medicineName}`;
+        const slotIndex = categoryNameCounter.get(posKey) ?? 0;
+        categoryNameCounter.set(posKey, slotIndex + 1);
+
+        const candidatesByName = await this.prisma.medicine.findMany({
+          where: { name: medicineName, isActive: true, ...(categoryId ? { categoryId } : {}) },
+          orderBy: { createdAt: 'asc' },
         });
+
+        let medicine = slotIndex < candidatesByName.length
+          ? candidatesByName[slotIndex]
+          : null;
 
         if (!medicine) {
           medicine = await this.prisma.medicine.create({
