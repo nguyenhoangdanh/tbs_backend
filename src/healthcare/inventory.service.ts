@@ -733,43 +733,51 @@ export class InventoryService {
             continue;
           }
 
-          // Try to find existing medicine by name, but only if it doesn't already
-          // have an inventory record for this (month, year). If it does, treat as
-          // a new entry (e.g. duplicate-name rows in the same Excel file for
-          // different batches / sub-items).
+          // Try to find existing medicine by name.
+          // Use findMany so that duplicate-name rows in the same Excel file each
+          // get matched to a distinct medicine record.
+          // Algorithm: among all medicines with this name, pick the first one that
+          // does NOT yet have an inventory record for (month, year).
+          // If all existing medicines already have inventory → create a new medicine.
           console.log(
             `\n🔍 Searching for medicine by name: ${medicineData.name}`,
           );
-          const candidateByName = await this.prisma.medicine.findFirst({
+          const candidatesByName = await this.prisma.medicine.findMany({
             where: { name: medicineData.name, isActive: true },
+            orderBy: { createdAt: 'asc' },
           });
 
-          if (candidateByName) {
-            const alreadyHasInventory =
+          for (const candidate of candidatesByName) {
+            const hasInventory =
               await this.prisma.medicineInventory.findUnique({
                 where: {
                   medicineId_month_year: {
-                    medicineId: candidateByName.id,
+                    medicineId: candidate.id,
                     month,
                     year,
                   },
                 },
                 select: { medicineId: true },
               });
-            if (!alreadyHasInventory) {
-              medicine = candidateByName;
+            if (!hasInventory) {
+              medicine = candidate;
               console.log(
                 `✅ Found existing medicine: ${medicine.name} (ID: ${medicine.id})`,
               );
+              break;
+            }
+          }
+
+          if (!medicine) {
+            if (candidatesByName.length > 0) {
+              console.log(
+                `📋 All medicines named "${medicineData.name}" already have inventory for ${month}/${year}, creating new entry`,
+              );
             } else {
               console.log(
-                `📋 Medicine "${medicineData.name}" already has inventory for ${month}/${year}, creating new entry`,
+                `🆕 Medicine not found, will create new: ${medicineData.name}`,
               );
             }
-          } else {
-            console.log(
-              `🆕 Medicine not found, will create new: ${medicineData.name}`,
-            );
           }
         }
 
