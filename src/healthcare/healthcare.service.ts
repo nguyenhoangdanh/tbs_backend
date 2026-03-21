@@ -1614,7 +1614,6 @@ export class HealthcareService {
           where: { isDispensed: true },
           include: {
             medicine: {
-              select: { id: true, name: true, units: true },
               include: {
                 inventoryBalances: {
                   where: { month: curMonth, year: curYear },
