@@ -1200,26 +1200,24 @@ export class InventoryService {
     // Tính tổng hợp bằng Decimal để không cộng tròn
     const summaryD = inventories.reduce(
       (acc, inv) => ({
-        totalOpeningAmount: acc.totalOpeningAmount.plus(
-          D(inv.openingTotalAmount),
-        ),
-        totalImportAmount: acc.totalImportAmount.plus(
-          D(inv.monthlyImportAmount),
-        ),
-        totalExportAmount: acc.totalExportAmount.plus(
-          D(inv.monthlyExportAmount),
-        ),
-        totalClosingAmount: acc.totalClosingAmount.plus(
-          D(inv.closingTotalAmount),
-        ),
-        totalSuggestedAmount: acc.totalSuggestedAmount.plus(
-          D(inv.suggestedPurchaseAmount),
-        ),
+        totalOpeningQty: acc.totalOpeningQty + Number(inv.openingQuantity),
+        totalOpeningAmount: acc.totalOpeningAmount.plus(D(inv.openingTotalAmount)),
+        totalImportQty: acc.totalImportQty + Number(inv.monthlyImportQuantity),
+        totalImportAmount: acc.totalImportAmount.plus(D(inv.monthlyImportAmount)),
+        totalExportQty: acc.totalExportQty + Number(inv.monthlyExportQuantity),
+        totalExportAmount: acc.totalExportAmount.plus(D(inv.monthlyExportAmount)),
+        totalClosingQty: acc.totalClosingQty + Number(inv.closingQuantity),
+        totalClosingAmount: acc.totalClosingAmount.plus(D(inv.closingTotalAmount)),
+        totalSuggestedAmount: acc.totalSuggestedAmount.plus(D(inv.suggestedPurchaseAmount)),
       }),
       {
+        totalOpeningQty: 0,
         totalOpeningAmount: new Prisma.Decimal(0),
+        totalImportQty: 0,
         totalImportAmount: new Prisma.Decimal(0),
+        totalExportQty: 0,
         totalExportAmount: new Prisma.Decimal(0),
+        totalClosingQty: 0,
         totalClosingAmount: new Prisma.Decimal(0),
         totalSuggestedAmount: new Prisma.Decimal(0),
       },
@@ -1231,9 +1229,13 @@ export class InventoryService {
       items: convertedInventories,
       summary: {
         totalMedicines: convertedInventories.length,
+        totalOpeningQty: summaryD.totalOpeningQty,
         totalOpeningAmount: summaryD.totalOpeningAmount.toFixed(),
+        totalImportQty: summaryD.totalImportQty,
         totalImportAmount: summaryD.totalImportAmount.toFixed(),
+        totalExportQty: summaryD.totalExportQty,
         totalExportAmount: summaryD.totalExportAmount.toFixed(),
+        totalClosingQty: summaryD.totalClosingQty,
         totalClosingAmount: summaryD.totalClosingAmount.toFixed(),
         totalSuggestedAmount: summaryD.totalSuggestedAmount.toFixed(),
       },
@@ -1278,27 +1280,27 @@ export class InventoryService {
           month: inv.month,
           inventories: [],
           summary: {
+            totalOpeningQty: 0,
             totalOpeningAmount: new Prisma.Decimal(0),
+            totalImportQty: 0,
             totalImportAmount: new Prisma.Decimal(0),
+            totalExportQty: 0,
             totalExportAmount: new Prisma.Decimal(0),
+            totalClosingQty: 0,
             totalClosingAmount: new Prisma.Decimal(0),
           },
         };
       }
 
       acc[monthKey].inventories.push(serializeInventoryRow(inv));
-      acc[monthKey].summary.totalOpeningAmount = acc[
-        monthKey
-      ].summary.totalOpeningAmount.plus(D(inv.openingTotalAmount));
-      acc[monthKey].summary.totalImportAmount = acc[
-        monthKey
-      ].summary.totalImportAmount.plus(D(inv.monthlyImportAmount));
-      acc[monthKey].summary.totalExportAmount = acc[
-        monthKey
-      ].summary.totalExportAmount.plus(D(inv.monthlyExportAmount));
-      acc[monthKey].summary.totalClosingAmount = acc[
-        monthKey
-      ].summary.totalClosingAmount.plus(D(inv.closingTotalAmount));
+      acc[monthKey].summary.totalOpeningQty += Number(inv.openingQuantity);
+      acc[monthKey].summary.totalOpeningAmount = acc[monthKey].summary.totalOpeningAmount.plus(D(inv.openingTotalAmount));
+      acc[monthKey].summary.totalImportQty += Number(inv.monthlyImportQuantity);
+      acc[monthKey].summary.totalImportAmount = acc[monthKey].summary.totalImportAmount.plus(D(inv.monthlyImportAmount));
+      acc[monthKey].summary.totalExportQty += Number(inv.monthlyExportQuantity);
+      acc[monthKey].summary.totalExportAmount = acc[monthKey].summary.totalExportAmount.plus(D(inv.monthlyExportAmount));
+      acc[monthKey].summary.totalClosingQty += Number(inv.closingQuantity);
+      acc[monthKey].summary.totalClosingAmount = acc[monthKey].summary.totalClosingAmount.plus(D(inv.closingTotalAmount));
 
       return acc;
     }, {} as any);
