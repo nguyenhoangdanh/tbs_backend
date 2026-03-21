@@ -1031,6 +1031,7 @@ export class HealthcareService {
 
     for (let i = 0; i < limit; i++) {
       let periodStart: Date, periodEnd: Date, label: string;
+      let skip = false;
 
       switch (period) {
         case 'day': {
@@ -1041,7 +1042,7 @@ export class HealthcareService {
           periodEnd.setHours(23, 59, 59, 999);
 
           // Skip if this date is beyond end date
-          if (periodStart > end) break;
+          if (periodStart > end) { skip = true; break; }
 
           // Format: 10/9, 12/9, etc.
           label = `${periodStart.getDate()}/${periodStart.getMonth() + 1}`;
@@ -1066,7 +1067,7 @@ export class HealthcareService {
           periodStart.setHours(0, 0, 0, 0);
           periodEnd = new Date(periodStart);
           periodEnd.setHours(23, 59, 59, 999);
-          if (periodStart > end) break;
+          if (periodStart > end) { skip = true; break; }
           // Just show day number — month is already known from the filter context
           label = `${periodStart.getDate()}`;
           break;
@@ -1093,6 +1094,8 @@ export class HealthcareService {
         default:
           continue;
       }
+
+      if (skip) continue;
 
       // day/week/month: fetch per-day from DB; year: filter in-memory from pre-loaded data
       let periodExaminations = 0;
