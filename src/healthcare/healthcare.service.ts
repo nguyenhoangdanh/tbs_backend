@@ -191,10 +191,32 @@ export class HealthcareService {
         }
       : { isActive: true };
 
-    return this.prisma.medicine.findMany({
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
+    const medicines = await this.prisma.medicine.findMany({
       where,
       orderBy: { name: 'asc' },
-      include: { category: true },
+      include: {
+        category: true,
+        inventoryBalances: {
+          where: { month: currentMonth, year: currentYear },
+          select: { closingQuantity: true, closingUnitPrice: true },
+          take: 1,
+        },
+      },
+    });
+
+    // Flatten: attach currentStock directly on each medicine
+    return medicines.map((m) => {
+      const { inventoryBalances, ...rest } = m;
+      const stock = inventoryBalances[0];
+      return {
+        ...rest,
+        currentStock: stock ? Number(stock.closingQuantity) : 0,
+        unitPrice: stock ? Number(stock.closingUnitPrice) : 0,
+      };
     });
   }
 
