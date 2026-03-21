@@ -271,4 +271,15 @@ export class HealthcareController {
       endDate,
     );
   }
+
+  @Get('statistics/patient-visits')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Get patient visit list with dispensed medicines and total value' })
+  async getPatientVisitStats(
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.healthcareService.getPatientVisitStats(period, startDate, endDate);
+  }
 }

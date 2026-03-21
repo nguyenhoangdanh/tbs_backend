@@ -1560,4 +1560,96 @@ export class HealthcareService {
       workAccidentCases,
     };
   }
+
+  async getPatientVisitStats(
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const end = endDate ? new Date(endDate) : new Date();
+    if (endDate) end.setHours(23, 59, 59, 999);
+
+    let start: Date;
+    if (startDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      const now = new Date(end);
+      switch (period) {
+        case 'day':
+          start = new Date(now);
+          start.setHours(0, 0, 0, 0);
+          break;
+        case 'week': {
+          start = new Date(now);
+          const day = start.getDay();
+          const diff = day === 0 ? 6 : day - 1;
+          start.setDate(start.getDate() - diff);
+          start.setHours(0, 0, 0, 0);
+          break;
+        }
+        case 'month':
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          start = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+    }
+
+    const records = await this.prisma.medicalRecord.findMany({
+      where: { visitDate: { gte: start, lte: end } },
+      orderBy: { visitDate: 'desc' },
+      include: {
+        patient: {
+          select: { firstName: true, lastName: true, employeeCode: true },
+        },
+        prescriptions: {
+          where: { isDispensed: true },
+          include: {
+            medicine: { select: { id: true, name: true, units: true, unitPrice: true } },
+          },
+        },
+      },
+    });
+
+    const D = (v: any) => new Prisma.Decimal(v ?? 0);
+
+    const patients = records.map((r) => {
+      const totalValue = r.prescriptions.reduce(
+        (sum, p) => sum.plus(D(p.medicine?.unitPrice ?? 0).times(p.quantity)),
+        new Prisma.Decimal(0),
+      );
+      return {
+        recordId: r.id,
+        visitDate: r.visitDate,
+        patientCode: r.patient?.employeeCode ?? '',
+        patientName: `${r.patient?.firstName ?? ''} ${r.patient?.lastName ?? ''}`.trim(),
+        isWorkAccident: r.isWorkAccident,
+        medicines: r.prescriptions.map((p) => ({
+          name: p.medicine?.name ?? '',
+          units: p.medicine?.units ?? '',
+          quantity: p.quantity,
+          unitPrice: Number(p.medicine?.unitPrice ?? 0),
+        })),
+        totalMedicines: r.prescriptions.length,
+        totalValue: totalValue.toFixed(),
+      };
+    });
+
+    const grandTotal = patients.reduce(
+      (sum, p) => sum.plus(D(p.totalValue)),
+      new Prisma.Decimal(0),
+    );
+
+    return {
+      period,
+      dateRange: { start, end },
+      totalRecords: records.length,
+      patients,
+      grandTotal: grandTotal.toFixed(),
+    };
+  }
 }
