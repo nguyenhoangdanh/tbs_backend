@@ -1599,6 +1599,10 @@ export class HealthcareService {
       }
     }
 
+    const now = new Date();
+    const curMonth = now.getMonth() + 1;
+    const curYear = now.getFullYear();
+
     const records = await this.prisma.medicalRecord.findMany({
       where: { visitDate: { gte: start, lte: end } },
       orderBy: { visitDate: 'desc' },
@@ -1609,7 +1613,16 @@ export class HealthcareService {
         prescriptions: {
           where: { isDispensed: true },
           include: {
-            medicine: { select: { id: true, name: true, units: true, unitPrice: true } },
+            medicine: {
+              select: { id: true, name: true, units: true },
+              include: {
+                inventoryBalances: {
+                  where: { month: curMonth, year: curYear },
+                  take: 1,
+                  select: { closingUnitPrice: true },
+                },
+              },
+            },
           },
         },
       },
@@ -1619,7 +1632,10 @@ export class HealthcareService {
 
     const patients = records.map((r) => {
       const totalValue = r.prescriptions.reduce(
-        (sum, p) => sum.plus(D(p.medicine?.unitPrice ?? 0).times(p.quantity)),
+        (sum, p) => {
+          const price = p.medicine?.inventoryBalances?.[0]?.closingUnitPrice ?? 0;
+          return sum.plus(D(price).times(p.quantity));
+        },
         new Prisma.Decimal(0),
       );
       return {
@@ -1632,7 +1648,7 @@ export class HealthcareService {
           name: p.medicine?.name ?? '',
           units: p.medicine?.units ?? '',
           quantity: p.quantity,
-          unitPrice: Number(p.medicine?.unitPrice ?? 0),
+          unitPrice: Number(p.medicine?.inventoryBalances?.[0]?.closingUnitPrice ?? 0),
         })),
         totalMedicines: r.prescriptions.length,
         totalValue: totalValue.toFixed(),
