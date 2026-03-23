@@ -1164,10 +1164,11 @@ export class InventoryService {
     const where: Prisma.MedicineInventoryWhereInput = {
       month: targetMonth,
       year: targetYear,
+      medicine: { isActive: true },
     };
 
     if (categoryId || search) {
-      where.medicine = {};
+      where.medicine = { isActive: true };
       if (categoryId) {
         where.medicine.categoryId = categoryId;
       }
@@ -1337,6 +1338,7 @@ export class InventoryService {
       where: {
         month: currentMonth,
         year: currentYear,
+        medicine: { isActive: true },
         closingQuantity: {
           lt: minThreshold,
           gt: 0,
@@ -1356,6 +1358,7 @@ export class InventoryService {
       where: {
         month: currentMonth,
         year: currentYear,
+        medicine: { isActive: true },
         expiryDate: {
           lte: expiryThreshold,
           gte: currentDate,
@@ -1582,8 +1585,10 @@ export class InventoryService {
     const inventories = await this.prisma.medicineInventory.findMany({
       where: {
         year,
+        medicine: { isActive: true },
         ...(categoryId && {
           medicine: {
+            isActive: true,
             categoryId,
           },
         }),
@@ -1609,7 +1614,8 @@ export class InventoryService {
       where: {
         month: 12,
         year: year - 1,
-        ...(categoryId && { medicine: { categoryId } }),
+        medicine: { isActive: true },
+        ...(categoryId && { medicine: { isActive: true, categoryId } }),
       },
       include: { medicine: { include: { category: true } } },
     });
@@ -1618,7 +1624,8 @@ export class InventoryService {
       where: {
         month: 1,
         year,
-        ...(categoryId && { medicine: { categoryId } }),
+        medicine: { isActive: true },
+        ...(categoryId && { medicine: { isActive: true, categoryId } }),
       },
       include: { medicine: { include: { category: true } } },
     });
