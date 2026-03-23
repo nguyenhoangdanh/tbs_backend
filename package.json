@@ -19,7 +19,10 @@
     "db:migrate:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate deploy'",
     "db:seed:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/seed.ts'",
     "db:setup:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate deploy && npx tsx prisma/seed.ts'",
-    "db:import": "npx tsx prisma/import-workers.ts"
+    "db:reset": "npx prisma migrate reset --force",
+    "db:reset:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate reset --force && npx tsx prisma/seed.ts'",
+
+    "db:import:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/import-workers.ts'"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",
