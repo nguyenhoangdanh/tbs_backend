@@ -3055,21 +3055,30 @@ export class InventoryService {
     let skipped = 0;
 
     for (const { id: medicineId } of medicines) {
-      // Bỏ qua nếu đã có bản ghi cho tháng này
+      // Kiểm tra bản ghi đã tồn tại chưa
       const existing = await this.prisma.medicineInventory.findUnique({
         where: { medicineId_month_year: { medicineId, month, year } },
       });
-      if (existing) {
-        skipped++;
-        continue;
-      }
 
-      // Lấy tồn cuối kỳ tháng gần nhất
+      // Lấy tồn cuối kỳ tháng gần nhất (dùng cho cả create lẫn patch expiryDate)
       const prev = await this.findMostRecentPreviousInventory(
         medicineId,
         month,
         year,
       );
+
+      if (existing) {
+        // Nếu expiryDate bị null nhưng tháng trước có → patch lại
+        if (!existing.expiryDate && prev?.expiryDate) {
+          await this.prisma.medicineInventory.update({
+            where: { medicineId_month_year: { medicineId, month, year } },
+            data: { expiryDate: prev.expiryDate },
+          });
+        }
+        skipped++;
+        continue;
+      }
+
       if (!prev) {
         skipped++;
         continue;
@@ -3220,6 +3229,11 @@ export class InventoryService {
           ? ytdExportAmt.div(ytdExportQty)
           : new Prisma.Decimal(0);
 
+        // Clone expiryDate từ record trước nếu record hiện tại đang null
+        const prevExpiryDate = i > 0 ? records[i - 1].expiryDate : null;
+        const expiryDatePatch =
+          !rec.expiryDate && prevExpiryDate ? { expiryDate: prevExpiryDate } : {};
+
         // Cập nhật bản ghi với dữ liệu tính toán lại
         await this.prisma.medicineInventory.update({
           where: {
@@ -3230,6 +3244,7 @@ export class InventoryService {
             },
           },
           data: {
+            ...expiryDatePatch,
             openingQuantity: dOpenQty.toFixed(),
             openingUnitPrice: dOpenPrice.toFixed(),
             openingTotalAmount: dOpenAmt.toFixed(),
@@ -3245,9 +3260,12 @@ export class InventoryService {
           },
         });
 
-        // Ghi ngược closing đã tính lại vào mảng để bản ghi kế tiếp dùng đúng
+        // Ghi ngược closing + expiryDate đã tính lại vào mảng để bản ghi kế tiếp dùng đúng
         (records[i] as any).closingQuantity = dClosingQty.toFixed();
         (records[i] as any).closingUnitPrice = dClosingPrice.toFixed();
+        if (expiryDatePatch.expiryDate) {
+          (records[i] as any).expiryDate = expiryDatePatch.expiryDate;
+        }
 
         totalRecords++;
       }
