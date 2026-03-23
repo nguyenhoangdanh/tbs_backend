@@ -51,6 +51,9 @@ COPY prisma ./prisma/
 # with wrong version from npx)
 COPY --from=base /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=base /app/node_modules/@prisma/client ./node_modules/@prisma/client
+# Copy prisma CLI so migrate deploy works at runtime without npx
+COPY --from=base /app/node_modules/prisma ./node_modules/prisma
+COPY --from=base /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 
 # Copy built application
 COPY --from=base /app/dist ./dist

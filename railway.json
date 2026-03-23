@@ -2,10 +2,10 @@
   "name": "tbsgroup-backend",
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "pnpm install && npx prisma generate && pnpm run build"
+    "buildCommand": "pnpm install && pnpm exec prisma generate && pnpm run build"
   },
   "deploy": {
-    "startCommand": "npx prisma migrate deploy && pnpm run start:prod",
+    "startCommand": "./node_modules/.bin/prisma migrate deploy && pnpm run start:prod",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
