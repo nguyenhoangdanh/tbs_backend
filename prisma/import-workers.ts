@@ -195,7 +195,7 @@ async function ensureOffices(
   console.log('\n🏢 [1/7] Ensuring offices...');
   const map = new Map<string, string>();
 
-  for (const name of officNames) {
+  await Promise.all(Array.from(officNames).map(async name => {
     const type: OfficeType = (
       name.includes('VP') || name.includes('Văn phòng') ||
       name.includes('VPĐH') || name.includes('Điều hành')
@@ -208,7 +208,7 @@ async function ensureOffices(
     });
     map.set(name, office.id);
     console.log(`  ✓ [${type}] ${name}`);
-  }
+  }));
   return map;
 }
 
@@ -219,6 +219,7 @@ async function ensureDepartments(
   console.log('\n🏬 [2/7] Ensuring departments...');
   const map = new Map<string, string>();
   const seen = new Set<string>();
+  const unique: Array<{ key: string; name: string; officeId: string }> = [];
 
   for (const row of rows) {
     const key = `${row.pb}__${row.tt}`;
@@ -226,15 +227,18 @@ async function ensureDepartments(
     seen.add(key);
     const officeId = officeMap.get(row.tt);
     if (!officeId) { console.warn(`  ⚠  Office not found: ${row.tt}`); continue; }
+    unique.push({ key, name: row.pb, officeId });
+  }
 
+  await Promise.all(unique.map(async ({ key, name, officeId }) => {
     const dept = await prisma.department.upsert({
-      where: { name_officeId: { name: row.pb, officeId } },
+      where: { name_officeId: { name, officeId } },
       update: {},
-      create: { name: row.pb, officeId },
+      create: { name, officeId },
     });
     map.set(key, dept.id);
-    console.log(`  ✓ ${row.pb} → ${row.tt}`);
-  }
+    console.log(`  ✓ ${name}`);
+  }));
   return map;
 }
 
@@ -242,19 +246,22 @@ async function ensurePositions(rows: StaffRow[]): Promise<Map<string, string>> {
   console.log('\n👔 [3/7] Ensuring positions...');
   const map = new Map<string, string>();
   const seen = new Set<string>();
+  const unique: string[] = [];
 
   for (const row of rows) {
-    if (seen.has(row.cd)) continue;
-    seen.add(row.cd);
-    const props = getPositionProps(row.cd);
-    const pos = await prisma.position.upsert({
-      where: { name: row.cd },
-      update: {},
-      create: { name: row.cd, ...props },
-    });
-    map.set(row.cd, pos.id);
-    console.log(`  ✓ ${row.cd} (level ${props.level}, mgmt=${props.isManagement})`);
+    if (!seen.has(row.cd)) { seen.add(row.cd); unique.push(row.cd); }
   }
+
+  await Promise.all(unique.map(async cd => {
+    const props = getPositionProps(cd);
+    const pos = await prisma.position.upsert({
+      where: { name: cd },
+      update: {},
+      create: { name: cd, ...props },
+    });
+    map.set(cd, pos.id);
+    console.log(`  ✓ ${cd}`);
+  }));
   return map;
 }
 
@@ -267,12 +274,14 @@ async function ensureJobPositions(
   console.log('\n💼 [4/7] Ensuring job positions...');
   const map = new Map<string, string>();
   const seen = new Set<string>();
+  const unique: Array<{ key: string; row: StaffRow }> = [];
 
   for (const row of rows) {
     const key = `${row.cd}__${row.vt}__${row.pb}__${row.tt}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (!seen.has(key)) { seen.add(key); unique.push({ key, row }); }
+  }
 
+  await Promise.all(unique.map(async ({ key, row }) => {
     const positionId = posMap.get(row.cd);
     const deptKey = `${row.pb}__${row.tt}`;
     const departmentId = deptMap.get(deptKey);
@@ -280,7 +289,7 @@ async function ensureJobPositions(
 
     if (!positionId || !departmentId || !officeId) {
       console.warn(`  ⚠  Missing refs for job position: ${key}`);
-      continue;
+      return;
     }
 
     const existing = await prisma.jobPosition.findFirst({
@@ -298,7 +307,7 @@ async function ensureJobPositions(
     });
     map.set(key, jp.id);
     console.log(`  ✓ ${row.vt} (${row.cd})`);
-  }
+  }));
   return map;
 }
 
@@ -306,10 +315,10 @@ async function ensureTeams(
   rows: StaffRow[],
   deptMap: Map<string, string>,
 ): Promise<Map<string, string>> {
-  // key: `${tenTo}__${deptKey}`
   console.log('\n🔧 [5/7] Ensuring teams (CN only)...');
   const map = new Map<string, string>();
   const seen = new Set<string>();
+  const unique: Array<{ mapKey: string; tenTo: string; departmentId: string }> = [];
 
   for (const row of rows) {
     if (!row.tenTo) continue;
@@ -317,19 +326,21 @@ async function ensureTeams(
     const mapKey = `${row.tenTo}__${deptKey}`;
     if (seen.has(mapKey)) continue;
     seen.add(mapKey);
-
     const departmentId = deptMap.get(deptKey);
     if (!departmentId) { console.warn(`  ⚠  Dept not found: ${deptKey}`); continue; }
+    unique.push({ mapKey, tenTo: row.tenTo, departmentId });
+  }
 
-    const code = row.tenTo.replace(/\s+/g, '_').toUpperCase().slice(0, 30);
+  await Promise.all(unique.map(async ({ mapKey, tenTo, departmentId }) => {
+    const code = tenTo.replace(/\s+/g, '_').toUpperCase().slice(0, 30);
     const team = await prisma.team.upsert({
       where: { code_departmentId: { code, departmentId } },
       update: {},
-      create: { name: row.tenTo, code, departmentId },
+      create: { name: tenTo, code, departmentId },
     });
     map.set(mapKey, team.id);
-    console.log(`  ✓ ${row.tenTo} → ${row.pb} (${row.tt})`);
-  }
+    console.log(`  ✓ ${tenTo}`);
+  }));
   return map;
 }
 
@@ -345,67 +356,105 @@ async function createUsers(
   const hashedPassword = await bcrypt.hash('123456', 10);
   let ok = 0, skip = 0, fail = 0;
 
+  // ── 1. Batch-load all existing users for this company ──────────────────────
+  const existingUsers = await prisma.user.findMany({
+    where: { companyId },
+    select: { id: true, employeeCode: true, email: true },
+  });
+  const existingByCode = new Map(existingUsers.map(u => [u.employeeCode, u]));
+  const existingEmails = new Set(existingUsers.map(u => u.email));
+  // ──────────────────────────────────────────────────────────────────────────
+
+  // ── 2. Prepare new users (fully in-memory, no DB queries) ─────────────────
+  type NewUserRow = {
+    msnv: string; hoTen: string;
+    data: Parameters<typeof prisma.user.create>[0]['data'];
+    roleDefinitionId: string;
+  };
+  const toCreate: NewUserRow[] = [];
+
   for (const row of rows) {
-    try {
-      const officeId = officeMap.get(row.tt);
-      if (!officeId) { console.warn(`  ⚠  No office for ${row.msnv}`); fail++; continue; }
+    const officeId = officeMap.get(row.tt);
+    if (!officeId) { console.warn(`  ⚠  No office for ${row.msnv}`); fail++; continue; }
 
-      const jpKey = `${row.cd}__${row.vt}__${row.pb}__${row.tt}`;
-      const jobPositionId = jpMap.get(jpKey);
-      if (!jobPositionId) { console.warn(`  ⚠  No jobPosition for ${row.msnv}: ${jpKey}`); fail++; continue; }
+    const jpKey = `${row.cd}__${row.vt}__${row.pb}__${row.tt}`;
+    const jobPositionId = jpMap.get(jpKey);
+    if (!jobPositionId) { console.warn(`  ⚠  No jobPosition for ${row.msnv}: ${jpKey}`); fail++; continue; }
 
-      // Check existing by employeeCode + companyId
-      const existing = await prisma.user.findFirst({
-        where: { employeeCode: row.msnv, companyId },
-      });
-      if (existing) {
-        userMap.set(row.msnv, existing.id);
-        skip++;
-        continue;
-      }
+    const existing = existingByCode.get(row.msnv);
+    if (existing) {
+      userMap.set(row.msnv, existing.id);
+      skip++;
+      continue;
+    }
 
-      // Unique email
-      let email = generateEmail(row.hoTen);
-      let suffix = 0;
-      while (await prisma.user.findUnique({ where: { email } })) {
-        suffix++;
-        email = email.replace('@tbsgroup.vn', `${suffix}@tbsgroup.vn`);
-        if (suffix > 20) { email = `${row.msnv.toLowerCase()}@tbsgroup.vn`; break; }
-      }
+    // Deduplicate emails in-memory (no DB round-trip)
+    let email = generateEmail(row.hoTen);
+    if (existingEmails.has(email)) {
+      let suffix = 1;
+      const base = email.replace('@tbsgroup.vn', '');
+      while (existingEmails.has(`${base}${suffix}@tbsgroup.vn`) && suffix <= 20) suffix++;
+      email = suffix <= 20 ? `${base}${suffix}@tbsgroup.vn` : `${row.msnv.toLowerCase()}@tbsgroup.vn`;
+    }
+    existingEmails.add(email); // reserve so next duplicate gets a different suffix
 
-      const nameParts = row.hoTen.split(' ');
-      const firstName = nameParts[0];
-      const lastName = nameParts.slice(1).join(' ') || '';
+    const nameParts = row.hoTen.split(' ');
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || '';
+    const roleCode = determineRole(row.cd, row.isWorker);
+    const roleDefinitionId = roleMap.get(roleCode) ?? roleMap.get('USER')!;
 
-      const roleCode = determineRole(row.cd, row.isWorker);
-      const roleDefinitionId = roleMap.get(roleCode) ?? roleMap.get('USER')!;
+    toCreate.push({
+      msnv: row.msnv, hoTen: row.hoTen,
+      roleDefinitionId,
+      data: {
+        companyId,
+        employeeCode: row.msnv,
+        email,
+        password: hashedPassword,
+        firstName,
+        lastName,
+        phone: row.phone || undefined,
+        dateOfBirth: row.dob ?? undefined,
+        sex: row.sex ?? undefined,
+        jobPositionId,
+        officeId,
+        isActive: true,
+      },
+    });
+  }
 
-      const user = await prisma.user.create({
-        data: {
-          companyId,
-          employeeCode: row.msnv,
-          email,
-          password: hashedPassword,
-          firstName,
-          lastName,
-          phone: row.phone || undefined,
-          dateOfBirth: row.dob ?? undefined,
-          sex: row.sex ?? undefined,
-          jobPositionId,
-          officeId,
-          isActive: true,
-          roles: { create: { roleDefinitionId } },
-        },
-      });
+  // ── 3. Batch create users then roles in two transactions ──────────────────
+  if (toCreate.length > 0) {
+    // createMany returns count only — then fetch created users by employeeCode
+    await prisma.user.createMany({
+      data: toCreate.map(u => u.data),
+      skipDuplicates: true,
+    });
 
-      userMap.set(row.msnv, user.id);
-      ok++;
-      console.log(`  ✓ ${row.msnv} ${row.hoTen} [${roleCode}]`);
-    } catch (err: any) {
-      console.error(`  ✗ ${row.msnv}: ${err.message}`);
-      fail++;
+    const created = await prisma.user.findMany({
+      where: { companyId, employeeCode: { in: toCreate.map(u => u.msnv) } },
+      select: { id: true, employeeCode: true },
+    });
+    const createdByCode = new Map(created.map(u => [u.employeeCode, u.id]));
+
+    // Batch create roles
+    const rolesToCreate = toCreate
+      .map(u => ({ userId: createdByCode.get(u.msnv), roleDefinitionId: u.roleDefinitionId }))
+      .filter((r): r is { userId: string; roleDefinitionId: string } => !!r.userId);
+
+    if (rolesToCreate.length > 0) {
+      await prisma.userRole.createMany({ data: rolesToCreate, skipDuplicates: true });
+    }
+
+    for (const u of toCreate) {
+      const id = createdByCode.get(u.msnv);
+      if (id) { userMap.set(u.msnv, id); ok++; }
+      else fail++;
     }
   }
+  // ──────────────────────────────────────────────────────────────────────────
+
   console.log(`\n  ✅ Created: ${ok}  ⚠ Skipped: ${skip}  ✗ Failed: ${fail}`);
   return userMap;
 }
@@ -415,47 +464,65 @@ async function createManagementRelations(
   userMap: Map<string, string>,
 ): Promise<void> {
   console.log('\n🔗 [7/7] Creating management relations...');
-  let ok = 0, skip = 0, fail = 0;
+  let ok = 0, skip = 0;
 
-  // Build set of (userId, departmentId) pairs
-  const toCreate = new Map<string, Set<string>>(); // managerId → departmentIds
+  // ── 1. Batch-load user→departmentId mapping ────────────────────────────────
+  const allUserIds = Array.from(userMap.values());
+  const usersWithDept = await prisma.user.findMany({
+    where: { id: { in: allUserIds } },
+    select: { id: true, jobPosition: { select: { departmentId: true } } },
+  });
+  const userDeptMap = new Map<string, string>();
+  for (const u of usersWithDept) {
+    if (u.jobPosition?.departmentId) userDeptMap.set(u.id, u.jobPosition.departmentId);
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
+  // ── 2. Build desired (managerId, departmentId) pairs in memory ────────────
+  const desired = new Map<string, Set<string>>(); // managerId → Set<departmentId>
   for (const row of rows) {
     const userId = userMap.get(row.msnv);
     if (!userId) continue;
+    const departmentId = userDeptMap.get(userId);
+    if (!departmentId) continue;
 
     for (const mgrMsnv of [row.mgr1, row.mgr2, row.mgr3].filter(Boolean)) {
-      const managerId = userMap.get(mgrMsnv);
+      const managerId = userMap.get(mgrMsnv!);
       if (!managerId) continue;
-
-      const userWithDept = await prisma.user.findUnique({
-        where: { id: userId },
-        select: { jobPosition: { select: { departmentId: true } } },
-      });
-      const departmentId = userWithDept?.jobPosition?.departmentId;
-      if (!departmentId) continue;
-
-      if (!toCreate.has(managerId)) toCreate.set(managerId, new Set());
-      toCreate.get(managerId)!.add(departmentId);
+      if (!desired.has(managerId)) desired.set(managerId, new Set());
+      desired.get(managerId)!.add(departmentId);
     }
   }
+  // ──────────────────────────────────────────────────────────────────────────
 
-  for (const [managerId, deptIds] of toCreate) {
+  // ── 3. Batch-load existing relations, then createMany new ones ───────────
+  const managerIds = Array.from(desired.keys());
+  if (managerIds.length === 0) {
+    console.log(`  ✅ Created: 0  ⚠ Skipped: 0`);
+    return;
+  }
+
+  const existingRelations = await prisma.userDepartmentManagement.findMany({
+    where: { userId: { in: managerIds } },
+    select: { userId: true, departmentId: true },
+  });
+  const existingSet = new Set(existingRelations.map(r => `${r.userId}:${r.departmentId}`));
+
+  const toCreate: Array<{ userId: string; departmentId: string; isActive: boolean }> = [];
+  for (const [managerId, deptIds] of desired) {
     for (const departmentId of deptIds) {
-      try {
-        const exists = await prisma.userDepartmentManagement.findUnique({
-          where: { userId_departmentId: { userId: managerId, departmentId } },
-        });
-        if (exists) { skip++; continue; }
-        await prisma.userDepartmentManagement.create({ data: { userId: managerId, departmentId, isActive: true } });
-        ok++;
-      } catch (err: any) {
-        console.error(`  ✗ Management relation: ${err.message}`);
-        fail++;
-      }
+      if (existingSet.has(`${managerId}:${departmentId}`)) { skip++; continue; }
+      toCreate.push({ userId: managerId, departmentId, isActive: true });
     }
   }
-  console.log(`  ✅ Created: ${ok}  ⚠ Skipped: ${skip}  ✗ Failed: ${fail}`);
+
+  if (toCreate.length > 0) {
+    await prisma.userDepartmentManagement.createMany({ data: toCreate, skipDuplicates: true });
+    ok = toCreate.length;
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
+  console.log(`  ✅ Created: ${ok}  ⚠ Skipped: ${skip}`);
 }
 
 // ─── Main ──────────────────────────────────────────────────────────────────────
