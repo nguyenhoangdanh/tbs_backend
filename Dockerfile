@@ -58,6 +58,10 @@ COPY --from=base /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
 # Copy built application
 COPY --from=base /app/dist ./dist
 
+# Copy entrypoint script
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x entrypoint.sh
+
 # Create non-root user for security
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nestjs
@@ -77,5 +81,5 @@ ENV PORT=8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD node -e "require('http').get('http://localhost:8080/health', (res) => { process.exit(res.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))"
 
-# Start the application
-CMD ["node", "dist/src/main.js"]
+# Start via entrypoint (runs migrate then starts app)
+CMD ["sh", "entrypoint.sh"]

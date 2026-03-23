@@ -5,7 +5,6 @@
     "buildCommand": "pnpm install && pnpm exec prisma generate && pnpm run build"
   },
   "deploy": {
-    "startCommand": "./node_modules/.bin/prisma migrate deploy && pnpm run start:prod",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
