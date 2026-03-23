@@ -18,8 +18,8 @@ RUN pnpm install --frozen-lockfile
 # Copy prisma schema
 COPY prisma ./prisma/
 
-# Generate Prisma client
-RUN npx prisma generate
+# Generate Prisma client (uses local prisma from node_modules)
+RUN pnpm exec prisma generate
 
 # Copy source code
 COPY . .
@@ -44,9 +44,13 @@ COPY package.json pnpm-lock.yaml ./
 # Install only production dependencies
 RUN pnpm install --prod --frozen-lockfile
 
-# Copy prisma schema and generate client
+# Copy prisma schema
 COPY prisma ./prisma/
-RUN npx prisma generate
+
+# Copy generated Prisma client from base (avoids re-running prisma generate
+# with wrong version from npx)
+COPY --from=base /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=base /app/node_modules/@prisma/client ./node_modules/@prisma/client
 
 # Copy built application
 COPY --from=base /app/dist ./dist
