@@ -2557,6 +2557,26 @@ export class InventoryService {
     // so duplicate-name rows within the same category map to distinct medicine records.
     const categoryNameCounter = new Map<string, number>();
 
+    // ── Pre-load lookups to avoid N+1 queries in the main loop ──────────────
+    const categoryCache = new Map<string, { id: string; type: string }>();
+    {
+      const allCats = await this.prisma.medicineCategory.findMany();
+      allCats.forEach(c => categoryCache.set(c.code, { id: c.id, type: c.type as string }));
+    }
+    const medicinesByNameCat = new Map<string, any[]>();
+    {
+      const allMeds = await this.prisma.medicine.findMany({
+        where: { isActive: true },
+        orderBy: { createdAt: 'asc' },
+      });
+      for (const med of allMeds) {
+        const key = `${med.name}:${med.categoryId ?? ''}`;
+        if (!medicinesByNameCat.has(key)) medicinesByNameCat.set(key, []);
+        medicinesByNameCat.get(key)!.push(med);
+      }
+    }
+    // ────────────────────────────────────────────────────────────────────────
+
     for (const row of data) {
       try {
         // Skip empty rows
@@ -2590,7 +2610,7 @@ export class InventoryService {
           // Upsert category so it exists in DB
           try {
             const sortOrder = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII'].indexOf(catCode) + 1;
-            await this.prisma.medicineCategory.upsert({
+            const upsertedCat = await this.prisma.medicineCategory.upsert({
               where: { code: catCode },
               update: { name: catName, type: catType as any },
               create: {
@@ -2600,6 +2620,8 @@ export class InventoryService {
                 sortOrder: sortOrder > 0 ? sortOrder : 99,
               },
             });
+            // Keep cache current for subsequent rows in this category
+            categoryCache.set(catCode, { id: upsertedCat.id, type: upsertedCat.type as string });
           } catch (_e) { /* ignore */ }
           continue;
         }
@@ -2764,10 +2786,7 @@ export class InventoryService {
         let itemType = 'MEDICINE' as any;
 
         if (currentCategory) {
-          const category = await this.prisma.medicineCategory.findUnique({
-            where: { code: currentCategory },
-          });
-
+          const category = categoryCache.get(currentCategory);
           if (category) {
             itemType = category.type;
             categoryId = category.id;
@@ -2782,10 +2801,9 @@ export class InventoryService {
         const slotIndex = categoryNameCounter.get(posKey) ?? 0;
         categoryNameCounter.set(posKey, slotIndex + 1);
 
-        const candidatesByName = await this.prisma.medicine.findMany({
-          where: { name: medicineName, isActive: true, ...(categoryId ? { categoryId } : {}) },
-          orderBy: { createdAt: 'asc' },
-        });
+        // Use in-memory cache instead of per-row DB query
+        const cacheKey = `${medicineName}:${categoryId ?? ''}`;
+        const candidatesByName = medicinesByNameCat.get(cacheKey) ?? [];
 
         let medicine = slotIndex < candidatesByName.length
           ? candidatesByName[slotIndex]
@@ -2818,6 +2836,18 @@ export class InventoryService {
             },
           });
           updated++;
+        }
+
+        // Update in-memory cache so subsequent duplicate-name rows are correct
+        {
+          const mKey = `${medicine.name}:${medicine.categoryId ?? ''}`;
+          const list = medicinesByNameCat.get(mKey);
+          if (list) {
+            const idx = list.findIndex((m: any) => m.id === medicine!.id);
+            if (idx >= 0) list[idx] = medicine; else list.push(medicine);
+          } else {
+            medicinesByNameCat.set(mKey, [medicine]);
+          }
         }
 
         // Parse expiry date
@@ -2956,8 +2986,7 @@ export class InventoryService {
             suggestedPurchaseAmount: suggestedAmount,
           },
         });
-        // Cascade opening to subsequent months after each medicine import
-        await this.propagateOpeningForward(medicine.id, month, year);
+        // Collect for batch propagation after the loop
         importedMedicineIds.add(medicine.id);
       } catch (error) {
         errors.push({
@@ -2967,6 +2996,18 @@ export class InventoryService {
         });
       }
     }
+
+    // ── Propagate opening forward in parallel batches (not per-row) ─────────
+    const propIds = Array.from(importedMedicineIds);
+    const PROP_CONCURRENCY = 5;
+    for (let i = 0; i < propIds.length; i += PROP_CONCURRENCY) {
+      await Promise.all(
+        propIds.slice(i, i + PROP_CONCURRENCY).map(id =>
+          this.propagateOpeningForward(id, month, year),
+        ),
+      );
+    }
+    // ────────────────────────────────────────────────────────────────────────
 
     console.log(`\n✅ Import completed:`);
     console.log(`   - Imported: ${imported} new medicines`);
@@ -2983,43 +3024,49 @@ export class InventoryService {
     const nextMonth = month === 12 ? 1 : month + 1;
     const nextYear = month === 12 ? year + 1 : year;
     let seeded = 0;
-    for (const medicineId of importedMedicineIds) {
-      try {
-        const existing = await this.prisma.medicineInventory.findUnique({
-          where: {
-            medicineId_month_year: { medicineId, month: nextMonth, year: nextYear },
-          },
-        });
-        if (existing) continue; // Don't overwrite records that already have real data
 
-        const current = await this.prisma.medicineInventory.findUnique({
-          where: { medicineId_month_year: { medicineId, month, year } },
+    // ── Batch next-month seeding: 2 queries instead of 3×N ──────────────────
+    if (propIds.length > 0) {
+      const existingNextMonth = new Set(
+        (await this.prisma.medicineInventory.findMany({
+          where: { medicineId: { in: propIds }, month: nextMonth, year: nextYear },
+          select: { medicineId: true },
+        })).map(r => r.medicineId),
+      );
+      const needsSeeding = propIds.filter(id => !existingNextMonth.has(id));
+      if (needsSeeding.length > 0) {
+        const currentRecords = await this.prisma.medicineInventory.findMany({
+          where: { medicineId: { in: needsSeeding }, month, year },
         });
-        if (!current) continue;
-
-        await this.prisma.medicineInventory.create({
-          data: {
-            medicineId,
-            month: nextMonth,
-            year: nextYear,
-            expiryDate: current.expiryDate,
-            openingQuantity: current.closingQuantity,
-            openingUnitPrice: current.closingUnitPrice,
-            openingTotalAmount: current.closingTotalAmount,
-            // Yearly accumulators: reset for new year, carry over for same year
-            yearlyImportQuantity: nextYear !== year ? 0 : current.yearlyImportQuantity,
-            yearlyImportUnitPrice: nextYear !== year ? 0 : current.yearlyImportUnitPrice,
-            yearlyImportAmount: nextYear !== year ? 0 : current.yearlyImportAmount,
-            yearlyExportQuantity: nextYear !== year ? 0 : current.yearlyExportQuantity,
-            yearlyExportUnitPrice: nextYear !== year ? 0 : current.yearlyExportUnitPrice,
-            yearlyExportAmount: nextYear !== year ? 0 : current.yearlyExportAmount,
-          },
-        });
-        seeded++;
-      } catch (_e) {
-        // Ignore duplicate/constraint errors — record may have been created concurrently
+        for (const current of currentRecords) {
+          try {
+            await this.prisma.medicineInventory.create({
+              data: {
+                medicineId: current.medicineId,
+                month: nextMonth,
+                year: nextYear,
+                expiryDate: current.expiryDate,
+                openingQuantity: current.closingQuantity,
+                openingUnitPrice: current.closingUnitPrice,
+                openingTotalAmount: current.closingTotalAmount,
+                // Yearly accumulators: reset for new year, carry over for same year
+                yearlyImportQuantity: nextYear !== year ? 0 : current.yearlyImportQuantity,
+                yearlyImportUnitPrice: nextYear !== year ? 0 : current.yearlyImportUnitPrice,
+                yearlyImportAmount: nextYear !== year ? 0 : current.yearlyImportAmount,
+                yearlyExportQuantity: nextYear !== year ? 0 : current.yearlyExportQuantity,
+                yearlyExportUnitPrice: nextYear !== year ? 0 : current.yearlyExportUnitPrice,
+                yearlyExportAmount: nextYear !== year ? 0 : current.yearlyExportAmount,
+              },
+            });
+            seeded++;
+          } catch (_e) {
+            // Ignore duplicate/constraint errors
+          }
+        }
       }
     }
+    // ────────────────────────────────────────────────────────────────────────
+
     if (seeded > 0) {
       console.log(`   - Seeded opening balance for ${seeded} medicines in ${nextMonth}/${nextYear}`);
     }
