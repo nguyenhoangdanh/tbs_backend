@@ -2575,6 +2575,15 @@ export class InventoryService {
         medicinesByNameCat.get(key)!.push(med);
       }
     }
+    // Pre-load existing inventory records for this period (for batch upsert)
+    const existingInventorySet = new Set<string>(
+      (await this.prisma.medicineInventory.findMany({
+        where: { month, year },
+        select: { medicineId: true },
+      })).map(r => r.medicineId),
+    );
+    // Buffer for batch inventory writes — filled in the loop, flushed after
+    const pendingInventories: Array<Record<string, any>> = [];
     // ────────────────────────────────────────────────────────────────────────
 
     for (const row of data) {
@@ -2823,18 +2832,32 @@ export class InventoryService {
           });
           imported++;
         } else {
-          medicine = await this.prisma.medicine.update({
-            where: { id: medicine.id },
-            data: {
-              type: itemType,
-              categoryId:
-                categoryId !== undefined ? categoryId : medicine.categoryId,
-              route: route || medicine.route,
-              strength: strength || medicine.strength,
-              manufacturer: manufacturer || medicine.manufacturer,
-              units: units || medicine.units,
-            },
-          });
+          // Skip update if no field actually changed (avoids write on re-import)
+          const newCatId = categoryId !== undefined ? categoryId : medicine.categoryId;
+          const newRoute = route || medicine.route;
+          const newStrength = strength || medicine.strength;
+          const newManufacturer = manufacturer || medicine.manufacturer;
+          const newUnits = units || medicine.units;
+          const changed =
+            medicine.type !== itemType ||
+            medicine.categoryId !== newCatId ||
+            medicine.route !== newRoute ||
+            medicine.strength !== newStrength ||
+            medicine.manufacturer !== newManufacturer ||
+            medicine.units !== newUnits;
+          if (changed) {
+            medicine = await this.prisma.medicine.update({
+              where: { id: medicine.id },
+              data: {
+                type: itemType,
+                categoryId: newCatId,
+                route: newRoute,
+                strength: newStrength,
+                manufacturer: newManufacturer,
+                units: newUnits,
+              },
+            });
+          }
           updated++;
         }
 
@@ -2925,66 +2948,31 @@ export class InventoryService {
           }
         }
 
-        // Upsert MedicineInventory
-        await this.prisma.medicineInventory.upsert({
-          where: {
-            medicineId_month_year: {
-              medicineId: medicine.id,
-              month,
-              year,
-            },
-          },
-          update: {
-            expiryDate,
-            openingQuantity: openingQty,
-            openingUnitPrice: openingPrice,
-            openingTotalAmount: openingAmount,
-            monthlyImportQuantity: monthlyImportQty,
-            monthlyImportUnitPrice: monthlyImportPrice,
-            monthlyImportAmount: monthlyImportAmount,
-            monthlyExportQuantity: monthlyExportQty,
-            monthlyExportUnitPrice: monthlyExportPrice,
-            monthlyExportAmount: monthlyExportAmount,
-            closingQuantity: closingQty,
-            closingUnitPrice: closingPrice,
-            closingTotalAmount: closingAmount,
-            yearlyImportQuantity: yearlyImportQty,
-            yearlyImportUnitPrice: yearlyImportPrice,
-            yearlyImportAmount: yearlyImportAmount,
-            yearlyExportQuantity: yearlyExportQty,
-            yearlyExportUnitPrice: yearlyExportPrice,
-            yearlyExportAmount: yearlyExportAmount,
-            suggestedPurchaseQuantity: suggestedQty,
-            suggestedPurchaseUnitPrice: suggestedPrice,
-            suggestedPurchaseAmount: suggestedAmount,
-          },
-          create: {
-            medicineId: medicine.id,
-            month,
-            year,
-            expiryDate,
-            openingQuantity: openingQty,
-            openingUnitPrice: openingPrice,
-            openingTotalAmount: openingAmount,
-            monthlyImportQuantity: monthlyImportQty,
-            monthlyImportUnitPrice: monthlyImportPrice,
-            monthlyImportAmount: monthlyImportAmount,
-            monthlyExportQuantity: monthlyExportQty,
-            monthlyExportUnitPrice: monthlyExportPrice,
-            monthlyExportAmount: monthlyExportAmount,
-            closingQuantity: closingQty,
-            closingUnitPrice: closingPrice,
-            closingTotalAmount: closingAmount,
-            yearlyImportQuantity: yearlyImportQty,
-            yearlyImportUnitPrice: yearlyImportPrice,
-            yearlyImportAmount: yearlyImportAmount,
-            yearlyExportQuantity: yearlyExportQty,
-            yearlyExportUnitPrice: yearlyExportPrice,
-            yearlyExportAmount: yearlyExportAmount,
-            suggestedPurchaseQuantity: suggestedQty,
-            suggestedPurchaseUnitPrice: suggestedPrice,
-            suggestedPurchaseAmount: suggestedAmount,
-          },
+        // Collect inventory data for batch write after the loop
+        pendingInventories.push({
+          medicineId: medicine.id,
+          expiryDate,
+          openingQuantity: openingQty,
+          openingUnitPrice: openingPrice,
+          openingTotalAmount: openingAmount,
+          monthlyImportQuantity: monthlyImportQty,
+          monthlyImportUnitPrice: monthlyImportPrice,
+          monthlyImportAmount: monthlyImportAmount,
+          monthlyExportQuantity: monthlyExportQty,
+          monthlyExportUnitPrice: monthlyExportPrice,
+          monthlyExportAmount: monthlyExportAmount,
+          closingQuantity: closingQty,
+          closingUnitPrice: closingPrice,
+          closingTotalAmount: closingAmount,
+          yearlyImportQuantity: yearlyImportQty,
+          yearlyImportUnitPrice: yearlyImportPrice,
+          yearlyImportAmount: yearlyImportAmount,
+          yearlyExportQuantity: yearlyExportQty,
+          yearlyExportUnitPrice: yearlyExportPrice,
+          yearlyExportAmount: yearlyExportAmount,
+          suggestedPurchaseQuantity: suggestedQty,
+          suggestedPurchaseUnitPrice: suggestedPrice,
+          suggestedPurchaseAmount: suggestedAmount,
         });
         // Collect for batch propagation after the loop
         importedMedicineIds.add(medicine.id);
@@ -2997,16 +2985,32 @@ export class InventoryService {
       }
     }
 
-    // ── Propagate opening forward in parallel batches (not per-row) ─────────
+    // ── Batch-write all inventory records (createMany + transaction update) ──
     const propIds = Array.from(importedMedicineIds);
-    const PROP_CONCURRENCY = 5;
-    for (let i = 0; i < propIds.length; i += PROP_CONCURRENCY) {
-      await Promise.all(
-        propIds.slice(i, i + PROP_CONCURRENCY).map(id =>
-          this.propagateOpeningForward(id, month, year),
-        ),
-      );
+    if (pendingInventories.length > 0) {
+      const creates = pendingInventories
+        .filter(p => !existingInventorySet.has(p.medicineId))
+        .map(({ medicineId, ...fields }) => ({ ...fields, medicineId, month, year }));
+      const updates = pendingInventories.filter(p => existingInventorySet.has(p.medicineId));
+
+      if (creates.length > 0) {
+        await this.prisma.medicineInventory.createMany({ data: creates, skipDuplicates: true });
+      }
+      if (updates.length > 0) {
+        await this.prisma.$transaction(
+          updates.map(({ medicineId, ...data }) =>
+            this.prisma.medicineInventory.update({
+              where: { medicineId_month_year: { medicineId, month, year } },
+              data,
+            }),
+          ),
+        );
+      }
     }
+    // ────────────────────────────────────────────────────────────────────────
+
+    // ── Bulk propagate opening forward (2 queries + 1 batch transaction) ────
+    await this.propagateOpeningForwardBulk(propIds, month, year);
     // ────────────────────────────────────────────────────────────────────────
 
     console.log(`\n✅ Import completed:`);
@@ -3361,6 +3365,148 @@ export class InventoryService {
    * Hoạt động đúng với: tháng không liên tiếp (có gap), xuyên năm dương lịch.
    * Dừng sớm khi không còn bản ghi kế tiếp hoặc dữ liệu không thay đổi.
    */
+  private async propagateOpeningForwardBulk(
+    medicineIds: string[],
+    startMonth: number,
+    startYear: number,
+  ): Promise<void> {
+    if (medicineIds.length === 0) return;
+
+    // 1 query: get all start records
+    const startRecords = await this.prisma.medicineInventory.findMany({
+      where: { medicineId: { in: medicineIds }, month: startMonth, year: startYear },
+    });
+    if (startRecords.length === 0) return;
+
+    // 1 query: get all subsequent records for all medicines
+    const allSubsequent = await this.prisma.medicineInventory.findMany({
+      where: {
+        medicineId: { in: medicineIds },
+        OR: [
+          { year: { gt: startYear } },
+          { year: startYear, month: { gt: startMonth } },
+        ],
+      },
+      orderBy: [{ year: 'asc' }, { month: 'asc' }],
+    });
+    if (allSubsequent.length === 0) return;
+
+    // Group subsequent records by medicineId
+    const subsByMed = new Map<string, typeof allSubsequent>();
+    for (const rec of allSubsequent) {
+      if (!subsByMed.has(rec.medicineId)) subsByMed.set(rec.medicineId, []);
+      subsByMed.get(rec.medicineId)!.push(rec);
+    }
+
+    // Process each medicine's chain in memory, collect updates
+    const pendingUpdates: Array<{ medicineId: string; month: number; year: number; data: Record<string, any> }> = [];
+
+    for (const startRecord of startRecords) {
+      const { medicineId } = startRecord;
+      const chain = subsByMed.get(medicineId);
+      if (!chain || chain.length === 0) continue;
+
+      let prevClosingQty = D(startRecord.closingQuantity);
+      let prevClosingPrice = D(startRecord.closingUnitPrice);
+      let prevClosingAmt = D(startRecord.closingTotalAmount);
+      let prevYear = startYear;
+      let ytdImportQty = D(startRecord.yearlyImportQuantity);
+      let ytdImportAmt = D(startRecord.yearlyImportAmount);
+      let ytdExportQty = D(startRecord.yearlyExportQuantity);
+      let ytdExportAmt = D(startRecord.yearlyExportAmount);
+
+      for (const rec of chain) {
+        if (rec.year !== prevYear) {
+          ytdImportQty = new Prisma.Decimal(0);
+          ytdImportAmt = new Prisma.Decimal(0);
+          ytdExportQty = new Prisma.Decimal(0);
+          ytdExportAmt = new Prisma.Decimal(0);
+          prevYear = rec.year;
+        }
+
+        const dOpenQty = prevClosingQty;
+        const dOpenPrice = prevClosingPrice;
+        const dOpenAmt = prevClosingAmt;
+
+        const dImportQty = D(rec.monthlyImportQuantity);
+        const dImportAmt = D(rec.monthlyImportAmount);
+        const dExportQty = D(rec.monthlyExportQuantity);
+        const dExportAmt = D(rec.monthlyExportAmount);
+
+        const dClosingQty = dOpenQty.plus(dImportQty).minus(dExportQty);
+        const dClosingAmt = dOpenAmt.plus(dImportAmt).minus(dExportAmt);
+        const _G = Number(dOpenQty), _H = Number(dOpenPrice);
+        const _J = Number(dImportQty), _K = Number(D(rec.monthlyImportUnitPrice));
+        const _totalQP = _G + _J;
+        const dClosingPrice = _totalQP > 0
+          ? D(((_G * _H + _J * _K) / _totalQP).toPrecision(15))
+          : dOpenPrice;
+
+        const newYtdImportQty = ytdImportQty.plus(dImportQty);
+        const newYtdImportAmt = ytdImportAmt.plus(dImportAmt);
+        const newYtdExportQty = ytdExportQty.plus(dExportQty);
+        const newYtdExportAmt = ytdExportAmt.plus(dExportAmt);
+        const newYtdImportPr = newYtdImportQty.gt(0)
+          ? D(Number(newYtdImportAmt.div(newYtdImportQty)).toPrecision(15))
+          : ytdImportQty.gt(0) ? D(Number(ytdImportAmt.div(ytdImportQty)).toPrecision(15)) : new Prisma.Decimal(0);
+        const newYtdExportPr = newYtdExportQty.gt(0)
+          ? D(Number(newYtdExportAmt.div(newYtdExportQty)).toPrecision(15))
+          : ytdExportQty.gt(0) ? D(Number(ytdExportAmt.div(ytdExportQty)).toPrecision(15)) : new Prisma.Decimal(0);
+
+        // Early stop per medicine if nothing changed
+        const openingUnchanged =
+          D(rec.openingQuantity).eq(dOpenQty) &&
+          D(rec.openingUnitPrice).eq(dOpenPrice) &&
+          D(rec.openingTotalAmount).eq(dOpenAmt);
+        const ytdUnchanged =
+          D(rec.yearlyImportQuantity).eq(newYtdImportQty) &&
+          D(rec.yearlyExportQuantity).eq(newYtdExportQty);
+
+        if (openingUnchanged && ytdUnchanged) break;
+
+        pendingUpdates.push({
+          medicineId,
+          month: rec.month,
+          year: rec.year,
+          data: {
+            openingQuantity: dOpenQty.toFixed(),
+            openingUnitPrice: dOpenPrice.toFixed(),
+            openingTotalAmount: dOpenAmt.toFixed(),
+            closingQuantity: dClosingQty.toFixed(),
+            closingUnitPrice: dClosingPrice.toFixed(),
+            closingTotalAmount: dClosingAmt.toFixed(),
+            yearlyImportQuantity: newYtdImportQty.toFixed(),
+            yearlyImportUnitPrice: newYtdImportPr.toFixed(),
+            yearlyImportAmount: newYtdImportAmt.toFixed(),
+            yearlyExportQuantity: newYtdExportQty.toFixed(),
+            yearlyExportUnitPrice: newYtdExportPr.toFixed(),
+            yearlyExportAmount: newYtdExportAmt.toFixed(),
+          },
+        });
+
+        prevClosingQty = dClosingQty;
+        prevClosingPrice = dClosingPrice;
+        prevClosingAmt = dClosingAmt;
+        ytdImportQty = newYtdImportQty;
+        ytdImportAmt = newYtdImportAmt;
+        ytdExportQty = newYtdExportQty;
+        ytdExportAmt = newYtdExportAmt;
+      }
+    }
+
+    // 1 batch transaction: all updates at once
+    if (pendingUpdates.length > 0) {
+      await this.prisma.$transaction(
+        pendingUpdates.map(u =>
+          this.prisma.medicineInventory.update({
+            where: { medicineId_month_year: { medicineId: u.medicineId, month: u.month, year: u.year } },
+            data: u.data,
+          }),
+        ),
+      );
+    }
+  }
+
   private async propagateOpeningForward(
     medicineId: string,
     startMonth: number,
