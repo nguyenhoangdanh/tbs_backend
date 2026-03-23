@@ -1,11 +1,11 @@
 {
-  "name": "weekly-report-backend",
+  "name": "tbsgroup-backend",
   "build": {
     "builder": "NIXPACKS",
     "buildCommand": "pnpm install && npx prisma generate && pnpm run build"
   },
   "deploy": {
-    "startCommand": "pnpm run start:prod",
+    "startCommand": "npx prisma migrate deploy && pnpm run start:prod",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
