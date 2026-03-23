@@ -3105,6 +3105,7 @@ export class InventoryService {
           medicineId,
           month,
           year,
+          expiryDate: prev.expiryDate ?? null, // clone từ tháng trước
           openingQuantity: dOpenQty.toFixed(),
           openingUnitPrice: dOpenPrice.toFixed(),
           openingTotalAmount: dOpenAmt.toFixed(),
