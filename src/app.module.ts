@@ -17,8 +17,6 @@ import { join } from 'path';
 import { ManufacturingModule } from './modules/manufacturing/manufacturing.module';
 import { WorksheetModule } from './modules/worksheet/worksheet.module';
 import { WebSocketModule } from './modules/websocket/websocket.module';
-import { GatePassModule } from './gate-pass/gate-pass.module';
-import { NotificationModule } from './notifications/notification.module';
 import { HealthcareModule } from './healthcare/healthcare.module';
 import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 
@@ -68,8 +66,6 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     ManufacturingModule,
     WorksheetModule,
     WebSocketModule,
-    GatePassModule,
-    NotificationModule,
     HealthcareModule,
     FeedbackModule, // ⭐ NEW
 
