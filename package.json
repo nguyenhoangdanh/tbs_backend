@@ -11,7 +11,7 @@
     "start:prod": "node dist/src/main.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "db:generate": "npx prisma generate",
+    "db:generate": "npx prisma generate && (test -L .prisma || ln -s node_modules/.prisma .prisma)",
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
