@@ -47,13 +47,8 @@ RUN pnpm install --prod --frozen-lockfile
 # Copy prisma schema
 COPY prisma ./prisma/
 
-# Copy generated Prisma client from base (avoids re-running prisma generate
-# with wrong version from npx)
-COPY --from=base /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=base /app/node_modules/@prisma/client ./node_modules/@prisma/client
-# Copy prisma CLI so migrate deploy works at runtime without npx
-COPY --from=base /app/node_modules/prisma ./node_modules/prisma
-COPY --from=base /app/node_modules/.bin/prisma ./node_modules/.bin/prisma
+# Generate Prisma client for production
+RUN pnpm exec prisma generate
 
 # Copy built application
 COPY --from=base /app/dist ./dist
