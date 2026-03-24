@@ -24,6 +24,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { Public } from '../common/decorators/public.decorator';
 import { HealthcareService } from './healthcare.service';
 import {
   CreateMedicalRecordDto,
@@ -113,23 +114,13 @@ export class HealthcareController {
     return this.healthcareService.deleteMedicine(id);
   }
 
-  // Patient History Lookup (requires auth — user can view own history, staff can view all)
+  // Patient History Lookup — public, no auth required (lookup by employee code)
+  @Public()
   @Get('patient-history/:employeeCode')
   @ApiOperation({ summary: 'Get patient medical history by employee code' })
   async getPatientHistory(
     @Param('employeeCode') employeeCode: string,
-    @Request() req: any,
   ) {
-    const user = req.user;
-    const userRoles: string[] = (user.roles ?? []).map(
-      (r: any) => r.roleDefinition?.code ?? r.role?.code ?? r.code ?? r,
-    );
-    const isStaff = userRoles.some((r) =>
-      ['MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN'].includes(r),
-    );
-    if (!isStaff && user.employeeCode !== employeeCode) {
-      throw new ForbiddenException('Không có quyền xem hồ sơ y tế của nhân viên khác');
-    }
     return this.healthcareService.getPatientHistory(employeeCode);
   }
 
