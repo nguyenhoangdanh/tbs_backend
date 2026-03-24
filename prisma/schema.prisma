@@ -993,6 +993,7 @@ enum FeedbackStatus {
 model Feedback {
   id           String         @id @default(uuid())
   content      String         @db.Text
+  rating       Int?
   ipAddress    String?
   userAgent    String?
   status       FeedbackStatus @default(PENDING)
@@ -1009,6 +1010,7 @@ model Feedback {
 
   @@index([createdAt])
   @@index([status])
+  @@index([rating])
   @@map("feedbacks")
 }
 
