@@ -226,4 +226,3 @@ Dockerfile.dev
 /scripts/dev-*
 .vercel
 prisma/*.xlsx
-.prisma

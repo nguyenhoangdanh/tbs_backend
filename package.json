@@ -11,7 +11,7 @@
     "start:prod": "node dist/src/main.js",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
-    "db:generate": "npx prisma generate && (test -L .prisma || ln -s node_modules/.prisma .prisma) && node -e \"const fs=require('fs'),src='node_modules/.prisma/client',dst='node_modules/.pnpm/@prisma+client@6.10.1_prisma@6.10.1_typescript@5.8.3__typescript@5.8.3/node_modules/.prisma/client';['index.js','index.d.ts','default.js','default.d.ts','schema.prisma'].forEach(f=>{try{fs.copyFileSync(src+'/'+f,dst+'/'+f)}catch(e){}})\"",
+    "db:generate": "npx prisma generate",
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
