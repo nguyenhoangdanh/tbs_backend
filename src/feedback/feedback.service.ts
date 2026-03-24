@@ -28,6 +28,7 @@ export class FeedbackService {
     const feedback = await this.prisma.feedback.create({
       data: {
         content: dto.content,
+        rating: dto.rating ?? null,
         ipAddress,
         userAgent,
       },
@@ -191,15 +192,47 @@ export class FeedbackService {
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
 
-    const [total, thisMonth, lastMonth, pending, inProgress, resolved] = await Promise.all([
+    const [total, thisMonth, lastMonth, pending, inProgress, resolved, ratingGroups] = await Promise.all([
       this.prisma.feedback.count(),
       this.prisma.feedback.count({ where: { createdAt: { gte: startOfMonth } } }),
       this.prisma.feedback.count({ where: { createdAt: { gte: startOfLastMonth, lte: endOfLastMonth } } }),
       this.prisma.feedback.count({ where: { status: FeedbackStatus.PENDING } }),
       this.prisma.feedback.count({ where: { status: FeedbackStatus.IN_PROGRESS } }),
       this.prisma.feedback.count({ where: { status: FeedbackStatus.RESOLVED } }),
+      this.prisma.feedback.groupBy({
+        by: ['rating'],
+        where: { rating: { not: null } },
+        _count: { rating: true },
+      }),
     ]);
 
-    return { total, thisMonth, lastMonth, pending, inProgress, resolved };
+    const ratingMap: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let ratingSum = 0;
+    let ratingTotal = 0;
+    for (const group of ratingGroups) {
+      if (group.rating !== null) {
+        ratingMap[group.rating] = group._count.rating;
+        ratingSum += group.rating * group._count.rating;
+        ratingTotal += group._count.rating;
+      }
+    }
+
+    return {
+      total,
+      thisMonth,
+      lastMonth,
+      pending,
+      inProgress,
+      resolved,
+      ratingStats: {
+        star1: ratingMap[1],
+        star2: ratingMap[2],
+        star3: ratingMap[3],
+        star4: ratingMap[4],
+        star5: ratingMap[5],
+        average: ratingTotal > 0 ? Math.round((ratingSum / ratingTotal) * 10) / 10 : 0,
+        total: ratingTotal,
+      },
+    };
   }
 }
