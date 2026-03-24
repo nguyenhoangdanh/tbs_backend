@@ -22,7 +22,10 @@
     "db:reset": "npx prisma migrate reset --force",
     "db:reset:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate reset --force && npx tsx prisma/seed.ts'",
 
-    "db:import:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/import-workers.ts'"
+    "db:import:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/import-workers.ts'",
+
+    "db:reset:healthcare": "bash -c 'set -a && source .env && set +a && npx tsx prisma/reset-healthcare.ts'",
+    "db:reset:healthcare:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/reset-healthcare.ts'"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",
