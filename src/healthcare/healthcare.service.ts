@@ -1667,4 +1667,139 @@ export class HealthcareService {
       grandTotal: grandTotal.toFixed(),
     };
   }
+
+  async getVisitStatsByOffice(
+    period: 'day' | 'week' | 'month' | 'year' = 'month',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    const end = endDate ? new Date(endDate) : new Date();
+    if (endDate) end.setHours(23, 59, 59, 999);
+
+    let start: Date;
+    if (startDate) {
+      start = new Date(startDate);
+      start.setHours(0, 0, 0, 0);
+    } else {
+      const now = new Date(end);
+      switch (period) {
+        case 'day':
+          start = new Date(now);
+          start.setHours(0, 0, 0, 0);
+          break;
+        case 'week': {
+          start = new Date(now);
+          const day = start.getDay();
+          const diff = day === 0 ? 6 : day - 1;
+          start.setDate(start.getDate() - diff);
+          start.setHours(0, 0, 0, 0);
+          break;
+        }
+        case 'month':
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+          break;
+        case 'year':
+          start = new Date(now.getFullYear(), 0, 1);
+          break;
+        default:
+          start = new Date(now.getFullYear(), now.getMonth(), 1);
+      }
+    }
+
+    const records = await this.prisma.medicalRecord.findMany({
+      where: { visitDate: { gte: start, lte: end } },
+      orderBy: { visitDate: 'desc' },
+      select: {
+        id: true,
+        visitDate: true,
+        isWorkAccident: true,
+        patient: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+            office: { select: { id: true, name: true } },
+          },
+        },
+      },
+    });
+
+    // Group by office
+    const officeMap = new Map<
+      string,
+      {
+        officeId: string;
+        officeName: string;
+        totalVisits: number;
+        patients: Map<
+          string,
+          {
+            patientId: string;
+            patientCode: string;
+            patientName: string;
+            visitCount: number;
+            lastVisit: Date;
+            isWorkAccident: boolean;
+          }
+        >;
+      }
+    >();
+
+    for (const r of records) {
+      const officeId = r.patient?.office?.id ?? 'unknown';
+      const officeName = r.patient?.office?.name ?? 'Không xác định';
+
+      if (!officeMap.has(officeId)) {
+        officeMap.set(officeId, {
+          officeId,
+          officeName,
+          totalVisits: 0,
+          patients: new Map(),
+        });
+      }
+      const officeEntry = officeMap.get(officeId)!;
+      officeEntry.totalVisits++;
+
+      const patientId = r.patient?.id ?? r.id;
+      if (!officeEntry.patients.has(patientId)) {
+        officeEntry.patients.set(patientId, {
+          patientId,
+          patientCode: r.patient?.employeeCode ?? '',
+          patientName:
+            `${r.patient?.firstName ?? ''} ${r.patient?.lastName ?? ''}`.trim(),
+          visitCount: 0,
+          lastVisit: r.visitDate,
+          isWorkAccident: r.isWorkAccident,
+        });
+      }
+      const patientEntry = officeEntry.patients.get(patientId)!;
+      patientEntry.visitCount++;
+      if (r.visitDate > patientEntry.lastVisit) {
+        patientEntry.lastVisit = r.visitDate;
+      }
+      if (r.isWorkAccident) patientEntry.isWorkAccident = true;
+    }
+
+    // Convert map → array, sort offices desc by totalVisits, patients desc by visitCount
+    const offices = Array.from(officeMap.values())
+      .sort((a, b) => b.totalVisits - a.totalVisits)
+      .map((o) => ({
+        officeId: o.officeId,
+        officeName: o.officeName,
+        totalVisits: o.totalVisits,
+        uniquePatients: o.patients.size,
+        patients: Array.from(o.patients.values()).sort(
+          (a, b) => b.visitCount - a.visitCount,
+        ),
+      }));
+
+    return {
+      period,
+      dateRange: { start, end },
+      totalVisits: records.length,
+      totalOffices: offices.length,
+      offices,
+    };
+  }
 }

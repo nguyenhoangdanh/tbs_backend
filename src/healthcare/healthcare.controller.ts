@@ -273,4 +273,15 @@ export class HealthcareController {
   ) {
     return this.healthcareService.getPatientVisitStats(period, startDate, endDate);
   }
+
+  @Get('statistics/visits-by-office')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Get visit count grouped by office with patient detail list (desc)' })
+  async getVisitStatsByOffice(
+    @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+  ) {
+    return this.healthcareService.getVisitStatsByOffice(period, startDate, endDate);
+  }
 }
