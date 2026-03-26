@@ -1643,6 +1643,8 @@ export class HealthcareService {
         patientCode: r.patient?.employeeCode ?? '',
         patientName: `${r.patient?.firstName ?? ''} ${r.patient?.lastName ?? ''}`.trim(),
         isWorkAccident: r.isWorkAccident,
+        symptoms: r.symptoms ?? '',
+        diagnosis: r.diagnosis ?? '',
         medicines: r.prescriptions.map((p) => ({
           name: p.medicine?.name ?? '',
           units: p.medicine?.units ?? '',

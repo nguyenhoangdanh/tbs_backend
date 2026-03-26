@@ -414,6 +414,14 @@ export class InventoryService {
             category: true,
           },
         },
+        createdByUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            employeeCode: true,
+          },
+        },
       },
       orderBy: {
         transactionDate: 'desc',
