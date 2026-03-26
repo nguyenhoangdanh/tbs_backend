@@ -13,6 +13,7 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
+  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -103,8 +104,11 @@ export class InventoryController {
     description: 'Transaction created and inventory updated',
   })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
-  async createTransaction(@Body() data: CreateInventoryTransactionDto) {
-    return this.inventoryService.createInventoryTransaction(data);
+  async createTransaction(@Body() data: CreateInventoryTransactionDto, @Request() req: any) {
+    return this.inventoryService.createInventoryTransaction({
+      ...data,
+      createdById: req.user?.id ?? data.createdById,
+    });
   }
 
   @Get('transactions')
