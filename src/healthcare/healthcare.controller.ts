@@ -13,13 +13,20 @@ import {
   Patch,
   Request,
   ForbiddenException,
+  Res,
+  UseInterceptors,
+  UploadedFile,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
+  ApiConsumes,
 } from '@nestjs/swagger';
+import { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -283,5 +290,37 @@ export class HealthcareController {
     @Query('endDate') endDate?: string,
   ) {
     return this.healthcareService.getVisitStatsByOffice(period, startDate, endDate);
+  }
+
+  // ─── Export medical records ────────────────────────────────────────────────
+  @Get('medical-records/export')
+  @RequirePermissions('healthcare:manage')
+  @ApiOperation({ summary: 'Export lịch sử khám + đơn thuốc ra file Excel (.xlsx)' })
+  async exportMedicalRecords(
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Res() res?: Response,
+  ) {
+    const buffer = await this.healthcareService.exportMedicalRecordsExcel(startDate, endDate);
+    const fileName = `lichsu_kham_${(startDate ?? 'all').replace(/-/g, '')}${endDate ? '_' + endDate.replace(/-/g, '') : ''}.xlsx`;
+    res!.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Content-Length': buffer.length,
+    });
+    res!.end(buffer);
+  }
+
+  // ─── Import medical records ────────────────────────────────────────────────
+  @Post('medical-records/import')
+  @RequirePermissions('healthcare:manage')
+  @ApiOperation({ summary: 'Import lịch sử khám + đơn thuốc từ file Excel (xuất bởi endpoint export)' })
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file'))
+  async importMedicalRecords(@UploadedFile() file: Express.Multer.File) {
+    if (!file) throw new BadRequestException('Vui lòng chọn file Excel (.xlsx)');
+    if (!file.originalname.match(/\.(xlsx|xls)$/i))
+      throw new BadRequestException('Chỉ chấp nhận file .xlsx hoặc .xls');
+    return this.healthcareService.importMedicalRecordsExcel(file.buffer);
   }
 }

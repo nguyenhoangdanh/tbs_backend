@@ -1805,4 +1805,210 @@ export class HealthcareService {
       offices,
     };
   }
+
+  // ─── Export medical records to Excel ─────────────────────────────────────────
+  async exportMedicalRecordsExcel(startDate?: string, endDate?: string): Promise<Buffer> {
+    const XLSX = await import('xlsx');
+
+    const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), 0, 1);
+    const end = endDate ? new Date(endDate) : new Date();
+    start.setHours(0, 0, 0, 0);
+    end.setHours(23, 59, 59, 999);
+
+    const records = await this.prisma.medicalRecord.findMany({
+      where: { visitDate: { gte: start, lte: end } },
+      include: {
+        patient: { select: { employeeCode: true, firstName: true, lastName: true } },
+        doctor: { select: { employeeCode: true, firstName: true, lastName: true } },
+        prescriptions: {
+          include: {
+            medicine: { select: { name: true, dosage: true, units: true } },
+          },
+        },
+      },
+      orderBy: { visitDate: 'asc' },
+    });
+
+    // Sheet 1: Medical Records
+    const recordRows = records.map((r) => ({
+      'ID Phiếu':         r.id,
+      'Mã NV (bệnh nhân)': r.patient.employeeCode,
+      'Họ tên BN':        `${r.patient.firstName} ${r.patient.lastName}`,
+      'Mã NV (bác sĩ)':  r.doctor.employeeCode,
+      'Họ tên BS':        `${r.doctor.firstName} ${r.doctor.lastName}`,
+      'Ngày khám':        r.visitDate.toISOString(),
+      'Triệu chứng':      r.symptoms ?? '',
+      'Chẩn đoán':        r.diagnosis ?? '',
+      'Ghi chú':          r.notes ?? '',
+      'TNLĐ':             r.isWorkAccident ? 'Có' : 'Không',
+      'Số đơn thuốc':     r.prescriptions.length,
+    }));
+
+    // Sheet 2: Prescriptions (flat)
+    const prescriptionRows = records.flatMap((r) =>
+      r.prescriptions.map((p) => ({
+        'ID Đơn thuốc':      p.id,
+        'ID Phiếu khám':     r.id,
+        'Mã NV (bệnh nhân)': r.patient.employeeCode,
+        'Ngày khám':         r.visitDate.toISOString(),
+        'Tên thuốc':         p.medicine.name,
+        'Hàm lượng thuốc':  p.medicine.dosage ?? '',
+        'Đơn vị':            p.medicine.units ?? '',
+        'Số lượng cấp':      p.quantity,
+        'Liều dùng':         p.dosage ?? '',
+        'Tần suất':          p.frequency ?? '',
+        'Hàm lượng':         p.strength ?? '',
+        'Thời gian dùng':    p.duration ?? '',
+        'Hướng dẫn':         p.instructions ?? '',
+        'Ghi chú đơn':       p.notes ?? '',
+        'Đã cấp':            p.isDispensed ? 'Có' : 'Không',
+        'Thời gian cấp':     p.dispensedAt?.toISOString() ?? '',
+      })),
+    );
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(recordRows), 'Lịch sử khám');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(prescriptionRows), 'Đơn thuốc');
+
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    return buf;
+  }
+
+  // ─── Import medical records from Excel ────────────────────────────────────────
+  async importMedicalRecordsExcel(fileBuffer: Buffer): Promise<{
+    imported: number; skipped: number; errors: string[];
+  }> {
+    const XLSX = await import('xlsx');
+    const wb = XLSX.read(fileBuffer, { type: 'buffer' });
+
+    const recordSheet = wb.Sheets['Lịch sử khám'];
+    const prescriptionSheet = wb.Sheets['Đơn thuốc'];
+    if (!recordSheet) throw new Error('Sheet "Lịch sử khám" không tồn tại trong file');
+
+    const records: any[] = XLSX.utils.sheet_to_json(recordSheet);
+    const prescriptions: any[] = prescriptionSheet ? XLSX.utils.sheet_to_json(prescriptionSheet) : [];
+
+    let imported = 0;
+    let skipped = 0;
+    const errors: string[] = [];
+
+    // Build lookup maps
+    const [users, medicines] = await Promise.all([
+      this.prisma.user.findMany({ select: { id: true, employeeCode: true } }),
+      this.prisma.medicine.findMany({ select: { id: true, name: true } }),
+    ]);
+    const userByCode = new Map(users.map((u) => [u.employeeCode, u.id]));
+    const medicineByName = new Map(medicines.map((m) => [m.name.trim(), m.id]));
+
+    // Group prescriptions by record ID
+    const prescByRecord = new Map<string, any[]>();
+    for (const p of prescriptions) {
+      const rid = p['ID Phiếu khám']?.toString().trim();
+      if (!rid) continue;
+      if (!prescByRecord.has(rid)) prescByRecord.set(rid, []);
+      prescByRecord.get(rid)!.push(p);
+    }
+
+    for (const row of records) {
+      const recordId: string = row['ID Phiếu']?.toString().trim();
+      const patientCode: string = row['Mã NV (bệnh nhân)']?.toString().trim();
+      const doctorCode: string = row['Mã NV (bác sĩ)']?.toString().trim();
+      const visitDateRaw = row['Ngày khám'];
+
+      if (!recordId || !patientCode || !doctorCode || !visitDateRaw) {
+        errors.push(`Thiếu dữ liệu bắt buộc: ${JSON.stringify(row)}`);
+        skipped++;
+        continue;
+      }
+
+      const patientId = userByCode.get(patientCode);
+      const doctorId = userByCode.get(doctorCode);
+      if (!patientId) { errors.push(`Không tìm thấy nhân viên mã ${patientCode}`); skipped++; continue; }
+      if (!doctorId)  { errors.push(`Không tìm thấy bác sĩ mã ${doctorCode}`);    skipped++; continue; }
+
+      const visitDate = new Date(visitDateRaw);
+      if (isNaN(visitDate.getTime())) { errors.push(`Ngày khám không hợp lệ: ${visitDateRaw}`); skipped++; continue; }
+
+      try {
+        // Upsert medical record (by ID)
+        const existingRecord = await this.prisma.medicalRecord.findUnique({ where: { id: recordId } });
+        if (!existingRecord) {
+          await this.prisma.medicalRecord.create({
+            data: {
+              id: recordId,
+              patientId,
+              doctorId,
+              visitDate,
+              symptoms:       row['Triệu chứng'] || null,
+              diagnosis:      row['Chẩn đoán'] || null,
+              notes:          row['Ghi chú'] || null,
+              isWorkAccident: row['TNLĐ'] === 'Có',
+            },
+          });
+
+          // Import prescriptions for this record
+          const rowPrescs = prescByRecord.get(recordId) ?? [];
+          for (const p of rowPrescs) {
+            const medicineName = p['Tên thuốc']?.toString().trim();
+            const medicineId = medicineByName.get(medicineName);
+            if (!medicineId) { errors.push(`Thuốc không tìm thấy: "${medicineName}" (phiếu ${recordId})`); continue; }
+
+            const prescId: string | undefined = p['ID Đơn thuốc']?.toString().trim();
+            const isDispensed = p['Đã cấp'] === 'Có';
+            const dispensedAt = p['Thời gian cấp'] ? new Date(p['Thời gian cấp']) : null;
+
+            await this.prisma.medicalPrescription.upsert({
+              where: { id: prescId ?? '' },
+              update: {},
+              create: {
+                id:             prescId,
+                medicalRecordId: recordId,
+                medicineId,
+                quantity:       Number(p['Số lượng cấp']) || 1,
+                dosage:         p['Liều dùng'] || null,
+                frequency:      p['Tần suất'] || null,
+                strength:       p['Hàm lượng'] || null,
+                duration:       p['Thời gian dùng'] || null,
+                instructions:   p['Hướng dẫn'] || null,
+                notes:          p['Ghi chú đơn'] || null,
+                isDispensed,
+                dispensedAt:    isDispensed && dispensedAt ? dispensedAt : null,
+              },
+            });
+
+            // Deduct inventory for dispensed prescriptions (same logic as normal create flow)
+            if (isDispensed) {
+              try {
+                const qty = Number(p['Số lượng cấp']) || 1;
+                const stock = await this.inventoryService.getCurrentStock(medicineId);
+                await this.inventoryService.createInventoryTransaction({
+                  medicineId,
+                  type: InventoryTransactionTypeDto.EXPORT,
+                  quantity: qty,
+                  unitPrice: String(stock.unitPrice || '0'),
+                  transactionDate: visitDate.toISOString(),
+                  referenceType: 'MEDICAL_RECORD',
+                  referenceId: recordId,
+                  notes: `[IMPORT] Xuất thuốc theo đơn khám`,
+                  createdById: doctorId,
+                });
+              } catch (invErr: any) {
+                // Non-fatal: log but don't fail the whole record import
+                errors.push(`Tồn kho "${medicineName}" (phiếu ${recordId}): ${invErr.message}`);
+              }
+            }
+          }
+
+          imported++;
+        } else {
+          skipped++; // Already exists — skip to prevent overwrite
+        }
+      } catch (err: any) {
+        errors.push(`Lỗi phiếu ${recordId}: ${err.message}`);
+        skipped++;
+      }
+    }
+
+    return { imported, skipped, errors };
+  }
 }
