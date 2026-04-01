@@ -15,7 +15,8 @@
     "db:push": "npx prisma db push",
     "db:migrate": "npx prisma migrate dev",
     "db:studio": "npx prisma studio",
-    "db:seed": "npx tsx prisma/seed.ts",
+    "db:seed": "bash -c 'set -a && source .env && set +a && npx tsx prisma/seed.ts'",
+    "db:import": "bash -c 'set -a && source .env && set +a && npx tsx prisma/import-workers.ts'",
     "db:migrate:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate deploy'",
     "db:seed:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/seed.ts'",
     "db:setup:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate deploy && npx tsx prisma/seed.ts'",
@@ -25,7 +26,10 @@
     "db:import:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/import-workers.ts'",
 
     "db:reset:healthcare": "bash -c 'set -a && source .env && set +a && npx tsx prisma/reset-healthcare.ts'",
-    "db:reset:healthcare:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/reset-healthcare.ts'"
+    "db:reset:healthcare:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/reset-healthcare.ts'",
+
+    "docker:up": "docker compose -f docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker-compose.yml down"
   },
   "dependencies": {
     "@nestjs/cache-manager": "^3.0.1",

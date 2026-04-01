@@ -204,4 +204,65 @@ export class DepartmentService {
       where: { id },
     });
   }
+
+  // ── Manager assignment ──────────────────────────────────────────────────────
+
+  async getDeptManagers(departmentId: string) {
+    return this.prisma.userDepartmentManagement.findMany({
+      where: { departmentId, isActive: true },
+      include: {
+        user: {
+          select: {
+            id: true,
+            employeeCode: true,
+            firstName: true,
+            lastName: true,
+            avatar: true,
+            isActive: true,
+            jobPosition: {
+              select: {
+                jobName: true,
+                position: { select: { name: true, level: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async assignManager(departmentId: string, userId: string) {
+    const dept = await this.prisma.department.findUnique({ where: { id: departmentId } });
+    if (!dept) throw new NotFoundException('Department not found');
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    return this.prisma.userDepartmentManagement.upsert({
+      where: { userId_departmentId: { userId, departmentId } },
+      update: { isActive: true },
+      create: { userId, departmentId, isActive: true },
+    });
+  }
+
+  async removeManager(departmentId: string, userId: string) {
+    const rel = await this.prisma.userDepartmentManagement.findUnique({
+      where: { userId_departmentId: { userId, departmentId } },
+    });
+    if (!rel) throw new NotFoundException('Manager assignment not found');
+    return this.prisma.userDepartmentManagement.update({
+      where: { userId_departmentId: { userId, departmentId } },
+      data: { isActive: false },
+    });
+  }
+
+  async getManagerDepartments(userId: string) {
+    return this.prisma.userDepartmentManagement.findMany({
+      where: { userId, isActive: true },
+      include: {
+        department: {
+          include: { office: { select: { id: true, name: true, type: true } } },
+        },
+      },
+    });
+  }
 }

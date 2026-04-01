@@ -5,6 +5,7 @@ import {
   Body,
   Param,
   Delete,
+  Put,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -120,5 +121,27 @@ export class DepartmentController {
   })
   remove(@Param('id') id: string) {
     return this.departmentService.remove(id);
+  }
+
+  @Get(':id/managers')
+  @ApiOperation({ summary: 'Get managers assigned to a department' })
+  getDeptManagers(@Param('id') id: string) {
+    return this.departmentService.getDeptManagers(id);
+  }
+
+  @Put(':id/managers/:userId')
+  @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
+  @ApiOperation({ summary: 'Assign a user as manager of a department' })
+  assignManager(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.departmentService.assignManager(id, userId);
+  }
+
+  @Delete(':id/managers/:userId')
+  @Roles('ADMIN', 'SUPERADMIN')
+  @RequirePermissions('organizations:manage')
+  @ApiOperation({ summary: 'Remove a manager from a department' })
+  removeManager(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.departmentService.removeManager(id, userId);
   }
 }

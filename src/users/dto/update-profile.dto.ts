@@ -50,6 +50,11 @@ export class UpdateProfileDto {
   @IsDateString()
   dateOfBirth?: string;
 
+  @ApiProperty({ description: 'Join date (for seniority calculation)', required: false })
+  @IsOptional()
+  @IsDateString()
+  joinDate?: string;
+
   @ApiProperty({ description: 'Address', required: false })
   @IsOptional()
   @IsString()

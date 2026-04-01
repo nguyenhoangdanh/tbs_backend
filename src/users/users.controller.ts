@@ -185,6 +185,7 @@ export class UsersController {
   @ApiQuery({ name: 'page', required: false, type: Number })
   @ApiQuery({ name: 'limit', required: false, type: Number })
   @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'employeeCode', required: false, type: String })
   @ApiQuery({ name: 'officeId', required: false, type: String })
   @ApiQuery({ name: 'departmentId', required: false, type: String })
   @ApiQuery({ name: 'role', required: false, type: String, description: 'Filter by role code' })
@@ -193,6 +194,7 @@ export class UsersController {
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('search') search?: string,
+    @Query('employeeCode') employeeCode?: string,
     @Query('officeId') officeId?: string,
     @Query('departmentId') departmentId?: string,
     @Query('role') role?: string,
@@ -202,6 +204,7 @@ export class UsersController {
       page: page ? parseInt(page) : 1,
       limit: limit ? parseInt(limit) : 10,
       search,
+      employeeCode,
       officeId,
       departmentId,
       role,

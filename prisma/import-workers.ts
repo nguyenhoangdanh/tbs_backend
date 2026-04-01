@@ -9,8 +9,7 @@
  * Mặc định company: TOHOP_TUIXACH_THOAISON
  *
  * Excel structure (prisma/data.xlsx):
- *   Sheet 1 (index 1): "DSTH (CBQL, NV)" — cán bộ quản lý + nhân viên
- *   Sheet 2 (index 2): "DSTH(CN)"        — công nhân sản xuất
+ *   Sheet 0 (index 0): "DSTH (TỔNG)" — danh sách tổng hợp tất cả nhân viên
  *
  * Columns (0-indexed):
  *   0  MSNV           — Mã số nhân viên
@@ -24,10 +23,11 @@
  *   8  Manager Cấp 2
  *   9  Manager Cấp 3
  *   10 Ngày sinh      — Excel serial or DD/MM/YYYY
- *   11 Giới tính      — NAM / NỮ
- *   12 (trống)
- *   13 MÃ PB          — Mã phòng ban (department code)
- *   14 TÊN TỔ         — Tên tổ (CN sheet only)
+ *   11 Ngày vào làm  — Excel serial or DD/MM/YYYY
+ *   12 Giới tính     — NAM / NỮ
+ *   13 (trống)
+ *   14 MÃ PB          — Mã phòng ban (department code)
+ *   15 TÊN TỔ         — Tên tổ (CN sheet only)
  */
 
 import { PrismaClient, OfficeType, Sex } from '@prisma/client';
@@ -48,6 +48,12 @@ function getCompanyCode(): string {
   return process.env.COMPANY_CODE ?? 'TOHOP_TUIXACH_THOAISON';
 }
 
+function getSheetIndex(flag: string, defaultVal: number): number {
+  const idx = process.argv.indexOf(flag);
+  if (idx !== -1 && process.argv[idx + 1]) return parseInt(process.argv[idx + 1], 10);
+  return defaultVal;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface StaffRow {
@@ -62,6 +68,7 @@ interface StaffRow {
   mgr2: string;
   mgr3: string;
   dob: Date | null;
+  joinDate: Date | null;
   sex: Sex | null;
   tenTo?: string; // CN sheet only — Tên tổ (Team name)
   isWorker: boolean;
@@ -95,7 +102,12 @@ function parseSex(raw: unknown): Sex | null {
   return null;
 }
 
-/** Generates email: lastName + firstLetterOfFirstName + firstLettersOfMiddle @tbsgroup.vn */
+/** CD rank — lower number = higher authority */
+function cdRank(cd: string): number {
+  const p = cd.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (p === 'tgd' || p.includes('tong giam doc')) return 0;
+  if (p === 'ptgd' || p === 'p.tgd' || p.includes('pho tong giam doc')) return 1;
+}
 function generateEmail(hoTen: string): string {
   const normalized = hoTen
     .toLowerCase()
@@ -117,42 +129,90 @@ function generateEmail(hoTen: string): string {
 /** Role: ADMIN for TGĐ; MANAGER for GĐ/TP/TT/TL; WORKER for CN; USER otherwise */
 function determineRole(cd: string, isWorker: boolean): string {
   if (isWorker) return 'WORKER';
-  const p = cd.toLowerCase().trim();
-  if (p === 'tgđ' || p.includes('tổng giám đốc')) return 'ADMIN';
-  if (
-    p === 'gđ' || p.includes('giám đốc') ||
-    p === 'pgđ' || p.includes('phó giám đốc') ||
-    p === 'tp' || p.includes('trưởng phòng') ||
-    p === 'tt' || p === 'tổ trưởng' || p === 'đội trưởng' ||
-    p === 't.team' || p.includes('trưởng team') ||
-    p === 't.line' || p.includes('trưởng line')
-  ) return 'MANAGER';
-  if (p === 'tl' || p.includes('trợ lý')) return 'USER';
-  if (p === 'cn' || p.includes('công nhân')) return 'WORKER';
+  const rank = getCdRank(cd);
+  if (rank === 0) return 'ADMIN';      // TGĐ
+  if (rank <= 5) return 'MANAGER';     // PTGĐ → TT/TCA/T.TEAM/TL
+  if (rank === 7) return 'WORKER';     // CN
   return 'USER';
 }
 
+/**
+ * CD hierarchy rank — lower = higher seniority
+ * 0  TGĐ
+ * 1  PTGĐ
+ * 2  GĐ
+ * 3  PGĐ
+ * 4  TP / ĐT / T.LINE          (Trưởng phòng, Đội trưởng, Trưởng Line)
+ * 5  T.TEAM / TL / TCA / TT    (Trưởng team, Trợ lý, Trưởng ca, Tổ trưởng)
+ * 6  NV                        (Nhân viên)
+ * 7  CN                        (Công nhân)
+ * 99 Unknown
+ */
+function getCdRank(cd: string): number {
+  const p = cd.toLowerCase().trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+  if (p === 'tgd' || p.includes('tong giam doc')) return 0;
+  if (p === 'ptgd' || p === 'p.tgd' || p.includes('pho tong giam doc')) return 1;
+  if ((p === 'gd' || p.includes('giam doc')) && !p.includes('pho') && !p.includes('tong')) return 2;
+  if (p === 'pgd' || p.includes('pho giam doc')) return 3;
+  if (
+    p === 'tp' || p.includes('truong phong') || p.includes('truong ban') ||
+    p === 'dt' || p.includes('doi truong') ||
+    p === 't.line' || p.includes('truong line') || p.includes('line leader')
+  ) return 4;
+  if (
+    p === 't.team' || p.includes('truong team') || p.includes('team leader') ||
+    p === 'tl' || p.includes('tro ly') ||
+    p === 'tca' || p.includes('truong ca') ||
+    p === 'tt' || p.includes('to truong')
+  ) return 5;
+  if (p === 'nv' || p.includes('nhan vien')) return 6;
+  if (p === 'cn' || p.includes('cong nhan')) return 7;
+  return 99;
+}
+
+/**
+ * Grouping strategy determines how we identify "the same management unit":
+ *   pb_only  — VPĐH TH: group by phòng ban only (cross-office VPs handled at company level)
+ *   tt_pb    — LINE PHỤ TRỢ: group by trực thuộc + phòng ban
+ *   tt_pb_vt — Factories (NM TS1/TS2/TS3...): group by trực thuộc + phòng ban + vị trí CV
+ */
+type GroupStrategy = 'pb_only' | 'tt_pb' | 'tt_pb_vt';
+
+function getGroupStrategy(tt: string): GroupStrategy {
+  const t = tt.trim().toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (t === 'VPDH TH' || t.startsWith('VPDH') || t.includes('VAN PHONG')) return 'pb_only';
+  if (t.includes('LINE PHU TRO') || t.includes('LPT') || t.startsWith('LINE PT')) return 'tt_pb';
+  return 'tt_pb_vt'; // NM TS1, TS2, TS3, etc.
+}
+
+function makeGroupKey(row: StaffRow): string {
+  switch (getGroupStrategy(row.tt)) {
+    case 'pb_only':  return row.pb;
+    case 'tt_pb':    return `${row.tt}||${row.pb}`;
+    case 'tt_pb_vt': return `${row.tt}||${row.pb}||${row.vt}`;
+  }
+}
+
 function getPositionProps(cd: string): { isManagement: boolean; canViewHierarchy: boolean; level: number } {
-  const p = cd.toLowerCase().trim();
-  if (p === 'tgđ' || p.includes('tổng giám đốc')) return { isManagement: true, canViewHierarchy: true, level: 0 };
-  if (p === 'ptgđ' || p.includes('phó tổng giám đốc')) return { isManagement: true, canViewHierarchy: true, level: 1 };
-  if ((p === 'gđ' || p.includes('giám đốc')) && !p.includes('phó') && !p.includes('tổng')) return { isManagement: true, canViewHierarchy: true, level: 2 };
-  if (p === 'pgđ' || p.includes('phó giám đốc')) return { isManagement: true, canViewHierarchy: true, level: 3 };
-  if (p === 'tp' || p.includes('trưởng phòng') || p.includes('trưởng ban') ||
-      p === 't.team' || p.includes('trưởng team') || p.includes('team leader') ||
-      p === 't.line' || p.includes('trưởng line') || p.includes('line leader') ||
-      p.includes('trưởng nhóm') || p.includes('group leader')) return { isManagement: true, canViewHierarchy: true, level: 4 };
-  if (p === 'tl' || p.includes('trợ lý')) return { isManagement: false, canViewHierarchy: false, level: 5 };
-  if (p === 'tt' || p === 'tổ trưởng' || p === 'đội trưởng' || p === 'trưởng ca') return { isManagement: true, canViewHierarchy: true, level: 6 };
-  if (p === 'nv' || p.includes('nhân viên')) return { isManagement: false, canViewHierarchy: false, level: 7 };
-  return { isManagement: false, canViewHierarchy: false, level: 8 };
+  const rank = getCdRank(cd);
+  if (rank <= 3) return { isManagement: true,  canViewHierarchy: true,  level: rank };
+  if (rank === 4) return { isManagement: true,  canViewHierarchy: true,  level: 4 };
+  if (rank === 5) return { isManagement: true,  canViewHierarchy: true,  level: 5 };
+  if (rank === 6) return { isManagement: false, canViewHierarchy: false, level: 6 };
+  return { isManagement: false, canViewHierarchy: false, level: 7 }; // CN / unknown
 }
 
 // ─── Excel parsing ─────────────────────────────────────────────────────────────
 
 function parseSheet(sheet: XLSX.WorkSheet, isWorkerSheet: boolean): StaffRow[] {
+  if (!sheet) return [];
   const rows: unknown[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
   const result: StaffRow[] = [];
+  console.log(`  ℹ  Total raw rows (incl header): ${rows.length}`);
 
   for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
@@ -178,8 +238,9 @@ function parseSheet(sheet: XLSX.WorkSheet, isWorkerSheet: boolean): StaffRow[] {
       mgr2: row[8] ? String(Math.floor(Number(row[8]))).trim() : '',
       mgr3: row[9] ? String(Math.floor(Number(row[9]))).trim() : '',
       dob: parseExcelDate(row[10]),
-      sex: parseSex(row[11]),
-      tenTo: isWorkerSheet && row[14] ? String(row[14]).trim() : undefined,
+      joinDate: parseExcelDate(row[11]),
+      sex: parseSex(row[12]),
+      tenTo: isWorkerSheet && row[15] ? String(row[15]).trim() : undefined,
       isWorker: isWorkerSheet,
     });
   }
@@ -353,7 +414,7 @@ async function createUsers(
 ): Promise<Map<string, string>> {
   console.log('\n👥 [6/7] Creating users...');
   const userMap = new Map<string, string>(); // msnv → userId
-  const hashedPassword = await bcrypt.hash('123456', 10);
+  const hashedPassword = await bcrypt.hash('Abcd123@', 10);
   let ok = 0, skip = 0, fail = 0;
 
   // ── 1. Batch-load all existing users for this company ──────────────────────
@@ -416,6 +477,7 @@ async function createUsers(
         lastName,
         phone: row.phone || undefined,
         dateOfBirth: row.dob ?? undefined,
+        joinDate: row.joinDate ?? undefined,
         sex: row.sex ?? undefined,
         jobPositionId,
         officeId,
@@ -462,6 +524,7 @@ async function createUsers(
 async function createManagementRelations(
   rows: StaffRow[],
   userMap: Map<string, string>,
+  deptMap: Map<string, string>,
 ): Promise<void> {
   console.log('\n🔗 [7/7] Creating management relations...');
   let ok = 0, skip = 0;
@@ -478,20 +541,118 @@ async function createManagementRelations(
   }
   // ──────────────────────────────────────────────────────────────────────────
 
-  // ── 2. Build desired (managerId, departmentId) pairs in memory ────────────
+  // ── 2. Build desired (managerId, departmentId) pairs ──────────────────────
   const desired = new Map<string, Set<string>>(); // managerId → Set<departmentId>
+  const addRelation = (managerId: string, departmentId: string) => {
+    if (!desired.has(managerId)) desired.set(managerId, new Set());
+    desired.get(managerId)!.add(departmentId);
+  };
+
+  // Build a quick msnv→row lookup for CD rank checks
+  const rowByCd = new Map<string, StaffRow>();
+  for (const row of rows) rowByCd.set(row.msnv, row);
+
+  // 2a. Explicit mgr1/mgr2/mgr3 from spreadsheet
+  //     Only allow cross-dept management for rank ≤ 4 (TP/ĐT/T.LINE and above).
+  //     TT/TCA/T.TEAM (rank 5) should only manage their own dept (handled in 2b),
+  //     to avoid tổ trưởng of TỔ 1 being incorrectly assigned to TỔ 4.
   for (const row of rows) {
     const userId = userMap.get(row.msnv);
     if (!userId) continue;
     const departmentId = userDeptMap.get(userId);
     if (!departmentId) continue;
-
     for (const mgrMsnv of [row.mgr1, row.mgr2, row.mgr3].filter(Boolean)) {
       const managerId = userMap.get(mgrMsnv!);
       if (!managerId) continue;
-      if (!desired.has(managerId)) desired.set(managerId, new Set());
-      desired.get(managerId)!.add(departmentId);
+      const mgrRow = rowByCd.get(mgrMsnv!);
+      const mgrRank = mgrRow ? getCdRank(mgrRow.cd) : 99;
+      if (mgrRank >= 5) continue; // only TP and above can be cross-dept managers via mgr columns
+      addRelation(managerId, departmentId);
     }
+  }
+
+  // 2b. Auto-detect: each management-level person (rank ≤ 5) becomes manager of their OWN dept.
+  //     This correctly handles TP, PGĐ, T.TEAM etc. in the same dept — all get assigned.
+  let autoDetected = 0;
+  for (const row of rows) {
+    if (getCdRank(row.cd) >= 6) continue; // skip NV / CN
+    const managerId = userMap.get(row.msnv);
+    if (!managerId) continue;
+    const deptId = deptMap.get(`${row.pb}__${row.tt}`);
+    if (!deptId) continue;
+    addRelation(managerId, deptId);
+    autoDetected++;
+  }
+  console.log(`  ℹ  Auto-detected ${autoDetected} manager→dept relations from CD hierarchy`);
+
+  // ── 2c. T.LINE special expansion: Trưởng Line manages ALL sub-depts of the LINE ──
+  //
+  // If a T.LINE person is in a dept whose name contains "ĐH LINE", they are head of
+  // the entire LINE group. A LINE group = all depts sharing the same line prefix
+  // within the same office. Example:
+  //   "LINE CẮT DÁN - ĐH LINE - TS1"  (management dept)
+  //   "LINE CẮT DÁN - TỔ CD 1 - TS1"  (sub-dept 1)
+  //   "LINE CẮT DÁN - TỔ CD 2 - TS1"  (sub-dept 2)
+  //   ...
+  // The Trưởng Line in ĐH LINE dept should manage all 5 depts.
+  //
+  // Line prefix = the part before " - ĐH LINE" in the dept name.
+
+  let tlineExpanded = 0;
+
+  // Build a map: tt → all (pb, deptId) pairs for quick prefix lookup
+  const deptsByOffice = new Map<string, Array<{ pb: string; deptId: string }>>();
+  for (const [key, deptId] of deptMap) {
+    const sepIdx = key.lastIndexOf('__');
+    if (sepIdx === -1) continue;
+    const pb = key.slice(0, sepIdx);
+    const tt = key.slice(sepIdx + 2);
+    if (!deptsByOffice.has(tt)) deptsByOffice.set(tt, []);
+    deptsByOffice.get(tt)!.push({ pb, deptId });
+  }
+
+  for (const row of rows) {
+    // Process T.LINE managers
+    if (getCdRank(row.cd) !== 4) continue;
+    const cdNorm = row.cd.toLowerCase().trim()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+    if (!cdNorm.includes('t.line') && !cdNorm.includes('line')) continue;
+
+    const managerId = userMap.get(row.msnv);
+    if (!managerId) continue;
+
+    const pbNormD = row.pb.toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/Đ/g, 'D');
+
+    // Case A: T.LINE in ĐH LINE dept → manage all depts sharing the same line prefix
+    const dhIdx = pbNormD.indexOf(' - DH LINE');
+    if (dhIdx !== -1) {
+      const linePrefix = row.pb.slice(0, dhIdx);
+      const siblingDepts = deptsByOffice.get(row.tt) ?? [];
+      for (const { pb, deptId } of siblingDepts) {
+        if (pb.startsWith(linePrefix)) {
+          addRelation(managerId, deptId);
+          tlineExpanded++;
+        }
+      }
+      continue;
+    }
+
+    // Case B: Fallback — T.LINE in a dept whose name starts with "LINE " (no ĐH LINE dept)
+    //         Extract line prefix = everything before first " - " in dept name
+    //         Then assign manager to all sibling depts with same prefix in same office
+    if (!pbNormD.startsWith('LINE ')) continue;
+    const dashIdx = row.pb.indexOf(' - ');
+    const linePrefix = dashIdx !== -1 ? row.pb.slice(0, dashIdx) : row.pb;
+    const siblingDepts = deptsByOffice.get(row.tt) ?? [];
+    for (const { pb, deptId } of siblingDepts) {
+      if (pb.startsWith(linePrefix)) {
+        addRelation(managerId, deptId);
+        tlineExpanded++;
+      }
+    }
+  }
+  if (tlineExpanded > 0) {
+    console.log(`  ℹ  T.LINE expansion: ${tlineExpanded} additional manager→dept relations`);
   }
   // ──────────────────────────────────────────────────────────────────────────
 
@@ -555,11 +716,10 @@ async function main() {
   const wb = XLSX.readFile(excelPath);
   console.log(`📊 Sheets: ${wb.SheetNames.join(', ')}`);
 
-  const staffRows = parseSheet(wb.Sheets[wb.SheetNames[1]], false);
-  const workerRows = parseSheet(wb.Sheets[wb.SheetNames[2]], true);
-  const allRows = [...staffRows, ...workerRows];
+  // Sheet 0 = "DSTH (TỔNG)" — danh sách tổng hợp tất cả nhân viên
+  const allRows = parseSheet(wb.Sheets[wb.SheetNames[0]], false);
 
-  console.log(`\n📈 Parsed: ${staffRows.length} staff + ${workerRows.length} workers = ${allRows.length} total`);
+  console.log(`\n📈 Parsed: ${allRows.length} total rows`);
 
   // Collect office/dept names
   const officeNames = new Set(allRows.map(r => r.tt));
@@ -569,13 +729,13 @@ async function main() {
   const deptMap = await ensureDepartments(allRows, officeMap);
   const posMap = await ensurePositions(allRows);
   const jpMap = await ensureJobPositions(allRows, posMap, deptMap, officeMap);
-  await ensureTeams(workerRows, deptMap);
+  await ensureTeams(allRows.filter(r => r.isWorker), deptMap);
   const userMap = await createUsers(allRows, company.id, officeMap, jpMap, roleMap);
-  await createManagementRelations(allRows, userMap);
+  await createManagementRelations(allRows, userMap, deptMap);
 
   console.log('\n══════════════════════════════════════════');
   console.log('✅ Import completed successfully!');
-  console.log(`   Staff: ${staffRows.length} | Workers: ${workerRows.length}`);
+  console.log(`   Total: ${allRows.length} rows`);
 }
 
 main()

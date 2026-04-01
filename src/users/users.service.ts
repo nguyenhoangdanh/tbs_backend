@@ -19,6 +19,7 @@ interface GetAllUsersParams {
   page: number;
   limit: number;
   search?: string;
+  employeeCode?: string;
   officeId?: string;
   departmentId?: string;
   role?: string;
@@ -38,14 +39,16 @@ export class UsersService {
   // ========== USER CRUD ==========
 
   async getAllUsers(params: GetAllUsersParams) {
-    const { page, limit, search, officeId, departmentId, role, isActive } =
+    const { page, limit, search, employeeCode, officeId, departmentId, role, isActive } =
       params;
 
     const skip = (page - 1) * limit;
 
     const where: any = {};
 
-    if (search) {
+    if (employeeCode) {
+      where.employeeCode = { contains: employeeCode.trim(), mode: 'insensitive' };
+    } else if (search) {
       // Normalize search to uppercase so lowercase input matches all-caps stored data
       const normalized = search.trim().toLocaleUpperCase('vi');
       const tokens = normalized.split(/\s+/).filter(Boolean);
@@ -307,7 +310,10 @@ let departmentId: string | null = null;
 
     const updatedUser = await this.prisma.user.update({
       where: { id },
-      data: profileFields,
+      data: {
+        ...profileFields,
+        ...(profileFields.joinDate ? { joinDate: new Date(profileFields.joinDate) } : {}),
+      },
       include: {
         office: true,
         jobPosition: {

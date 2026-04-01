@@ -12,14 +12,14 @@ datasource db {
 // ========== MULTI-COMPANY / TENANT ROOT ==========
 
 model CompanyType {
-  id          String    @id @default(uuid())
-  code        String    @unique // "HOLDING", "NGANH", "CHUOI", "TO_HOP", "NHA_MAY"
-  name        String    @unique // "Tập đoàn", "Ngành", "Chuỗi", "Tổ hợp", "Nhà máy"
-  level       Int       // 0=top (Tập đoàn) → higher = deeper in hierarchy
+  id          String   @id @default(uuid())
+  code        String   @unique // "HOLDING", "NGANH", "CHUOI", "TO_HOP", "NHA_MAY"
+  name        String   @unique // "Tập đoàn", "Ngành", "Chuỗi", "Tổ hợp", "Nhà máy"
+  level       Int // 0=top (Tập đoàn) → higher = deeper in hierarchy
   description String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   companies Company[]
 
@@ -29,13 +29,13 @@ model CompanyType {
 }
 
 model BusinessSector {
-  id          String    @id @default(uuid())
-  code        String    @unique // "BAGS", "FOOTWEAR", etc.
-  name        String    @unique // "Túi xách", "Giày da", etc.
+  id          String   @id @default(uuid())
+  code        String   @unique // "BAGS", "FOOTWEAR", etc.
+  name        String   @unique // "Túi xách", "Giày da", etc.
   description String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   companies Company[]
 
@@ -44,13 +44,13 @@ model BusinessSector {
 }
 
 model Region {
-  id          String    @id @default(uuid())
-  code        String    @unique // "AN_GIANG", "HCM", "BINH_DUONG"
-  name        String    @unique // "An Giang", "TP. Hồ Chí Minh"
+  id          String   @id @default(uuid())
+  code        String   @unique // "AN_GIANG", "HCM", "BINH_DUONG"
+  name        String   @unique // "An Giang", "TP. Hồ Chí Minh"
   description String?
-  isActive    Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   companies Company[]
 
@@ -59,30 +59,38 @@ model Region {
 }
 
 model Company {
-  id              String    @id @default(uuid())
-  code            String    @unique
-  name            String    @unique
+  id              String   @id @default(uuid())
+  code            String   @unique
+  name            String   @unique
   typeId          String
   parentCompanyId String?
   regionId        String?
-  taxCode         String?   @unique
+  taxCode         String?  @unique
   address         String?
   phone           String?
   email           String?
   logoUrl         String?
-  isActive        Boolean   @default(true)
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  companyType CompanyType     @relation(fields: [typeId], references: [id])
-  parent      Company?        @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
-  children    Company[]       @relation("CompanyHierarchy")
-  region      Region?         @relation(fields: [regionId], references: [id])
+  companyType CompanyType      @relation(fields: [typeId], references: [id])
+  parent      Company?         @relation("CompanyHierarchy", fields: [parentCompanyId], references: [id])
+  children    Company[]        @relation("CompanyHierarchy")
+  region      Region?          @relation(fields: [regionId], references: [id])
   sectors     BusinessSector[]
   offices     Office[]
   users       User[]
   products    Product[]
   processes   Process[]
+
+  publicHolidays       PublicHoliday[]
+  leaveTypes           LeaveType[]
+  leaveTypeCategories  LeaveTypeCategory[]
+  leaveApprovalFlows   LeaveApprovalFlow[]
+  leaveRequests        LeaveRequest[]
+  leaveBalances        LeaveBalance[]
+  leaveVisibilityRules LeaveVisibilityRule[]
 
   @@index([typeId])
   @@index([parentCompanyId])
@@ -116,19 +124,22 @@ model JobPosition {
 }
 
 model Office {
-  id           String        @id @default(uuid())
-  companyId    String        // Belongs to which company
-  name         String        // Unique per company (@@unique below)
-  type         OfficeType
-  description  String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  departments  Department[]
-  jobPositions JobPosition[]
-  users        User[]
-  worksheets   WorkSheet[]
+  id             String                   @id @default(uuid())
+  companyId      String // Belongs to which company
+  name           String // Unique per company (@@unique below)
+  type           OfficeType
+  description    String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  company        Company                  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  departments    Department[]
+  jobPositions   JobPosition[]
+  users          User[]
+  worksheets     WorkSheet[]
   monthlyBackups WorkSheetMonthlyBackup[]
+
+  leaveApprovalFlows   LeaveApprovalFlow[]
+  leaveVisibilityRules LeaveVisibilityRule[]
 
   @@unique([name, companyId])
   @@index([companyId])
@@ -147,6 +158,9 @@ model Department {
   jobPositions JobPosition[]
   managers     UserDepartmentManagement[]
   teams        Team[] // Department = Line (for factory departments)
+
+  leaveApprovalFlows   LeaveApprovalFlow[]
+  targetApprovalLevels LeaveApprovalFlowLevel[] @relation("LevelTargetDepartment")
 
   @@unique([name, officeId])
   @@index([officeId])
@@ -171,8 +185,8 @@ model Position {
 
 model User {
   id                 String                     @id @default(uuid())
-  companyId          String                     // Tenant isolation — denormalized from officeId.companyId for performance
-  employeeCode       String                     // Unique per company (@@unique below)
+  companyId          String // Tenant isolation — denormalized from officeId.companyId for performance
+  employeeCode       String // Unique per company (@@unique below)
   email              String?                    @unique // Global email uniqueness for login
   password           String
   firstName          String
@@ -210,12 +224,24 @@ model User {
   prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
   inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
 
-  feedbackViews       FeedbackView[] @relation("FeedbackViewedBy")
-  resolvedFeedbacks   Feedback[]     @relation("FeedbackResolvedBy")
-  processedFeedbacks  Feedback[]     @relation("FeedbackProcessedBy")
+  feedbackViews      FeedbackView[] @relation("FeedbackViewedBy")
+  resolvedFeedbacks  Feedback[]     @relation("FeedbackResolvedBy")
+  processedFeedbacks Feedback[]     @relation("FeedbackProcessedBy")
 
-  directPermissions     UserPermission[] @relation("UserDirectPermissions")
-  grantedPermissions    UserPermission[] @relation("UserGrantedPermissions")
+  directPermissions  UserPermission[] @relation("UserDirectPermissions")
+  grantedPermissions UserPermission[] @relation("UserGrantedPermissions")
+
+  // Leave management
+  joinDate             DateTime?                @db.Date // Ngày vào làm → tính thâm niên & accrual
+  leaveRequests        LeaveRequest[]           @relation("UserLeaveRequests")
+  leaveApprovalsGiven  LeaveApproval[]          @relation("LeaveApprovalApprover")
+  leaveApprovalsTarget LeaveApproval[]          @relation("LeaveApprovalTarget")
+  leaveBalances        LeaveBalance[]
+  leaveComments        LeaveRequestComment[]    @relation("LeaveCommentAuthor")
+  primaryApprLevels    LeaveApprovalFlowLevel[] @relation("LevelPrimaryApprover")
+  substitute1Levels    LeaveApprovalFlowLevel[] @relation("LevelSubstitute1")
+  substitute2Levels    LeaveApprovalFlowLevel[] @relation("LevelSubstitute2")
+  leaveVisibilityRules LeaveVisibilityRule[]    @relation("LeaveVisibilityForSpecificUser")
 
   @@unique([employeeCode, companyId])
   @@index([companyId])
@@ -328,19 +354,19 @@ model Team {
 }
 
 model Group {
-  id          String      @id @default(uuid())
-  name        String
-  code        String
-  description String?
-  teamId      String
-  leaderId    String?
-  isActive    Boolean     @default(true)
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  leader      User?       @relation("GroupLeader", fields: [leaderId], references: [id])
-  team        Team        @relation(fields: [teamId], references: [id], onDelete: Cascade)
-  members     User[]      @relation("GroupMembers")
-  worksheets  WorkSheet[]
+  id             String                   @id @default(uuid())
+  name           String
+  code           String
+  description    String?
+  teamId         String
+  leaderId       String?
+  isActive       Boolean                  @default(true)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  leader         User?                    @relation("GroupLeader", fields: [leaderId], references: [id])
+  team           Team                     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  members        User[]                   @relation("GroupMembers")
+  worksheets     WorkSheet[]
   monthlyBackups WorkSheetMonthlyBackup[]
 
   @@unique([code, teamId])
@@ -352,9 +378,9 @@ model Group {
 
 model Product {
   id                   String                @id @default(uuid())
-  companyId            String?               // null = shared/global across all companies
+  companyId            String? // null = shared/global across all companies
   name                 String
-  code                 String                // Unique per company (@@unique below)
+  code                 String // Unique per company (@@unique below)
   description          String?
   imageUrl             String?
   isActive             Boolean               @default(true)
@@ -373,9 +399,9 @@ model Product {
 
 model Process {
   id                   String                @id @default(uuid())
-  companyId            String?               // null = shared/global across all companies
+  companyId            String? // null = shared/global across all companies
   name                 String
-  code                 String                // Unique per company (@@unique below)
+  code                 String // Unique per company (@@unique below)
   description          String?
   isActive             Boolean               @default(true)
   createdAt            DateTime              @default(now())
@@ -772,8 +798,8 @@ model InventoryTransaction {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  medicine    Medicine  @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  createdByUser User?   @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  medicine      Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  createdByUser User?    @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   @@index([medicineId])
   @@index([type])
@@ -901,6 +927,9 @@ model RoleDefinition {
   permissions     RoleDefinitionPermission[]
   userAssignments UserRole[]
 
+  leaveApprovalLevels  LeaveApprovalFlowLevel[]
+  leaveVisibilityRules LeaveVisibilityRule[]
+
   @@index([isActive])
   @@index([isSystem])
   @@map("role_definitions")
@@ -971,9 +1000,9 @@ model UserPermission {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user        User       @relation("UserDirectPermissions", fields: [userId], references: [id], onDelete: Cascade)
-  permission  Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-  grantedBy   User?      @relation("UserGrantedPermissions", fields: [grantedById], references: [id], onDelete: SetNull)
+  user       User       @relation("UserDirectPermissions", fields: [userId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+  grantedBy  User?      @relation("UserGrantedPermissions", fields: [grantedById], references: [id], onDelete: SetNull)
 
   @@unique([userId, permissionId])
   @@index([userId])
@@ -1026,4 +1055,366 @@ model FeedbackView {
   @@index([feedbackId])
   @@index([viewerId])
   @@map("feedback_views")
+}
+
+// ========== LEAVE MANAGEMENT SYSTEM ==========
+
+// ─── Enums ────────────────────────────────────────────────────
+
+enum ApproverMode {
+  SPECIFIC_USER // Chỉ định đúng 1 người, cross-dept OK
+  ROLE_IN_COMPANY // Bất kỳ ai có role X trong toàn công ty
+  ROLE_IN_OFFICE // Bất kỳ ai có role X tại văn phòng requester
+  ROLE_IN_DEPARTMENT // Bất kỳ ai có role X tại phòng ban requester
+  DEPARTMENT_MANAGERS // Tất cả người trong UserDepartmentManagement của phòng ban
+}
+
+enum LeaveRequestStatus {
+  DRAFT // Chưa gửi (đang soạn)
+  PENDING // Đang chờ duyệt (đang ở một cấp duyệt nào đó)
+  APPROVED // Đã được duyệt hoàn toàn
+  REJECTED // Bị từ chối
+  CANCELLED // Người dùng hủy trước khi duyệt xong
+  WITHDRAWN // Rút lại sau khi đã được duyệt
+}
+
+enum LeaveApprovalAction {
+  APPROVED // Phê duyệt
+  REJECTED // Từ chối
+  TIMEOUT_ESCALATED // Hết timeout, chuyển lên cấp tiếp theo
+  TIMEOUT_AUTO_APPROVED // Hết timeout, tự động phê duyệt
+  TIMEOUT_AUTO_REJECTED // Hết timeout, tự động từ chối
+  FORWARDED // Chuyển cho người khác duyệt thay
+}
+
+enum LeaveTimeoutAction {
+  ESCALATE // Chuyển lên cấp tiếp theo
+  AUTO_APPROVE // Tự động phê duyệt
+  AUTO_REJECT // Tự động từ chối
+  NOTIFY_ONLY // Chỉ gửi thông báo nhắc nhở
+}
+
+enum LeaveVisibilityScope {
+  OWN // Chỉ thấy đơn của bản thân
+  TEAM // Thấy đơn của tổ/nhóm mình
+  DEPARTMENT // Thấy đơn của phòng ban mình
+  OFFICE // Thấy đơn của toàn văn phòng
+  COMPANY // Thấy tất cả trong công ty
+}
+
+enum LeaveCategory {
+  MEDICAL // Y tế: Thai sản, Bệnh, Khám thai, Sẩy thai
+  SPECIAL // Đặc biệt: Tang, Cưới, Khác
+  PERSONAL // Cá nhân: Phép năm, Việc riêng, Con ốm
+  OTHER // Khác: Nghĩa vụ quân sự
+}
+
+// ─── Models ───────────────────────────────────────────────────
+
+// Ngày nghỉ lễ Việt Nam — được seed tự động cho 2024–2030
+model PublicHoliday {
+  id          String   @id @default(uuid())
+  companyId   String? // null = áp dụng cho tất cả công ty
+  name        String // "Tết Dương Lịch", "Giỗ tổ Hùng Vương", ...
+  date        DateTime @db.Date // ngày cụ thể (đã tính sẵn cho lunar)
+  isLunar     Boolean  @default(false) // chỉ để thông tin (e.g. Hùng Vương)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([date])
+  @@index([companyId, isActive])
+  @@map("public_holidays")
+}
+
+// Loại phép — có code riêng, được seed tự động
+// companyId = null → global (áp dụng cho tất cả công ty)
+// Danh mục cha: TS (Thai sản), PB (Phép bệnh), KT (Khám thai), PT (Phép tang),...
+model LeaveTypeCategory {
+  id            String        @id @default(uuid())
+  companyId     String? // null = global
+  code          String // TS, PB, KT, ST, PT, PC, PK, PN, VR, C, NV
+  name          String // Tên đầy đủ (VD: "Thai sản", "Phép bệnh")
+  nameVi        String? // Tên viết tắt hiển thị (VD: "TS", "PB")
+  leaveCategory LeaveCategory // MEDICAL, SPECIAL, PERSONAL, OTHER
+  description   String?
+  colorCode     String? // hex color
+  sortOrder     Int           @default(0)
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  company    Company?    @relation(fields: [companyId], references: [id])
+  leaveTypes LeaveType[]
+
+  @@index([companyId, code])
+  @@index([leaveCategory])
+  @@map("leave_type_categories")
+}
+
+// Mã phép con (leaf): C3, B1, PN, V2, ... — thuộc một LeaveTypeCategory
+model LeaveType {
+  id                   String        @id @default(uuid())
+  companyId            String? // null = global
+  code                 String // C3, B1, PN, V2, ... (unique per company scope)
+  name                 String // Tên hiển thị
+  nameVi               String? // Tên tiếng Việt đầy đủ (nếu khác name)
+  description          String?
+  categoryId           String // FK đến LeaveTypeCategory
+  requiresDocument     Boolean       @default(false) // cần giấy tờ y tế
+  isPaid               Boolean       @default(true)
+  isAccruable          Boolean       @default(false) // tích lũy tự động (phép năm)
+  accrualPerMonth      Decimal?      @db.Decimal(5, 2)
+  maxDaysPerYear       Decimal?      @db.Decimal(7, 1)
+  maxCarryOver         Decimal?      @db.Decimal(7, 1)
+  minNoticeDays        Int           @default(0)
+  countWorkingDaysOnly Boolean       @default(true)
+  isAutoApproved       Boolean       @default(false)
+  allowHalfDay         Boolean       @default(true)
+  colorCode            String?
+  sortOrder            Int           @default(0)
+  isActive             Boolean       @default(true)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  company  Company?          @relation(fields: [companyId], references: [id])
+  category LeaveTypeCategory @relation(fields: [categoryId], references: [id])
+
+  approvalFlows   LeaveApprovalFlow[]
+  requests        LeaveRequest[]
+  balances        LeaveBalance[]
+  visibilityRules LeaveVisibilityRule[]
+
+  @@index([companyId, isActive])
+  @@index([categoryId])
+  @@index([isAccruable])
+  @@map("leave_types")
+}
+
+// Quy trình duyệt phép — cấu hình per company, optionally scoped theo leaveType/office/dept
+model LeaveApprovalFlow {
+  id           String   @id @default(uuid())
+  companyId    String
+  name         String // "Quy trình duyệt phép mặc định", "Quy trình phép năm",...
+  description  String?
+  leaveTypeId  String? // null = áp dụng cho tất cả loại phép
+  officeId     String? // null = áp dụng cho tất cả văn phòng
+  departmentId String? // null = áp dụng cho tất cả phòng ban
+  priority     Int      @default(0) // ưu tiên cao hơn → dùng trước khi có nhiều flow match
+  isDefault    Boolean  @default(false) // flow mặc định fallback
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company    Company     @relation(fields: [companyId], references: [id])
+  leaveType  LeaveType?  @relation(fields: [leaveTypeId], references: [id])
+  office     Office?     @relation(fields: [officeId], references: [id])
+  department Department? @relation(fields: [departmentId], references: [id])
+
+  levels   LeaveApprovalFlowLevel[]
+  requests LeaveRequest[]
+
+  @@index([companyId, isActive])
+  @@index([leaveTypeId])
+  @@index([officeId])
+  @@index([departmentId])
+  @@index([priority])
+  @@map("leave_approval_flows")
+}
+
+// Từng cấp duyệt trong một flow
+model LeaveApprovalFlowLevel {
+  id                 String             @id @default(uuid())
+  flowId             String
+  level              Int // 1, 2, 3,... (thứ tự duyệt)
+  approverMode       ApproverMode
+  // SPECIFIC_USER: chỉ định đúng 1 user
+  specificUserId     String?
+  // ROLE_IN_*: ai có role X tại scope tương ứng
+  roleDefinitionId   String?
+  // DEPARTMENT_MANAGERS override: nếu null → dùng dept của requester
+  targetDepartmentId String?
+  // Người duyệt thay thế khi primary vắng (cross-dept OK)
+  substitute1Id      String?
+  substitute2Id      String?
+  // Timeout
+  timeoutHours       Int? // tự động action sau N giờ (null = không timeout)
+  timeoutAction      LeaveTimeoutAction @default(NOTIFY_ONLY)
+  // Notification config (impl sau)
+  notifyByEmail      Boolean            @default(false)
+  // Visibility
+  canViewAllRequests Boolean            @default(false) // người duyệt cấp này xem được tất cả đơn
+  isActive           Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  flow             LeaveApprovalFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  specificUser     User?             @relation("LevelPrimaryApprover", fields: [specificUserId], references: [id])
+  roleDefinition   RoleDefinition?   @relation(fields: [roleDefinitionId], references: [id])
+  targetDepartment Department?       @relation("LevelTargetDepartment", fields: [targetDepartmentId], references: [id])
+  substitute1      User?             @relation("LevelSubstitute1", fields: [substitute1Id], references: [id])
+  substitute2      User?             @relation("LevelSubstitute2", fields: [substitute2Id], references: [id])
+
+  @@unique([flowId, level])
+  @@index([flowId])
+  @@index([specificUserId]) // performance: queue approval lookup
+  @@index([substitute1Id])
+  @@index([substitute2Id])
+  @@index([approverMode])
+  @@map("leave_approval_flow_levels")
+}
+
+// Đơn xin nghỉ phép
+model LeaveRequest {
+  id            String             @id @default(uuid())
+  requestNumber String             @unique // auto-gen: LR-20240001
+  userId        String
+  companyId     String // denormalized for performance
+  leaveTypeId   String
+  flowId        String? // flow đang được sử dụng (xác định khi submit)
+  currentLevel  Int                @default(1) // đang ở cấp duyệt nào
+  startDate     DateTime           @db.Date
+  endDate       DateTime           @db.Date
+  startHalfDay  Boolean            @default(false) // ngày đầu chỉ tính nửa ngày (buổi chiều)
+  endHalfDay    Boolean            @default(false) // ngày cuối chỉ tính nửa ngày (buổi sáng)
+  totalDays     Decimal            @db.Decimal(7, 1) // tổng số ngày (đã trừ CN + lễ)
+  reason        String?
+  attachmentUrl String? // giấy tờ đính kèm (giấy viện, ...)
+  status        LeaveRequestStatus @default(DRAFT)
+  submittedAt   DateTime?
+  approvedAt    DateTime?
+  rejectedAt    DateTime?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  // Email notification config (impl sau — chỉ lưu preference)
+  notifyByEmail Boolean            @default(false)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  user      User               @relation("UserLeaveRequests", fields: [userId], references: [id])
+  company   Company            @relation(fields: [companyId], references: [id])
+  leaveType LeaveType          @relation(fields: [leaveTypeId], references: [id])
+  flow      LeaveApprovalFlow? @relation(fields: [flowId], references: [id])
+
+  approvals LeaveApproval[]
+  comments  LeaveRequestComment[]
+
+  @@index([userId, status])
+  @@index([companyId, status])
+  @@index([leaveTypeId])
+  @@index([startDate, endDate])
+  @@index([status, currentLevel, companyId]) // approval queue lookup
+  @@index([submittedAt])
+  @@map("leave_requests")
+}
+
+// Bản ghi từng bước phê duyệt — chỉ tạo khi có action thực sự
+model LeaveApproval {
+  id           String              @id @default(uuid())
+  requestId    String
+  level        Int // cấp duyệt này thuộc về level nào
+  approverId   String // người thực sự đã action
+  targetUserId String? // người được chỉ định duyệt (primary approver)
+  isSubstitute Boolean             @default(false) // có phải người duyệt thay thế không
+  action       LeaveApprovalAction
+  comment      String?
+  actionAt     DateTime            @default(now())
+  createdAt    DateTime            @default(now())
+
+  request    LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  approver   User         @relation("LeaveApprovalApprover", fields: [approverId], references: [id])
+  targetUser User?        @relation("LeaveApprovalTarget", fields: [targetUserId], references: [id])
+
+  @@index([requestId])
+  @@index([approverId])
+  @@index([action])
+  @@index([level])
+  @@map("leave_approvals")
+}
+
+// Số dư phép — per user/leaveType/year
+// available = accrued + carriedOver + adjusted - used - pending - expired
+model LeaveBalance {
+  id               String   @id @default(uuid())
+  userId           String
+  leaveTypeId      String
+  year             Int
+  companyId        String // denormalized for performance
+  accrued          Decimal  @default(0) @db.Decimal(7, 1) // tích lũy trong năm (cron cộng hàng tháng)
+  carriedOver      Decimal  @default(0) @db.Decimal(7, 1) // kết dư từ năm trước
+  adjusted         Decimal  @default(0) @db.Decimal(7, 1) // điều chỉnh thủ công (admin)
+  used             Decimal  @default(0) @db.Decimal(7, 1) // đã sử dụng (đơn đã approved + ngày qua)
+  pending          Decimal  @default(0) @db.Decimal(7, 1) // đang chờ duyệt
+  expired          Decimal  @default(0) @db.Decimal(7, 1) // đã hết hạn (carry-over vượt giới hạn)
+  lastAccrualMonth Int? // tháng cuối đã tính accrual (1-12), null = chưa tính
+  lastAccrualYear  Int? // năm của lastAccrualMonth
+  note             String? // ghi chú điều chỉnh
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id])
+  company   Company   @relation(fields: [companyId], references: [id])
+
+  @@unique([userId, leaveTypeId, year])
+  @@index([userId, year])
+  @@index([companyId, year])
+  @@index([leaveTypeId])
+  @@map("leave_balances")
+}
+
+// Quy tắc visibility — ai được xem đơn phép của ai
+model LeaveVisibilityRule {
+  id               String               @id @default(uuid())
+  companyId        String
+  name             String // tên quy tắc để dễ quản lý
+  description      String?
+  scope            LeaveVisibilityScope // phạm vi xem: OWN, TEAM, DEPARTMENT, OFFICE, COMPANY
+  // Áp dụng cho ai (null = tất cả)
+  viewerRoleId     String? // role nào được áp dụng quy tắc này
+  viewerUserId     String? // user cụ thể được áp dụng quy tắc này
+  // Lọc theo loại phép/phòng ban (null = tất cả)
+  leaveTypeId      String?
+  officeId         String?
+  // Quyền xem chi tiết
+  canViewDetails   Boolean              @default(true) // thấy lý do, ngày tháng chi tiết
+  canViewDocuments Boolean              @default(false) // thấy file đính kèm
+  priority         Int                  @default(0) // ưu tiên khi nhiều rule match
+  isActive         Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  company    Company         @relation(fields: [companyId], references: [id])
+  viewerRole RoleDefinition? @relation(fields: [viewerRoleId], references: [id])
+  viewerUser User?           @relation("LeaveVisibilityForSpecificUser", fields: [viewerUserId], references: [id])
+  leaveType  LeaveType?      @relation(fields: [leaveTypeId], references: [id])
+  office     Office?         @relation(fields: [officeId], references: [id])
+
+  @@index([companyId, isActive])
+  @@index([viewerRoleId])
+  @@index([viewerUserId])
+  @@index([leaveTypeId])
+  @@index([scope])
+  @@map("leave_visibility_rules")
+}
+
+// Trao đổi/bình luận trên đơn xin phép
+model LeaveRequestComment {
+  id         String   @id @default(uuid())
+  requestId  String
+  userId     String
+  content    String   @db.Text
+  isInternal Boolean  @default(false) // true = chỉ người duyệt mới thấy
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  request LeaveRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  user    User         @relation("LeaveCommentAuthor", fields: [userId], references: [id])
+
+  @@index([requestId])
+  @@index([userId])
+  @@map("leave_request_comments")
 }

@@ -1,4 +1,4 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, Param, Body, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
@@ -30,13 +30,34 @@ export class OrganizationController {
     return this.hierarchyService.getOrganizationStructure();
   }
 
-  @Get('hierarchy')
-  @ApiOperation({ summary: 'Get organization hierarchy for management' })
-  @ApiResponse({
-    status: 200,
-    description: 'Organization hierarchy retrieved successfully',
-  })
-  getHierarchy() {
-    return this.hierarchyService.getOrganizationHierarchy();
+  @Get('management-tree')
+  @ApiOperation({ summary: 'Get management hierarchy tree (company→office→dept→managers)' })
+  getManagementTree(@Query('companyId') companyId?: string) {
+    return this.hierarchyService.getManagementTree(companyId);
+  }
+
+  @Get('departments/:id/managers')
+  @ApiOperation({ summary: 'Get all managers of a department' })
+  getDepartmentManagers(@Param('id') id: string) {
+    return this.hierarchyService.getDepartmentManagers(id);
+  }
+
+  @Put('departments/:id/managers/:userId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Assign a user as manager of a department' })
+  assignManager(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.hierarchyService.assignManager(id, userId);
+  }
+
+  @Delete('departments/:id/managers/:userId')
+  @ApiOperation({ summary: 'Remove a user from department managers' })
+  removeManager(@Param('id') id: string, @Param('userId') userId: string) {
+    return this.hierarchyService.removeManager(id, userId);
+  }
+
+  @Get('users/:userId/managed-departments')
+  @ApiOperation({ summary: 'Get all departments managed by a user' })
+  getManagedDepartments(@Param('userId') userId: string) {
+    return this.hierarchyService.getManagedDepartments(userId);
   }
 }

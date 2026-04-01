@@ -90,6 +90,13 @@ const RESOURCES = [
   'statistics',
   'hierarchy-reports',
   'task-evaluations',
+  'leave-requests',
+  'leave-types',
+  'leave-balances',
+  'leave-flows',
+  'leave-approvals',
+  'leave-visibility',
+  'public-holidays',
 ] as const;
 
 const ACTIONS = ['view', 'create', 'update', 'delete', 'approve', 'manage', 'assign'] as const;
@@ -131,6 +138,13 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     statistics:       ['view'],
     'hierarchy-reports': ['view'],
     'task-evaluations': ['view', 'update', 'delete', 'manage', 'create'],
+    'leave-requests':  ['view', 'create', 'update', 'delete', 'approve', 'manage'],
+    'leave-types':     ['view', 'create', 'update', 'delete', 'manage'],
+    'leave-balances':  ['view', 'create', 'update', 'manage'],
+    'leave-flows':     ['view', 'create', 'update', 'delete', 'manage'],
+    'leave-approvals': ['view', 'approve', 'manage'],
+    'leave-visibility': ['view', 'create', 'update', 'delete', 'manage'],
+    'public-holidays': ['view', 'create', 'update', 'delete', 'manage'],
   },
 
   MANAGER: {
@@ -156,6 +170,13 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     feedback:         ['view', 'manage'],
     'hierarchy-reports': ['view'],
     'task-evaluations': ['view', 'update', 'delete', 'manage', 'create'],
+    'leave-requests':  ['view', 'approve', 'manage'],
+    'leave-types':     ['view'],
+    'leave-balances':  ['view'],
+    'leave-flows':     ['view'],
+    'leave-approvals': ['view', 'approve'],
+    'leave-visibility': ['view'],
+    'public-holidays': ['view'],
   },
 
   USER: {
@@ -180,6 +201,11 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     inventory:        ['view'],
     feedback:         ['view', 'create'],
     statistics:       ['view'],
+    'leave-requests':  ['view', 'create', 'update'],
+    'leave-types':     ['view'],
+    'leave-balances':  ['view'],
+    'leave-approvals': ['view'],
+    'public-holidays': ['view'],
   },
 
   WORKER: {
@@ -191,6 +217,10 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'gate-passes':  ['view', 'create'],
     medicines:      ['view'],
     'medical-records': ['view'],
+    'leave-requests':  ['view', 'create', 'update'],
+    'leave-types':     ['view'],
+    'leave-balances':  ['view'],
+    'public-holidays': ['view'],
   },
 
   MEDICAL_STAFF: {
@@ -208,6 +238,228 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
 // ─────────────────────────────────────────────────────────────
 // SEED FUNCTIONS
 // ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// 7. PUBLIC HOLIDAYS (Vietnamese — 2024–2030)
+// ─────────────────────────────────────────────────────────────
+
+// Giỗ tổ Hùng Vương = 10/3 âm lịch, đã tính sẵn lịch dương:
+// 2024: 18/4, 2025: 7/4, 2026: 27/3, 2027: 16/4, 2028: 4/4, 2029: 24/3, 2030: 13/4
+const PUBLIC_HOLIDAYS_RAW = [
+  // Tết Dương Lịch — 1/1 mỗi năm
+  ...Array.from({ length: 7 }, (_, i) => ({
+    name: 'Tết Dương Lịch', month: 1, day: 1, year: 2024 + i, isLunar: false,
+    description: 'Nghỉ lễ Tết Dương lịch (1/1)',
+  })),
+  // Giỗ tổ Hùng Vương — 10/3 âm lịch (đã tính sang dương lịch)
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 18, year: 2024, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 7,  year: 2025, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 26, year: 2026, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 16, year: 2027, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 4,  year: 2028, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 3, day: 24, year: 2029, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  { name: 'Giỗ tổ Hùng Vương', month: 4, day: 13, year: 2030, isLunar: true,  description: 'Giỗ tổ Hùng Vương (10/3 âm lịch)' },
+  // Giải phóng miền Nam — 30/4 mỗi năm
+  ...Array.from({ length: 7 }, (_, i) => ({
+    name: 'Ngày Giải phóng miền Nam', month: 4, day: 30, year: 2024 + i, isLunar: false,
+    description: 'Ngày Giải phóng miền Nam, thống nhất đất nước (30/4)',
+  })),
+  // Quốc tế Lao Động — 1/5 mỗi năm
+  ...Array.from({ length: 7 }, (_, i) => ({
+    name: 'Ngày Quốc tế Lao Động', month: 5, day: 1, year: 2024 + i, isLunar: false,
+    description: 'Ngày Quốc tế Lao Động (1/5)',
+  })),
+  // Quốc khánh — 2/9 mỗi năm
+  ...Array.from({ length: 7 }, (_, i) => ({
+    name: 'Ngày Quốc khánh', month: 9, day: 2, year: 2024 + i, isLunar: false,
+    description: 'Quốc khánh nước CHXHCNVN (2/9)',
+  })),
+];
+
+async function seedPublicHolidays() {
+  console.log('\n━━━ [7/8] Seeding public holidays ━━━');
+  let count = 0;
+  for (const h of PUBLIC_HOLIDAYS_RAW) {
+    const date = new Date(Date.UTC(h.year, h.month - 1, h.day));
+    await prisma.publicHoliday.upsert({
+      where: {
+        // Prisma does not support @@unique with nullable companyId easily,
+        // use a findFirst + create/update pattern
+        id: (await prisma.publicHoliday.findFirst({
+          where: { companyId: null, date },
+          select: { id: true },
+        }))?.id ?? 'NEW_RECORD',
+      },
+      update: { name: h.name, isLunar: h.isLunar, description: h.description, isActive: true },
+      create: {
+        companyId: null,
+        name: h.name,
+        date,
+        isLunar: h.isLunar,
+        description: h.description,
+        isActive: true,
+      },
+    });
+    count++;
+  }
+  console.log(`  ✓ ${count} public holidays (2024–2030)`);
+}
+
+// ─────────────────────────────────────────────────────────────
+// 8. LEAVE TYPES — all codes + parent categories
+// ─────────────────────────────────────────────────────────────
+
+type LeaveCategorySeed = {
+  code: string;
+  name: string;
+  leaveCategory: 'MEDICAL' | 'SPECIAL' | 'PERSONAL' | 'OTHER';
+  requiresDocument?: boolean;
+  colorCode?: string;
+  sortOrder?: number;
+};
+
+type LeaveTypeSeed = {
+  code: string;
+  categoryCode: string; // maps to LeaveCategorySeed.code
+  name: string;
+  requiresDocument?: boolean;
+  isPaid?: boolean;
+  isAccruable?: boolean;
+  accrualPerMonth?: number;
+  maxDaysPerYear?: number;
+  maxCarryOver?: number;
+  sortOrder?: number;
+};
+
+// Parent categories (LeaveTypeCategory table)
+const LEAVE_CATEGORIES: LeaveCategorySeed[] = [
+  { code: 'TS', name: 'Thai sản',          leaveCategory: 'MEDICAL',  requiresDocument: true,  colorCode: '#FF8FAB', sortOrder: 10 },
+  { code: 'PB', name: 'Phép bệnh',         leaveCategory: 'MEDICAL',  requiresDocument: true,  colorCode: '#FF6B6B', sortOrder: 20 },
+  { code: 'KT', name: 'Khám thai',         leaveCategory: 'MEDICAL',  requiresDocument: true,  colorCode: '#FFA94D', sortOrder: 30 },
+  { code: 'ST', name: 'Sẩy thai',          leaveCategory: 'MEDICAL',  requiresDocument: true,  colorCode: '#E64980', sortOrder: 40 },
+  { code: 'PT', name: 'Phép tang',         leaveCategory: 'SPECIAL',  requiresDocument: false, colorCode: '#495057', sortOrder: 50 },
+  { code: 'PC', name: 'Phép cưới',         leaveCategory: 'SPECIAL',  requiresDocument: false, colorCode: '#F06595', sortOrder: 60 },
+  { code: 'PK', name: 'Phép khác',         leaveCategory: 'SPECIAL',  requiresDocument: false, colorCode: '#74C0FC', sortOrder: 70 },
+  { code: 'PN', name: 'Phép năm',          leaveCategory: 'PERSONAL', colorCode: '#51CF66', sortOrder: 80 },
+  { code: 'VR', name: 'Việc riêng',        leaveCategory: 'PERSONAL', colorCode: '#94D82D', sortOrder: 90 },
+  { code: 'C',  name: 'Con ốm',            leaveCategory: 'PERSONAL', requiresDocument: true,  colorCode: '#FFD43B', sortOrder: 100 },
+  { code: 'NV', name: 'Nghĩa vụ quân sự',  leaveCategory: 'OTHER',    colorCode: '#748FFC', sortOrder: 110 },
+];
+
+const LEAVE_TYPES: LeaveTypeSeed[] = [
+  // TS — Thai sản
+  { code: 'C3', categoryCode: 'TS', name: 'Sinh 1 con (6 tháng)', requiresDocument: true, maxDaysPerYear: 180, sortOrder: 11 },
+  { code: 'C4', categoryCode: 'TS', name: 'Sinh 1 con (7 tháng)', requiresDocument: true, maxDaysPerYear: 210, sortOrder: 12 },
+  { code: 'C5', categoryCode: 'TS', name: 'Sinh 1 con (8 tháng)', requiresDocument: true, maxDaysPerYear: 240, sortOrder: 13 },
+  { code: 'C6', categoryCode: 'TS', name: 'Sinh con làm việc độc hại, nặng nhọc', requiresDocument: true, sortOrder: 14 },
+  { code: 'C7', categoryCode: 'TS', name: 'Sinh 1 con (4 tháng)', requiresDocument: true, maxDaysPerYear: 120, sortOrder: 15 },
+  { code: 'C8', categoryCode: 'TS', name: 'Sinh 1 con (5 tháng)', requiresDocument: true, maxDaysPerYear: 150, sortOrder: 16 },
+  { code: 'C9', categoryCode: 'TS', name: 'Vợ sinh, chồng được nghỉ', requiresDocument: true, sortOrder: 17 },
+  // PB — Phép bệnh
+  { code: 'B1', categoryCode: 'PB', name: 'Ốm ngắn ngày (<15 năm công tác)', requiresDocument: true, sortOrder: 21 },
+  { code: 'B2', categoryCode: 'PB', name: 'Ốm dài ngày', requiresDocument: true, sortOrder: 22 },
+  { code: 'B3', categoryCode: 'PB', name: 'Ốm ngắn ngày (nặng nhọc, độc hại <15 năm)', requiresDocument: true, sortOrder: 23 },
+  { code: 'B4', categoryCode: 'PB', name: 'Ốm dài ngày (nặng nhọc, độc hại)', requiresDocument: true, sortOrder: 24 },
+  { code: 'B5', categoryCode: 'PB', name: 'Ốm ngắn ngày (>30 năm công tác)', requiresDocument: true, sortOrder: 25 },
+  { code: 'B6', categoryCode: 'PB', name: 'Ốm ngắn ngày (nặng nhọc, độc hại <30 năm)', requiresDocument: true, sortOrder: 26 },
+  { code: 'B7', categoryCode: 'PB', name: 'Ốm ngắn ngày (nặng nhọc, độc hại >30 năm)', requiresDocument: true, sortOrder: 27 },
+  { code: 'N1', categoryCode: 'PB', name: 'Dưỡng sức sinh thường tại nhà', requiresDocument: true, sortOrder: 28 },
+  { code: 'N2', categoryCode: 'PB', name: 'Dưỡng sinh mổ hoặc tai nạn từ 50%–81% tại nhà', requiresDocument: true, sortOrder: 29 },
+  { code: 'N3', categoryCode: 'PB', name: 'Dưỡng sinh song thai hoặc tai nạn từ 51% tại nhà', requiresDocument: true, sortOrder: 30 },
+  // KT — Khám thai
+  { code: 'K1', categoryCode: 'KT', name: 'Khám thai bình thường', requiresDocument: true, sortOrder: 31 },
+  { code: 'K2', categoryCode: 'KT', name: 'Khám thai', requiresDocument: true, sortOrder: 32 },
+  // ST — Sẩy thai
+  { code: 'S1', categoryCode: 'ST', name: 'Sẩy thai dưới 1 tháng', requiresDocument: true, sortOrder: 41 },
+  { code: 'S2', categoryCode: 'ST', name: 'Sẩy thai từ 1–3 tháng', requiresDocument: true, sortOrder: 42 },
+  { code: 'S3', categoryCode: 'ST', name: 'Sẩy thai từ 3–dưới 6 tháng', requiresDocument: true, sortOrder: 43 },
+  { code: 'S4', categoryCode: 'ST', name: 'Sẩy thai từ 6 tháng trở lên', requiresDocument: true, sortOrder: 44 },
+  // PT — Phép tang
+  { code: 'V3', categoryCode: 'PT', name: 'Phép tang', requiresDocument: false, sortOrder: 51 },
+  // PC — Phép cưới
+  { code: 'V4', categoryCode: 'PC', name: 'Phép cưới (bản thân)', requiresDocument: false, sortOrder: 61 },
+  { code: 'CC', categoryCode: 'PC', name: 'Phép con cưới', requiresDocument: false, sortOrder: 62 },
+  // PK — Phép khác
+  { code: 'H1', categoryCode: 'PK', name: 'Đặt vòng', requiresDocument: true,  sortOrder: 71 },
+  { code: 'H2', categoryCode: 'PK', name: 'Triệt sản', requiresDocument: true,  sortOrder: 72 },
+  { code: 'T1', categoryCode: 'PK', name: 'Tai nạn lỡ, giảm khả năng lao động dưới 21%', requiresDocument: true,  sortOrder: 73 },
+  { code: 'T2', categoryCode: 'PK', name: 'Tai nạn lỡ, giảm khả năng lao động trên 21%', requiresDocument: true,  sortOrder: 74 },
+  // PN — Phép năm (isAccruable = false ở đây vì parent PN mới có accrual)
+  { code: 'V2', categoryCode: 'PN', name: 'Vắng có phép', requiresDocument: false, sortOrder: 81, isAccruable: false },
+  { code: 'PN', categoryCode: 'PN', name: 'Phép năm', requiresDocument: false, sortOrder: 82, isAccruable: true, accrualPerMonth: 1, maxCarryOver: 5 },
+  // VR — Việc riêng (no sub-codes, parent handles it)
+  // C — Con ốm
+  { code: 'C1', categoryCode: 'C', name: 'Con dưới 3 tuổi bị bệnh', requiresDocument: true,  sortOrder: 101 },
+  { code: 'C2', categoryCode: 'C', name: 'Con từ 3–7 tuổi bị bệnh', requiresDocument: true,  sortOrder: 102 },
+  // NV — Nghĩa vụ quân sự
+  { code: 'V5', categoryCode: 'NV', name: 'Nghĩa vụ quân sự', requiresDocument: true,  sortOrder: 111 },
+];
+
+
+async function seedLeaveTypes() {
+  console.log('\n\u2501\u2501\u2501 [8/8] Seeding leave types \u2501\u2501\u2501');
+
+  // 1. Seed categories into leave_type_categories table
+  const categoryMap: Record<string, string> = {}; // code \u2192 id
+  for (const cat of LEAVE_CATEGORIES) {
+    const existing = await (prisma as any).leaveTypeCategory.findFirst({
+      where: { code: cat.code, companyId: null },
+      select: { id: true },
+    });
+    const record = await (prisma as any).leaveTypeCategory.upsert({
+      where: { id: existing?.id ?? 'NEW_RECORD' },
+      update: { name: cat.name, isActive: true, colorCode: cat.colorCode ?? null, sortOrder: cat.sortOrder ?? 0 },
+      create: {
+        companyId: null,
+        code: cat.code,
+        name: cat.name,
+        leaveCategory: cat.leaveCategory,
+        description: null,
+        colorCode: cat.colorCode ?? null,
+        sortOrder: cat.sortOrder ?? 0,
+        isActive: true,
+      },
+    });
+    categoryMap[cat.code] = record.id;
+    console.log(`  \u2713 [CAT]  ${cat.code} \u2014 ${cat.name}`);
+  }
+
+  // 2. Seed individual leave type codes into leave_types table
+  for (const lt of LEAVE_TYPES) {
+    const categoryId = categoryMap[lt.categoryCode];
+    if (!categoryId) {
+      console.warn(`  ! No category found for code ${lt.categoryCode}, skipping ${lt.code}`);
+      continue;
+    }
+    const existing = await prisma.leaveType.findFirst({
+      where: { code: lt.code, companyId: null },
+      select: { id: true },
+    });
+    await prisma.leaveType.upsert({
+      where: { id: existing?.id ?? 'NEW_RECORD' },
+      update: { name: lt.name, isActive: true, sortOrder: lt.sortOrder ?? 0 },
+      create: {
+        companyId: null,
+        code: lt.code,
+        name: lt.name,
+        categoryId,
+        requiresDocument: lt.requiresDocument ?? false,
+        isPaid: lt.isPaid ?? true,
+        isAccruable: lt.isAccruable ?? false,
+        accrualPerMonth: lt.accrualPerMonth ?? null,
+        maxDaysPerYear: lt.maxDaysPerYear ?? null,
+        maxCarryOver: lt.maxCarryOver ?? null,
+        sortOrder: lt.sortOrder ?? 0,
+        isActive: true,
+      },
+    });
+    console.log(`  \u2713 [TYPE] ${lt.code} \u2014 ${lt.name}`);
+  }
+
+  console.log(`  \u2713, Total: ${LEAVE_CATEGORIES.length} categories + ${LEAVE_TYPES.length} types`);
+}
+
+
 
 async function seedRoles() {
   console.log('\n━━━ [1/6] Seeding system roles ━━━');
@@ -528,6 +780,8 @@ async function main() {
   const company = await seedDefaultCompany();
   const { office, jobPosition } = await seedSuperAdminInfrastructure(company.id);
   await seedSuperAdminUser(company.id, office.id, jobPosition.id);
+  await seedPublicHolidays();
+  await seedLeaveTypes();
 
   console.log('\n══════════════════════════════════');
   console.log('✅ Seed completed successfully!\n');
