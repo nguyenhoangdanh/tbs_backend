@@ -28,6 +28,12 @@
     "db:reset:healthcare": "bash -c 'set -a && source .env && set +a && npx tsx prisma/reset-healthcare.ts'",
     "db:reset:healthcare:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/reset-healthcare.ts'",
 
+    "db:backup:healthcare": "bash scripts/backup-healthcare.sh",
+    "db:backup:healthcare:prod": "bash scripts/backup-healthcare.sh --env=.env.production",
+
+    "deploy:prod": "bash scripts/deploy-prod.sh",
+    "deploy:prod:skip-build": "bash scripts/deploy-prod.sh --skip-build",
+
     "docker:up": "docker compose -f docker-compose.yml up -d",
     "docker:down": "docker compose -f docker-compose.yml down"
   },

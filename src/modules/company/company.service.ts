@@ -108,7 +108,13 @@ export class CompanyService {
           include: {
             ...this._include(),
             children: {
-              include: this._include(),
+              include: {
+                ...this._include(),
+                children: {
+                  include: this._include(),
+                  orderBy: { name: 'asc' },
+                },
+              },
               orderBy: { name: 'asc' },
             },
           },

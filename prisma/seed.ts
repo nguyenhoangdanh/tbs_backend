@@ -584,6 +584,28 @@ async function seedDefaultCompany() {
   });
   console.log(`  ✓ [REGION] ${regionAnGiang.code} — ${regionAnGiang.name}`);
 
+  const regionHCM = await prisma.region.upsert({
+    where: { code: 'HCM' },
+    update: {},
+    create: {
+      code: 'HCM',
+      name: 'TP. Hồ Chí Minh',
+      description: 'Thành phố Hồ Chí Minh — trung tâm kinh tế lớn nhất cả nước',
+    },
+  });
+  console.log(`  ✓ [REGION] ${regionHCM.code} — ${regionHCM.name}`);
+
+  const regionMienDong_HCM = await prisma.region.upsert({
+    where: { code: 'MIEN_DONG_HCM' },
+    update: {},
+    create: {
+      code: 'MIEN_DONG_HCM',
+      name: 'Miền Đông Sài Gòn',
+      description: 'Khu vực Miền Đông Sài Gòn — gồm TP. Thủ Đức và các quận phía Đông TP.HCM',
+    },
+  });
+  console.log(`  ✓ [REGION] ${regionMienDong_HCM.code} — ${regionMienDong_HCM.name}`);
+
   // ── Root holding: TBS Group
   const holding = await prisma.company.upsert({
     where: { code: 'TBS' },
@@ -598,21 +620,69 @@ async function seedDefaultCompany() {
   });
   console.log(`  ✓ [HOLDING]  ${holding.code} — ${holding.name}`);
 
-  // ── Subsidiary: TBS An Giang
+  // ── Subsidiary: HANDBAG DIVISION (TBS  GROUP) — ngành túi xách đại diện cho lĩnh vực sản phẩm chính
   const subsidiary = await prisma.company.upsert({
-    where: { code: 'TBS_AN_GIANG' },
+    where: { code: 'HANDBAG_DIVISION' },
     update: {},
     create: {
-      code: 'TBS_AN_GIANG',
-      name: 'Công ty CP TBS An Giang',
+      code: 'HANDBAG_DIVISION',
+      name: 'Handbag Division (TBS Group)',
       typeId: companyTypes['NGANH'].id,
       parentCompanyId: holding.id,
-      regionId: regionAnGiang.id,
-      email: 'info@tbs-angiang.vn',
+      regionId: regionHCM.id,
+      email: 'info@tbsgroup.vn',
       isActive: true,
     },
   });
   console.log(`  ✓ [NGANH]    ${subsidiary.code} — ${subsidiary.name}`);
+
+  // Shoes Division (TBS Group) — ngành giày da đại diện cho lĩnh vực sản phẩm chính
+  const shoesDivision = await prisma.company.upsert({
+    where: { code: 'SHOES_DIVISION' },
+    update: {},
+    create: {
+      code: 'SHOES_DIVISION',
+      name: 'Shoes Division (TBS Group)',
+      typeId: companyTypes['NGANH'].id,
+      parentCompanyId: holding.id,
+      regionId: regionHCM.id,
+      email: 'info@tbsgroup.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [NGANH]    ${shoesDivision.code} — ${shoesDivision.name}`);
+
+  // ── Chuỗi: TBS Handbags — chuỗi điều hành sản phẩm túi xách cụ thể
+  const handbagChain = await prisma.company.upsert({
+    where: { code: 'TBS_HAND_BAGS' },
+    update: {},
+    create: {
+      code: 'TBS_HAND_BAGS',
+      name: 'TBS Handbags',
+      typeId: companyTypes['CHUOI'].id,
+      parentCompanyId: subsidiary.id,
+      regionId: regionMienDong_HCM.id,
+      email: 'info@tbsgroup.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [CHUOI]   ${handbagChain.code} — ${handbagChain.name}`);
+
+  // Chuoi: TBS Shoes — chuỗi điều hành sản phẩm giày da cụ thể
+  const shoesChain = await prisma.company.upsert({
+    where: { code: 'TBS_SHOES' },
+    update: {},
+    create: {
+      code: 'TBS_SHOES',
+      name: 'TBS Shoes',
+      typeId: companyTypes['CHUOI'].id,
+      parentCompanyId: shoesDivision.id,
+      regionId: regionHCM.id,
+      email: 'info@tbsgroup.vn',
+      isActive: true,
+    },
+  });
+  console.log(`  ✓ [CHUOI]   ${shoesChain.code} — ${shoesChain.name}`);
 
   // ── Tổ hợp Thoại Sơn
   const complex = await prisma.company.upsert({
@@ -622,14 +692,31 @@ async function seedDefaultCompany() {
       code: 'TOHOP_TUIXACH_THOAISON',
       name: 'Tổ hợp túi xách Thoại Sơn',
       typeId: companyTypes['TO_HOP'].id,
-      parentCompanyId: subsidiary.id,
+      parentCompanyId: handbagChain.id,
       regionId: regionAnGiang.id,
-      email: 'thoaison@tbs-angiang.vn',
+      email: 'thoaisonhandbag@tbsgroup.vn',
       isActive: true,
       sectors: { connect: [{ id: sectors['BAGS'].id }] },
     },
   });
   console.log(`  ✓ [TO_HOP]   ${complex.code} — ${complex.name}`);
+
+  // Tổ hợp giày Thoại Sơn
+  const shoesComplex = await prisma.company.upsert({
+    where: { code: 'TOHOP_GIAY_THOAISON' },
+    update: {},
+    create: {
+      code: 'TOHOP_GIAY_THOAISON',
+      name: 'Tổ hợp giày Thoại Sơn',
+      typeId: companyTypes['TO_HOP'].id,
+      parentCompanyId: shoesChain.id,
+      regionId: regionAnGiang.id,
+      email: 'angiangshoes@tbsgroup.vn',
+      isActive: true,
+      sectors: { connect: [{ id: sectors['FOOTWEAR'].id }] },
+    },
+  });
+  console.log(`  ✓ [TO_HOP]   ${shoesComplex.code} — ${shoesComplex.name}`);
 
   // Return holding as default company for SuperAdmin infra
   return holding;

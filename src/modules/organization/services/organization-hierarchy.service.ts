@@ -132,6 +132,7 @@ export class OrganizationHierarchyService {
       this.prisma.company.findMany({
         where: whereCompany,
         include: {
+          companyType: { select: { id: true, code: true, name: true, level: true } },
           offices: {
             orderBy: { name: 'asc' },
             include: {
