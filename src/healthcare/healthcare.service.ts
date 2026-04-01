@@ -970,7 +970,7 @@ export class HealthcareService {
         };
       }
 
-      acc[medicineId].totalQuantity += prescription.quantity;
+      acc[medicineId].totalQuantity += prescription.isDispensed ? prescription.quantity : 0;
       acc[medicineId].totalPrescriptions += 1;
 
       if (prescription.isDispensed) {
@@ -1238,6 +1238,7 @@ export class HealthcareService {
     const result = await this.prisma.medicalPrescription.groupBy({
       by: ['medicineId'],
       where: {
+        isDispensed: true,
         createdAt: {
           gte: start,
           lte: end,
