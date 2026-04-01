@@ -72,7 +72,7 @@ export class UsersService {
     }
 
     if (officeId) where.officeId = officeId;
-    if (role) where.role = role;
+    if (role) where.roles = { some: { roleDefinition: { code: role } } };
     if (typeof isActive === 'boolean') where.isActive = isActive;
 
     if (departmentId) {
