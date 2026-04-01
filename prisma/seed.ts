@@ -97,6 +97,7 @@ const RESOURCES = [
   'leave-approvals',
   'leave-visibility',
   'public-holidays',
+  'healthcare',
 ] as const;
 
 const ACTIONS = ['view', 'create', 'update', 'delete', 'approve', 'manage', 'assign'] as const;
@@ -232,6 +233,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     medicines:      ['view', 'create', 'update', 'delete', 'manage'],
     'medical-records': ['view', 'create', 'update', 'delete', 'manage'],
     inventory:      ['view', 'create', 'update', 'delete', 'manage'],
+    healthcare:     ['view', 'create', 'update', 'delete', 'manage'],
   },
 };
 
