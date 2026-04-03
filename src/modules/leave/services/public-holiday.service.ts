@@ -7,8 +7,9 @@ export class PublicHolidayService {
   constructor(private readonly prisma: PrismaService) {}
 
   async create(dto: CreatePublicHolidayDto) {
+    const { isRecurring: _, ...data } = dto;
     return this.prisma.publicHoliday.create({
-      data: { ...dto, date: new Date(dto.date) },
+      data: { ...data, date: new Date(dto.date) },
     });
   }
 
@@ -34,9 +35,10 @@ export class PublicHolidayService {
 
   async update(id: string, dto: Partial<CreatePublicHolidayDto>) {
     await this.findOne(id);
+    const { isRecurring: _, ...data } = dto;
     return this.prisma.publicHoliday.update({
       where: { id },
-      data: { ...dto, ...(dto.date ? { date: new Date(dto.date) } : {}) },
+      data: { ...data, ...(data.date ? { date: new Date(data.date) } : {}) },
     });
   }
 

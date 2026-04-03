@@ -8,7 +8,7 @@ import { LeaveApprovalService } from './leave-approval.service';
 import { LeaveBalanceService } from './leave-balance.service';
 import { CreateLeaveRequestDto } from '../dto/leave-request/create-leave-request.dto';
 import { UpdateLeaveRequestDto } from '../dto/leave-request/update-leave-request.dto';
-import { CancelLeaveRequestDto, AddLeaveCommentDto } from '../dto/leave-request/approve-leave.dto';
+import { CancelLeaveRequestDto, AddLeaveCommentDto, BulkApproveLeaveDto, ApprovalDecision } from '../dto/leave-request/approve-leave.dto';
 import { LeaveRequestStatus, Prisma } from '@prisma/client';
 
 @Injectable()
@@ -27,7 +27,7 @@ export class LeaveRequestService {
   async createRequest(userId: string, dto: CreateLeaveRequestDto) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
-      select: { id: true, companyId: true, officeId: true, jobPositionId: true, jobPosition: { select: { departmentId: true } } },
+      select: { id: true, companyId: true, officeId: true, jobPositionId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
     });
 
     const leaveType = await this.prisma.leaveType.findFirst({
@@ -86,8 +86,18 @@ export class LeaveRequestService {
       user.companyId,
       dto.leaveTypeId,
       user.officeId,
-      user.jobPosition.departmentId,
+      user.jobPosition?.departmentId ?? null,
     );
+
+    // Tính level bắt đầu (bỏ qua nếu người tạo là người duyệt hoặc không có ai duyệt)
+    const requesterInfo = {
+      companyId: user.companyId,
+      officeId: user.officeId ?? '',
+      jobPosition: { departmentId: user.jobPosition?.departmentId ?? '', jobName: user.jobPosition?.jobName ?? null },
+    };
+    const startingLevel = flow
+      ? await this.approvalService.computeStartingLevel(flow, userId, requesterInfo)
+      : 1;
 
     // Tạo số đơn tự động
     const requestNumber = await this.generateRequestNumber(user.companyId);
@@ -103,7 +113,7 @@ export class LeaveRequestService {
         companyId: user.companyId,
         leaveTypeId: dto.leaveTypeId,
         flowId: flow?.id ?? null,
-        currentLevel: 1,
+        currentLevel: startingLevel,
         startDate,
         endDate,
         startHalfDay: dto.startHalfDay ?? false,
@@ -176,10 +186,31 @@ export class LeaveRequestService {
     const leaveType = await this.prisma.leaveType.findUniqueOrThrow({ where: { id: request.leaveTypeId } });
     const newStatus: LeaveRequestStatus = leaveType.isAutoApproved ? 'APPROVED' : 'PENDING';
 
+    // Tính lại startingLevel nếu PENDING (bỏ qua cấp người tạo đơn = người duyệt)
+    let startingLevel = request.currentLevel ?? 1;
+    if (newStatus === 'PENDING' && request.flowId) {
+      const flow = await this.prisma.leaveApprovalFlow.findUnique({
+        where: { id: request.flowId },
+        include: { levels: { where: { isActive: true }, orderBy: { level: 'asc' } } },
+      });
+      if (flow) {
+        const user = await this.prisma.user.findUniqueOrThrow({
+          where: { id: userId },
+          select: { companyId: true, officeId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
+        });
+        startingLevel = await this.approvalService.computeStartingLevel(
+          flow,
+          userId,
+          { companyId: user.companyId, officeId: user.officeId ?? '', jobPosition: { departmentId: user.jobPosition?.departmentId ?? '', jobName: user.jobPosition?.jobName ?? null } },
+        );
+      }
+    }
+
     const updated = await this.prisma.leaveRequest.update({
       where: { id: requestId },
       data: {
         status: newStatus,
+        currentLevel: startingLevel,
         submittedAt: new Date(),
         approvedAt: newStatus === 'APPROVED' ? new Date() : null,
       },
@@ -196,12 +227,19 @@ export class LeaveRequestService {
     return updated;
   }
 
-  // ── Hủy đơn ───────────────────────────────────────────────────
+  // ── Hủy đơn (DRAFT / PENDING / APPROVED) ─────────────────────
 
-  async cancelRequest(requestId: string, userId: string, dto: CancelLeaveRequestDto) {
-    const request = await this.findRequestForUser(requestId, userId);
-    if (!['DRAFT', 'PENDING'].includes(request.status)) {
-      throw new BadRequestException('Không thể hủy đơn đã được xử lý');
+  async cancelRequest(requestId: string, userId: string, dto: CancelLeaveRequestDto, isAdminOrApprover = false) {
+    const request = await this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Đơn xin phép không tồn tại');
+
+    // Chỉ chủ đơn hoặc admin/approver mới có quyền hủy
+    if (request.userId !== userId && !isAdminOrApprover) {
+      throw new ForbiddenException('Bạn không có quyền thực hiện thao tác này');
+    }
+
+    if (!['DRAFT', 'PENDING', 'APPROVED'].includes(request.status)) {
+      throw new BadRequestException('Không thể hủy đơn đã bị từ chối hoặc đã hủy');
     }
 
     const updated = await this.prisma.leaveRequest.update({
@@ -214,16 +252,34 @@ export class LeaveRequestService {
       include: this.requestInclude(),
     });
 
-    // Hoàn lại số ngày pending
     const leaveType = await this.prisma.leaveType.findUniqueOrThrow({ where: { id: request.leaveTypeId } });
-    if (request.status === 'PENDING' && leaveType.isAccruable) {
-      await this.balanceService.adjustPending(
-        userId, request.leaveTypeId,
-        request.startDate.getFullYear(), request.companyId, -Number(request.totalDays),
-      );
+    if (leaveType.isAccruable) {
+      const year = request.startDate.getFullYear();
+      const days = Number(request.totalDays);
+      if (request.status === 'PENDING') {
+        // Hoàn lại pending
+        await this.balanceService.adjustPending(request.userId, request.leaveTypeId, year, request.companyId, -days);
+      } else if (request.status === 'APPROVED') {
+        // Hoàn lại used
+        await this.prisma.leaveBalance.update({
+          where: { userId_leaveTypeId_year: { userId: request.userId, leaveTypeId: request.leaveTypeId, year } },
+          data: { used: { decrement: days } },
+        });
+      }
     }
 
     return updated;
+  }
+
+  // ── Xóa đơn nháp ──────────────────────────────────────────────
+
+  async deleteRequest(requestId: string, userId: string) {
+    const request = await this.findRequestForUser(requestId, userId);
+    if (request.status !== 'DRAFT') {
+      throw new BadRequestException('Chỉ có thể xóa đơn ở trạng thái Nháp');
+    }
+    await this.prisma.leaveRequest.delete({ where: { id: requestId } });
+    return { success: true };
   }
 
   // ── Thêm bình luận ─────────────────────────────────────────────
@@ -241,6 +297,25 @@ export class LeaveRequestService {
       },
       include: { user: { select: { id: true, firstName: true, lastName: true } } },
     });
+  }
+
+  // ── Duyệt hàng loạt ───────────────────────────────────────────
+
+  async bulkApprove(approverId: string, dto: BulkApproveLeaveDto) {
+    const results: { id: string; success: boolean; error?: string }[] = [];
+    const approveDto = { action: dto.action, comment: dto.comment };
+
+    for (const requestId of dto.requestIds) {
+      try {
+        await this.approvalService.processApproval(requestId, approverId, approveDto as any);
+        results.push({ id: requestId, success: true });
+      } catch (e: any) {
+        results.push({ id: requestId, success: false, error: e?.message ?? 'Unknown error' });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+    return { successCount, failCount: results.length - successCount, results };
   }
 
   // ── Query ───────────────────────────────────────────────────────
@@ -289,7 +364,13 @@ export class LeaveRequestService {
       },
     });
     if (!request) throw new NotFoundException('Đơn xin phép không tồn tại');
-    return request;
+
+    // Compute whether the viewer can approve this request right now
+    const canApproveThis = request.status === 'PENDING'
+      ? await this.approvalService.canApproveRequest(requestId, viewerId)
+      : false;
+
+    return { ...request, canApproveThis };
   }
 
   // ── Pending approvals queue ────────────────────────────────────
@@ -327,7 +408,158 @@ export class LeaveRequestService {
       this.prisma.leaveRequest.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    // Batch-resolve actual approver names for ROLE_* modes (single query per unique role+dept combo)
+    const enriched = await this.enrichWithResolvedApprovers(data);
+    return { data: enriched, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /** Resolve actual user names for ROLE_IN_DEPARTMENT/ROLE_IN_COMPANY flow levels */
+  private async enrichWithResolvedApprovers(requests: any[]) {
+    if (!requests.length) return requests;
+
+    return Promise.all(requests.map(async (req) => {
+      const lvl = req.flow?.levels?.find((l: any) => l.level === (req.currentLevel ?? 1));
+      if (!lvl) return req;
+
+      const requesterOfficeId = req.user?.officeId ?? null;
+      const requesterDeptId = lvl.targetDepartment?.id ?? req.user?.jobPosition?.department?.id ?? null;
+      const requesterJobName = req.user?.jobPosition?.jobName ?? null;
+      // Use raw IDs if available, fallback to nested object IDs
+      const roleDefinitionId = lvl.roleDefinitionId ?? lvl.roleDefinition?.id ?? null;
+      const specificUserId = lvl.specificUserId ?? lvl.specificUser?.id ?? null;
+      let approvers: { id: string; firstName: string; lastName: string; employeeCode: string }[] = [];
+
+      switch (lvl.approverMode) {
+        case 'SPECIFIC_USER': {
+          if (specificUserId) {
+            const u = await this.prisma.user.findUnique({
+              where: { id: specificUserId },
+              select: { id: true, firstName: true, lastName: true, employeeCode: true },
+            });
+            if (u) approvers = [u];
+          }
+          break;
+        }
+
+        case 'ROLE_IN_COMPANY': {
+          if (roleDefinitionId) {
+            const roleUsers = await this.prisma.userRole.findMany({
+              where: { roleDefinitionId, isActive: true },
+              select: { userId: true },
+            });
+            const ids = roleUsers.map((r: any) => r.userId);
+            if (ids.length) {
+              approvers = await this.prisma.user.findMany({
+                where: { id: { in: ids }, isActive: true },
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                take: 3,
+              });
+            }
+          }
+          break;
+        }
+
+        case 'ROLE_IN_OFFICE': {
+          if (roleDefinitionId && requesterOfficeId) {
+            const roleUsers = await this.prisma.userRole.findMany({
+              where: { roleDefinitionId, isActive: true },
+              select: { userId: true },
+            });
+            const ids = roleUsers.map((r: any) => r.userId);
+            if (ids.length) {
+              approvers = await this.prisma.user.findMany({
+                where: { id: { in: ids }, officeId: requesterOfficeId, isActive: true },
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                take: 3,
+              });
+            }
+          }
+          break;
+        }
+
+        case 'ROLE_IN_DEPARTMENT': {
+          if (roleDefinitionId && requesterDeptId) {
+            const roleUsers = await this.prisma.userRole.findMany({
+              where: { roleDefinitionId, isActive: true },
+              select: { userId: true },
+            });
+            const ids = roleUsers.map((r: any) => r.userId);
+            if (ids.length) {
+              // VTCV-first: if requester has VTCV, prefer same-VTCV approvers in dept
+              if (requesterJobName) {
+                const vtcvApprovers = await this.prisma.user.findMany({
+                  where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: requesterDeptId, jobName: requesterJobName } },
+                  select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                  take: 3,
+                });
+                if (vtcvApprovers.length > 0) { approvers = vtcvApprovers; break; }
+              }
+              // Fallback: any approver in same dept (no VTCV match found)
+              approvers = await this.prisma.user.findMany({
+                where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: requesterDeptId } },
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                take: 3,
+              });
+            }
+          }
+          break;
+        }
+
+        case 'DEPARTMENT_MANAGERS': {
+          if (requesterDeptId) {
+            const mgmtRecords = await this.prisma.userDepartmentManagement.findMany({
+              where: { departmentId: requesterDeptId, isActive: true },
+              select: { userId: true, user: { select: { jobPosition: { select: { jobName: true } } } } },
+            });
+            const udmUserIds = mgmtRecords.map((m: any) => m.userId);
+
+            if (udmUserIds.length && requesterJobName) {
+              // VTCV-aware: check if any UDM member has same VTCV as requester
+              const sameVtcvMgrs = mgmtRecords.filter((m: any) => m.user.jobPosition?.jobName === requesterJobName);
+              if (sameVtcvMgrs.length > 0) {
+                // Same VTCV match → only those managers
+                approvers = await this.prisma.user.findMany({
+                  where: { id: { in: sameVtcvMgrs.map((m: any) => m.userId) }, isActive: true },
+                  select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                  take: 5,
+                });
+                break;
+              }
+
+              // No same-VTCV match → find tech-specific TPs and exclude them
+              const techSpecificVtcvs: string[] = [];
+              for (const udm of mgmtRecords as any[]) {
+                const vtcv = udm.user.jobPosition?.jobName;
+                if (!vtcv) continue;
+                const nonMgr = await this.prisma.user.count({
+                  where: { isActive: true, jobPosition: { departmentId: requesterDeptId, jobName: vtcv }, id: { notIn: udmUserIds } },
+                });
+                if (nonMgr > 0) techSpecificVtcvs.push(vtcv);
+              }
+
+              const eligibleIds = techSpecificVtcvs.length > 0
+                ? mgmtRecords.filter((m: any) => !techSpecificVtcvs.includes(m.user.jobPosition?.jobName ?? '')).map((m: any) => m.userId)
+                : udmUserIds;
+
+              approvers = await this.prisma.user.findMany({
+                where: { id: { in: eligibleIds }, isActive: true },
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                take: 5,
+              });
+            } else if (udmUserIds.length) {
+              approvers = await this.prisma.user.findMany({
+                where: { id: { in: udmUserIds }, isActive: true },
+                select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                take: 5,
+              });
+            }
+          }
+          break;
+        }
+      }
+
+      return { ...req, resolvedApprovers: approvers };
+    }));
   }
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -358,7 +590,13 @@ export class LeaveRequestService {
             category: { select: { code: true, name: true, leaveCategory: true } },
           },
         },
-      user: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+      user: {
+        select: {
+          id: true, firstName: true, lastName: true, employeeCode: true,
+          officeId: true,
+          jobPosition: { select: { department: { select: { id: true, name: true } }, jobName: true } },
+        },
+      },
       flow: {
         select: {
           id: true,
@@ -378,6 +616,15 @@ export class LeaveRequestService {
             },
           },
         },
+      },
+      approvals: {
+        select: {
+          id: true,
+          level: true,
+          action: true,
+          approver: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+        },
+        orderBy: { level: 'asc' as const },
       },
     } as const;
   }

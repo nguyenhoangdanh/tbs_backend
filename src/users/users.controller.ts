@@ -145,8 +145,14 @@ export class UsersController {
   @Get('departments')
   @RequirePermissions('users:view')
   @ApiOperation({ summary: 'Get all departments' })
-  async getDepartments(@Query('officeId') officeId?: string) {
-    return this.usersService.getDepartments(officeId);
+  async getDepartments(
+    @GetUser('companyId') jwtCompanyId: string,
+    @Query('officeId') officeId?: string,
+    @Query('companyId') queryCompanyId?: string,
+  ) {
+    // Only filter by companyId when explicitly provided; otherwise return all
+    // (SUPERADMIN may belong to parent company but needs to see all child depts)
+    return this.usersService.getDepartments(officeId, queryCompanyId);
   }
 
   @Get('positions')

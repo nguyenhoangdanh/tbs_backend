@@ -64,9 +64,6 @@ interface StaffRow {
   pb: string;   // Phòng ban (Department)
   tt: string;   // Trực thuộc (Office)
   phone: string;
-  mgr1: string;
-  mgr2: string;
-  mgr3: string;
   dob: Date | null;
   joinDate: Date | null;
   sex: Sex | null;
@@ -127,12 +124,29 @@ function generateEmail(hoTen: string): string {
 }
 
 /** Role: ADMIN for TGĐ; MANAGER for GĐ/TP/TT/TL; WORKER for CN; USER otherwise */
-function determineRole(cd: string, isWorker: boolean): string {
-  if (isWorker) return 'WORKER';
+function determineRole(cd: string, isWorker: boolean, tt = ''): string {
   const rank = getCdRank(cd);
-  if (rank === 0) return 'ADMIN';      // TGĐ
-  if (rank <= 5) return 'MANAGER';     // PTGĐ → TT/TCA/T.TEAM/TL
-  if (rank === 7) return 'WORKER';     // CN
+  // Even on worker sheet, management-rank CD (0-5) overrides isWorker flag
+  if (isWorker && rank >= 6) return 'WORKER';
+  if (rank === 0) return 'ADMIN';       // TGĐ
+  if (rank === 1 || rank === 3) return 'MANAGER'; // PTGĐ, PGĐ
+  if (rank === 2) {
+    // GĐ tại văn phòng (VPĐH) → MANAGER; tại nhà máy → FACTORY_DIRECTOR
+    const tNorm = tt.trim().toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/Đ/g, 'D');
+    return (tNorm === 'VPDH TH' || tNorm.startsWith('VPDH') || tNorm.includes('VAN PHONG'))
+      ? 'MANAGER' : 'FACTORY_DIRECTOR';
+  }
+  if (rank === 4) {
+    // TP / ĐT → MANAGER; T.LINE / Trưởng Line → LINE_MANAGER
+    const p = cd.toLowerCase().trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+    return (p === 't.line' || p.includes('truong line') || p.includes('line leader'))
+      ? 'LINE_MANAGER' : 'MANAGER';
+  }
+  if (rank === 5) {
+    // T.TEAM / TL / TCA / TT / Tổ trưởng — tất cả rank 5 đều là TEAM_LEADER (ngang cấp)
+    return 'TEAM_LEADER';
+  }
+  if (rank === 7) return 'WORKER';      // CN
   return 'USER';
 }
 
@@ -165,7 +179,8 @@ function getCdRank(cd: string): number {
     p === 't.team' || p.includes('truong team') || p.includes('team leader') ||
     p === 'tl' || p.includes('tro ly') ||
     p === 'tca' || p.includes('truong ca') ||
-    p === 'tt' || p.includes('to truong')
+    p === 'tt' || p === 't.t' || p === 't.tt' ||
+    p.includes('to truong') || p.includes('truong to')
   ) return 5;
   if (p === 'nv' || p.includes('nhan vien')) return 6;
   if (p === 'cn' || p.includes('cong nhan')) return 7;
@@ -182,7 +197,7 @@ type GroupStrategy = 'pb_only' | 'tt_pb' | 'tt_pb_vt';
 
 function getGroupStrategy(tt: string): GroupStrategy {
   const t = tt.trim().toUpperCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/Đ/g, 'D');
   if (t === 'VPDH TH' || t.startsWith('VPDH') || t.includes('VAN PHONG')) return 'pb_only';
   if (t.includes('LINE PHU TRO') || t.includes('LPT') || t.startsWith('LINE PT')) return 'tt_pb';
   return 'tt_pb_vt'; // NM TS1, TS2, TS3, etc.
@@ -234,13 +249,10 @@ function parseSheet(sheet: XLSX.WorkSheet, isWorkerSheet: boolean): StaffRow[] {
       pb,
       tt,
       phone: row[6] ? String(row[6]).trim() : '',
-      mgr1: row[7] ? String(Math.floor(Number(row[7]))).trim() : '',
-      mgr2: row[8] ? String(Math.floor(Number(row[8]))).trim() : '',
-      mgr3: row[9] ? String(Math.floor(Number(row[9]))).trim() : '',
-      dob: parseExcelDate(row[10]),
-      joinDate: parseExcelDate(row[11]),
-      sex: parseSex(row[12]),
-      tenTo: isWorkerSheet && row[15] ? String(row[15]).trim() : undefined,
+      dob: parseExcelDate(row[7]),
+      joinDate: parseExcelDate(row[8]),
+      sex: parseSex(row[9]),
+      tenTo: isWorkerSheet && row[12] ? String(row[12]).trim() : undefined,
       isWorker: isWorkerSheet,
     });
   }
@@ -462,8 +474,11 @@ async function createUsers(
     const nameParts = row.hoTen.split(' ');
     const firstName = nameParts[0];
     const lastName = nameParts.slice(1).join(' ') || '';
-    const roleCode = determineRole(row.cd, row.isWorker);
-    const roleDefinitionId = roleMap.get(roleCode) ?? roleMap.get('USER')!;
+    const roleCode = determineRole(row.cd, row.isWorker, row.tt);
+    const roleDefinitionId =
+      roleMap.get(roleCode) ??
+      roleMap.get(roleCode === 'FACTORY_DIRECTOR' || roleCode === 'LINE_MANAGER' || roleCode === 'TEAM_LEADER' ? 'MANAGER' : roleCode) ??
+      roleMap.get('USER')!;
 
     toCreate.push({
       msnv: row.msnv, hoTen: row.hoTen,
@@ -548,34 +563,13 @@ async function createManagementRelations(
     desired.get(managerId)!.add(departmentId);
   };
 
-  // Build a quick msnv→row lookup for CD rank checks
-  const rowByCd = new Map<string, StaffRow>();
-  for (const row of rows) rowByCd.set(row.msnv, row);
-
-  // 2a. Explicit mgr1/mgr2/mgr3 from spreadsheet
-  //     Only allow cross-dept management for rank ≤ 4 (TP/ĐT/T.LINE and above).
-  //     TT/TCA/T.TEAM (rank 5) should only manage their own dept (handled in 2b),
-  //     to avoid tổ trưởng of TỔ 1 being incorrectly assigned to TỔ 4.
-  for (const row of rows) {
-    const userId = userMap.get(row.msnv);
-    if (!userId) continue;
-    const departmentId = userDeptMap.get(userId);
-    if (!departmentId) continue;
-    for (const mgrMsnv of [row.mgr1, row.mgr2, row.mgr3].filter(Boolean)) {
-      const managerId = userMap.get(mgrMsnv!);
-      if (!managerId) continue;
-      const mgrRow = rowByCd.get(mgrMsnv!);
-      const mgrRank = mgrRow ? getCdRank(mgrRow.cd) : 99;
-      if (mgrRank >= 5) continue; // only TP and above can be cross-dept managers via mgr columns
-      addRelation(managerId, departmentId);
-    }
-  }
-
-  // 2b. Auto-detect: each management-level person (rank ≤ 5) becomes manager of their OWN dept.
-  //     This correctly handles TP, PGĐ, T.TEAM etc. in the same dept — all get assigned.
+  // 2b. Auto-detect: each management-level person (rank ≤ 4) becomes manager of their OWN dept.
+  //     Rank 5 (T.TEAM/TT/TL/TCA) are excluded here because they are level-1 approvers
+  //     (ROLE_IN_DEPARTMENT/TEAM_LEADER). Adding them to UserDeptManagement would cause them
+  //     to appear again at level-2 DEPARTMENT_MANAGERS after already approving at level 1.
   let autoDetected = 0;
   for (const row of rows) {
-    if (getCdRank(row.cd) >= 6) continue; // skip NV / CN
+    if (getCdRank(row.cd) >= 5) continue; // skip rank 5 (T.TEAM/TT), NV, CN
     const managerId = userMap.get(row.msnv);
     if (!managerId) continue;
     const deptId = deptMap.get(`${row.pb}__${row.tt}`);

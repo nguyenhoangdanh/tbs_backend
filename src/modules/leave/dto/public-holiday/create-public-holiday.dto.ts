@@ -16,6 +16,10 @@ export class CreatePublicHolidayDto {
   isLunar?: boolean;
 
   @IsOptional()
+  @IsBoolean()
+  isRecurring?: boolean; // frontend field — not stored (holidays recur by re-seeding each year)
+
+  @IsOptional()
   @IsString()
   description?: string;
 }

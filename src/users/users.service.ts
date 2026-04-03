@@ -444,15 +444,18 @@ let departmentId: string | null = null;
     });
   }
 
-  async getDepartments(officeId?: string) {
+  async getDepartments(officeId?: string, companyId?: string) {
+    const where: any = {};
+    if (officeId) where.officeId = officeId;
+    if (companyId) where.office = { companyId };
     return this.prisma.department.findMany({
-      where: officeId ? { officeId } : undefined,
+      where: Object.keys(where).length ? where : undefined,
       select: {
         id: true,
         name: true,
         officeId: true,
         office: {
-          select: { name: true },
+          select: { name: true, companyId: true },
         },
       },
       orderBy: { name: 'asc' },
@@ -566,8 +569,28 @@ let departmentId: string | null = null;
           const firstName = nameParts.slice(0, -1).join(' ') || lastName;
 
           // ⭐ Determine role based on Position (CD)
-          // CN (Công nhân) = WORKER, others = USER
-          const role = cd.toUpperCase() === 'CN' ? 'WORKER' : 'USER';
+          // CD values (normalized to lowercase):
+          // cn           → WORKER
+          // tt / tổ trưởng          → TEAM_LEADER
+          // tl / ql line / trưởng line → LINE_MANAGER
+          // gd / giám đốc / gd nm   → FACTORY_DIRECTOR
+          // tp / tpb / tbp / nv-qlr / trưởng phòng / đơn vị → MANAGER
+          // others                  → USER
+          const cdKey = cd.toLowerCase().trim();
+          let role: string;
+          if (cdKey === 'cn') {
+            role = 'WORKER';
+          } else if (['tt', 'tổ trưởng', 'to truong'].includes(cdKey)) {
+            role = 'TEAM_LEADER';
+          } else if (['tl', 'ql line', 'ql-line', 'trưởng line', 'truong line'].includes(cdKey)) {
+            role = 'LINE_MANAGER';
+          } else if (['gd', 'gd nm', 'giám đốc', 'giam doc', 'giam doc nha may', 'giám đốc nhà máy'].includes(cdKey)) {
+            role = 'FACTORY_DIRECTOR';
+          } else if (['tp', 'tpb', 'tbp', 'trưởng phòng', 'truong phong', 'trưởng đơn vị', 'truong don vi', 'ql'].includes(cdKey)) {
+            role = 'MANAGER';
+          } else {
+            role = 'USER';
+          }
 
           // Lookup Office by name (Trực thuộc)
           const office = offices.find(

@@ -29,6 +29,21 @@ export class LeaveFlowController {
     return this.leaveFlowService.findAll(queryCompanyId ?? companyId);
   }
 
+  @Get('preview-approvers')
+  @RequirePermissions('leave-flows:view')
+  previewApprovers(
+    @GetUser('companyId') jwtCompanyId: string,
+    @Query('mode') mode: string,
+    @Query('companyId') queryCompanyId?: string,
+    @Query('roleDefinitionId') roleDefinitionId?: string,
+    @Query('targetDepartmentId') targetDepartmentId?: string,
+    @Query('officeId') officeId?: string,
+  ) {
+    // Pass queryCompanyId if provided; otherwise pass jwtCompanyId as soft hint
+    // (previewApprovers uses it as fallback, not strict filter)
+    return this.leaveFlowService.previewApprovers(queryCompanyId ?? jwtCompanyId, mode, roleDefinitionId, targetDepartmentId, officeId);
+  }
+
   @Get(':id')
   @RequirePermissions('leave-flows:view')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -39,6 +54,18 @@ export class LeaveFlowController {
   @RequirePermissions('leave-flows:update')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: Partial<CreateLeaveFlowDto>) {
     return this.leaveFlowService.update(id, dto);
+  }
+
+  @Post('reattach-all')
+  @RequirePermissions('leave-flows:manage')
+  reattachAll() {
+    return this.leaveFlowService.reattachAllPendingRequests();
+  }
+
+  @Post('fix-scoping')
+  @RequirePermissions('leave-flows:manage')
+  fixFlowScoping() {
+    return this.leaveFlowService.fixFlowScoping();
   }
 
   @Delete(':id')

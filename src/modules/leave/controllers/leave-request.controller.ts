@@ -7,7 +7,7 @@ import { LeaveApprovalService } from '../services/leave-approval.service';
 import { CreateLeaveRequestDto } from '../dto/leave-request/create-leave-request.dto';
 import { UpdateLeaveRequestDto } from '../dto/leave-request/update-leave-request.dto';
 import {
-  ApproveLeaveDto, CancelLeaveRequestDto, AddLeaveCommentDto,
+  ApproveLeaveDto, CancelLeaveRequestDto, AddLeaveCommentDto, BulkApproveLeaveDto,
 } from '../dto/leave-request/approve-leave.dto';
 import { GetUser } from 'src/common/decorators/get-user.decorator';
 import { RequirePermissions } from 'src/common/decorators/permissions.decorator';
@@ -81,6 +81,17 @@ export class LeaveRequestController {
     return this.leaveApprovalService.getPendingRequestsForApprover(approverId, companyId, cursor, limit);
   }
 
+  // ── Duyệt hàng loạt ──────────────────────────────────────────
+
+  @Post('bulk-approve')
+  @RequirePermissions('leave-approvals:approve')
+  bulkApprove(
+    @GetUser('id') approverId: string,
+    @Body() dto: BulkApproveLeaveDto,
+  ) {
+    return this.leaveRequestService.bulkApprove(approverId, dto);
+  }
+
   // ── Chi tiết đơn ─────────────────────────────────────────────
 
   @Get(':id')
@@ -104,6 +115,17 @@ export class LeaveRequestController {
     return this.leaveRequestService.updateRequest(id, userId, dto);
   }
 
+  // ── Xóa đơn nháp ──────────────────────────────────────────────
+
+  @Delete(':id')
+  @RequirePermissions('leave-requests:delete')
+  delete(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    return this.leaveRequestService.deleteRequest(id, userId);
+  }
+
   // ── Submit đơn nháp ────────────────────────────────────────────
 
   @Post(':id/submit')
@@ -121,10 +143,20 @@ export class LeaveRequestController {
   @RequirePermissions('leave-requests:update')
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
-    @GetUser('id') userId: string,
+    @GetUser() currentUser: any,
     @Body() dto: CancelLeaveRequestDto,
   ) {
-    return this.leaveRequestService.cancelRequest(id, userId, dto);
+    // Admin hoặc người có quyền approve có thể hủy đơn của người khác
+    const hasApprovePermission = (currentUser?.roles ?? []).some((r: any) =>
+      r.roleDefinition?.permissions?.some(
+        (p: any) => p.permission?.resource === 'leave-approvals' && p.permission?.action === 'approve' && p.isGranted,
+      ),
+    );
+    const isAdminOrApprover = hasApprovePermission ||
+      ['ADMIN', 'SUPERADMIN', 'MANAGER', 'LINE_MANAGER', 'FACTORY_DIRECTOR'].some((role) =>
+        (currentUser?.roles ?? []).some((r: any) => r.roleDefinition?.code === role),
+      );
+    return this.leaveRequestService.cancelRequest(id, currentUser.id, dto, isAdminOrApprover);
   }
 
   // ── Phê duyệt / Từ chối ───────────────────────────────────────

@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsEnum, IsUUID } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsUUID, IsArray } from 'class-validator';
 
 export enum ApprovalDecision {
   APPROVED = 'APPROVED',
@@ -26,4 +26,17 @@ export class AddLeaveCommentDto {
 
   @IsOptional()
   isInternal?: boolean = false;
+}
+
+export class BulkApproveLeaveDto {
+  @IsArray()
+  @IsUUID('4', { each: true })
+  requestIds: string[];
+
+  @IsEnum(ApprovalDecision)
+  action: ApprovalDecision;
+
+  @IsOptional()
+  @IsString()
+  comment?: string;
 }
