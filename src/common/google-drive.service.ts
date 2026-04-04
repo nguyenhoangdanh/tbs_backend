@@ -35,21 +35,35 @@ export class GoogleDriveService {
   }
 
   private getDrive(): drive_v3.Drive {
-    const { client_email, private_key } = this.parseCredentials();
+    const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
 
+    if (refreshToken) {
+      // OAuth2 with user refresh token — file is owned by the Google account (uses their quota).
+      // Works with personal My Drive folders shared with the service account.
+      const oauth2 = new google.auth.OAuth2(
+        process.env.GOOGLE_OAUTH_CLIENT_ID,
+        process.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      );
+      oauth2.setCredentials({ refresh_token: refreshToken });
+      return google.drive({ version: 'v3', auth: oauth2 });
+    }
+
+    // Fallback: service account JWT (requires a Shared Drive — no quota on personal Drive).
+    const { client_email, private_key } = this.parseCredentials();
     const auth = new google.auth.GoogleAuth({
       credentials: { client_email, private_key },
       scopes: ['https://www.googleapis.com/auth/drive'],
     });
-
     return google.drive({ version: 'v3', auth });
   }
 
   isConfigured(): boolean {
-    return !!(
-      process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY &&
-      process.env.GOOGLE_DRIVE_FOLDER_ID
-    );
+    const hasOAuth =
+      !!(process.env.GOOGLE_OAUTH_REFRESH_TOKEN &&
+        process.env.GOOGLE_OAUTH_CLIENT_ID &&
+        process.env.GOOGLE_OAUTH_CLIENT_SECRET);
+    const hasServiceAccount = !!(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
+    return (hasOAuth || hasServiceAccount) && !!(process.env.GOOGLE_DRIVE_FOLDER_ID);
   }
 
   /**
