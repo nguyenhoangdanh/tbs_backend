@@ -33,6 +33,7 @@ import { GetUser } from '../common/decorators/get-user.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { AuthResponseDto } from './dto/auth-response.dto';
 import { PermissionsService } from '../common/permissions.service';
+import { EnvironmentConfig } from '../config/config.environment';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -43,7 +44,8 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
     private readonly prisma: PrismaService,
-    private readonly permissionsService: PermissionsService, // ⭐ ADD
+    private readonly permissionsService: PermissionsService,
+    private readonly envConfig: EnvironmentConfig,
   ) {}
 
   @Post('register')
@@ -236,6 +238,35 @@ export class AuthController {
       rememberMe,
       request,
     );
+  }
+
+  @Post('refresh-from-cookie')
+  @Public()
+  @ApiOperation({ summary: 'Refresh tokens using refresh_token cookie (no auth header required)' })
+  async refreshFromCookie(
+    @Req() request: any,
+    @Res({ passthrough: true }) response: Response,
+    @Body('rememberMe') rememberMe: boolean = false,
+  ): Promise<AuthResponseDto> {
+    const refreshToken = request.cookies?.refresh_token;
+    if (!refreshToken) {
+      throw new UnauthorizedException('No refresh token cookie found');
+    }
+
+    let payload: any;
+    try {
+      payload = this.jwtService.verify(refreshToken, {
+        secret: this.envConfig.jwtSecret,
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
+    }
+
+    if (!payload?.sub) {
+      throw new UnauthorizedException('Invalid refresh token payload');
+    }
+
+    return this.authService.refreshToken(payload.sub, response, rememberMe, request);
   }
 
   @Post('forgot-password')
