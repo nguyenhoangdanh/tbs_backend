@@ -33,6 +33,7 @@ import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
 import { HealthcareService } from './healthcare.service';
+import { HealthcareCron } from './healthcare.cron';
 import {
   CreateMedicalRecordDto,
   UpdateMedicalRecordDto,
@@ -47,7 +48,10 @@ import {
 @RequirePermissions('healthcare:view')
 @ApiBearerAuth('JWT-auth')
 export class HealthcareController {
-  constructor(private readonly healthcareService: HealthcareService) {}
+  constructor(
+    private readonly healthcareService: HealthcareService,
+    private readonly healthcareCron: HealthcareCron,
+  ) {}
 
   @Get('dashboard')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
@@ -322,5 +326,25 @@ export class HealthcareController {
     if (!file.originalname.match(/\.(xlsx|xls)$/i))
       throw new BadRequestException('Chỉ chấp nhận file .xlsx hoặc .xls');
     return this.healthcareService.importMedicalRecordsExcel(file.buffer);
+  }
+
+  // ─── Backup toàn bộ lịch sử khám lên Google Drive ────────────────────────
+  @Post('backup/trigger')
+  @RequirePermissions('healthcare:manage')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({
+    summary: 'Trigger backup thủ công: xuất toàn bộ lịch sử khám → Google Drive',
+    description:
+      'Upload file Excel lên folder Google Drive đã cấu hình. ' +
+      'Folder chỉ giữ tối đa 3 file gần nhất, file cũ hơn sẽ bị xóa tự động. ' +
+      'Cron job sẽ tự chạy lúc 9 PM giờ VN mỗi ngày.',
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Backup thành công',
+    schema: { example: { fileName: 'lichsu_kham_2026-04-04.xlsx', fileId: '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms' } },
+  })
+  async triggerBackup() {
+    return this.healthcareCron.runBackup();
   }
 }

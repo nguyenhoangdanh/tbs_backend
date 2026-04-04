@@ -22,18 +22,13 @@
     "db:setup:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate deploy && npx tsx prisma/seed.ts'",
     "db:reset": "npx prisma migrate reset --force",
     "db:reset:prod": "bash -c 'set -a && source .env.production && set +a && npx prisma migrate reset --force && npx tsx prisma/seed.ts'",
-
     "db:import:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/import-workers.ts'",
-
     "db:reset:healthcare": "bash -c 'set -a && source .env && set +a && npx tsx prisma/reset-healthcare.ts'",
     "db:reset:healthcare:prod": "bash -c 'set -a && source .env.production && set +a && npx tsx prisma/reset-healthcare.ts'",
-
     "db:backup:healthcare": "bash scripts/backup-healthcare.sh",
     "db:backup:healthcare:prod": "bash scripts/backup-healthcare.sh --env=.env.production",
-
     "deploy:prod": "bash scripts/deploy-prod.sh",
     "deploy:prod:skip-build": "bash scripts/deploy-prod.sh --skip-build",
-
     "docker:up": "docker compose -f docker-compose.yml up -d",
     "docker:down": "docker compose -f docker-compose.yml down"
   },
@@ -52,7 +47,6 @@
     "@nestjs/throttler": "^6.4.0",
     "@nestjs/websockets": "^11.1.16",
     "@prisma/client": "^6.10.1",
-    "prisma": "^6.10.1",
     "@types/socket.io": "^3.0.2",
     "bcrypt": "^6.0.0",
     "cache-manager": "^7.1.1",
@@ -62,11 +56,13 @@
     "date-fns": "^4.1.0",
     "dotenv": "^17.3.1",
     "express": "4.19.2",
+    "googleapis": "^171.4.0",
     "multer": "^2.0.2",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "passport-local": "^1.0.0",
     "path-to-regexp": "6.2.1",
+    "prisma": "^6.10.1",
     "reflect-metadata": "^0.2.0",
     "rxjs": "^7.8.1",
     "socket.io": "^4.8.1",
