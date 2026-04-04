@@ -309,27 +309,26 @@ export class AuthService {
       };
 
       // Enhanced response for different auth modes
-      const baseResponse: AuthResponseDto = {
-        access_token,
-        refresh_token, // ✅ Always include refresh_token
-        user: userResponse,
-        message: 'Đăng nhập thành công',
-      };
-
-      // Add iOS-specific fields if applicable
+      // iOS Safari / token mode: include tokens in body (no cookie support)
       if (deviceInfo.isIOSSafari) {
         return {
-          ...baseResponse,
+          access_token,
+          refresh_token,
+          user: userResponse,
+          message: 'Đăng nhập thành công',
           iosDetected: true,
           fallbackToken: access_token,
           deviceInfo: deviceInfo,
-          // For token mode (iOS/Mac)
           accessToken: access_token,
           refreshToken: refresh_token,
         };
       }
 
-      return baseResponse;
+      // Cookie mode: tokens are in HttpOnly cookies — do NOT expose them in the body
+      return {
+        user: userResponse,
+        message: 'Đăng nhập thành công',
+      } as AuthResponseDto;
 
     } catch (error) {
       this.logger.error(`Login error for ${employeeCode}:`, error.message);
@@ -445,16 +444,12 @@ export class AuthService {
       updatedAt: userWithoutPassword.updatedAt.toISOString(),
     };
 
-    const baseResponse: AuthResponseDto = {
-      access_token,
-      refresh_token, // ✅ Always include refresh_token
-      user: userResponse,
-      message: 'Token refreshed successfully',
-    };
-
     if (deviceInfo.isIOSSafari) {
       return {
-        ...baseResponse,
+        access_token,
+        refresh_token,
+        user: userResponse,
+        message: 'Token refreshed successfully',
         iosDetected: true,
         fallbackToken: access_token,
         deviceInfo: deviceInfo,
@@ -463,7 +458,11 @@ export class AuthService {
       };
     }
 
-    return baseResponse;
+    // Cookie mode: tokens are already in HttpOnly cookies — do NOT expose in body
+    return {
+      user: userResponse,
+      message: 'Token refreshed successfully',
+    } as AuthResponseDto;
   }
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto) {
