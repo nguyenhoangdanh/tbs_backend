@@ -10,17 +10,21 @@ export class GoogleDriveService {
 
   private getDrive(): drive_v3.Drive {
     const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    const key = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n');
+    // Replace literal \n sequences with real newlines (common when storing in .env)
+    const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n');
 
-    if (!email || !key) {
+    if (!email || !privateKey) {
       throw new Error(
         'Google Drive not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.',
       );
     }
 
-    const auth = new google.auth.JWT({
-      email,
-      key,
+    // Use GoogleAuth with credentials object — compatible with Node.js 18+/OpenSSL 3
+    const auth = new google.auth.GoogleAuth({
+      credentials: {
+        client_email: email,
+        private_key: privateKey,
+      },
       scopes: ['https://www.googleapis.com/auth/drive'],
     });
 
