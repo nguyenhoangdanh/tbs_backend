@@ -8,23 +8,37 @@ const EXCEL_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.
 export class GoogleDriveService {
   private readonly logger = new Logger(GoogleDriveService.name);
 
-  private getDrive(): drive_v3.Drive {
-    const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    // Replace literal \n sequences with real newlines (common when storing in .env)
-    const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, '\n');
-
-    if (!email || !privateKey) {
-      throw new Error(
-        'Google Drive not configured. Set GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.',
-      );
+  private parseCredentials(): { client_email: string; private_key: string } {
+    const raw = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY;
+    if (!raw) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY is not set.');
     }
 
-    // Use GoogleAuth with credentials object — compatible with Node.js 18+/OpenSSL 3
+    // The env var may contain the full service-account JSON (as pasted from the downloaded key file)
+    // or just the raw PEM private key string.
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('{')) {
+      const json = JSON.parse(trimmed) as { client_email: string; private_key: string };
+      if (!json.private_key || !json.client_email) {
+        throw new Error('Service account JSON is missing private_key or client_email.');
+      }
+      return { client_email: json.client_email, private_key: json.private_key };
+    }
+
+    // Plain PEM string — also requires GOOGLE_SERVICE_ACCOUNT_EMAIL
+    const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+    if (!email) {
+      throw new Error('GOOGLE_SERVICE_ACCOUNT_EMAIL is required when GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY is a PEM string.');
+    }
+    // Replace literal \n sequences with real newlines (common when storing PEM in .env)
+    return { client_email: email, private_key: trimmed.replace(/\\n/g, '\n') };
+  }
+
+  private getDrive(): drive_v3.Drive {
+    const { client_email, private_key } = this.parseCredentials();
+
     const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: email,
-        private_key: privateKey,
-      },
+      credentials: { client_email, private_key },
       scopes: ['https://www.googleapis.com/auth/drive'],
     });
 
@@ -33,7 +47,6 @@ export class GoogleDriveService {
 
   isConfigured(): boolean {
     return !!(
-      process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL &&
       process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY &&
       process.env.GOOGLE_DRIVE_FOLDER_ID
     );
