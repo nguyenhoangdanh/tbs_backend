@@ -53,13 +53,15 @@ export class GoogleDriveService {
   }
 
   /**
-   * Upload một file Excel (.xlsx) lên Google Drive folder.
+   * Upload một file Excel (.xlsx) lên Google Drive folder (Shared Drive).
+   * supportsAllDrives=true is required for Shared Drives (Team Drives).
    * @returns fileId của file vừa upload
    */
   async uploadExcelFile(fileName: string, buffer: Buffer, folderId: string): Promise<string> {
     const drive = this.getDrive();
 
     const res = await drive.files.create({
+      supportsAllDrives: true,
       requestBody: {
         name: fileName,
         parents: [folderId],
@@ -78,6 +80,7 @@ export class GoogleDriveService {
 
   /**
    * Liệt kê tất cả file Excel trong folder, sắp xếp mới nhất trước.
+   * includeItemsFromAllDrives + supportsAllDrives required for Shared Drives.
    */
   async listExcelFiles(folderId: string): Promise<drive_v3.Schema$File[]> {
     const drive = this.getDrive();
@@ -87,6 +90,8 @@ export class GoogleDriveService {
       fields: 'files(id, name, createdTime)',
       orderBy: 'createdTime desc',
       pageSize: 100,
+      supportsAllDrives: true,
+      includeItemsFromAllDrives: true,
     });
 
     return res.data.files ?? [];
@@ -106,7 +111,7 @@ export class GoogleDriveService {
     const toDelete = files.slice(maxFiles); // files[0..maxFiles-1] là mới nhất
     await Promise.all(
       toDelete.map(async (f) => {
-        await drive.files.delete({ fileId: f.id! });
+        await drive.files.delete({ fileId: f.id!, supportsAllDrives: true });
         this.logger.log(`🗑️  Deleted old backup: ${f.name}`);
       }),
     );
