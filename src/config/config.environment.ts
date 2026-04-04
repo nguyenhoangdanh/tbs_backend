@@ -61,7 +61,11 @@ export class EnvironmentConfig {
   }
 
   get isProduction(): boolean {
-    return this.nodeEnv === 'production';
+    // Check NODE_ENV first, then fall back to Railway-specific indicators
+    if (this.nodeEnv === 'production') return true;
+    if (process.env.RAILWAY_ENVIRONMENT === 'production') return true;
+    if (process.env.RAILWAY_SERVICE_ID) return true;
+    return false;
   }
 
   get databaseUrl(): string {
@@ -89,12 +93,21 @@ export class EnvironmentConfig {
   }
 
   get cookieDomain(): string {
-    // ✅ ALWAYS return empty - never set domain
+    // ALWAYS return empty - never set domain
     return '';
   }
 
   get cookieSecure(): boolean {
-    return this.configService.get<string>('COOKIE_SECURE') === 'true';
+    const override = process.env.COOKIE_SECURE;
+    if (override === 'true') return true;
+    if (override === 'false') return false;
+    return this.isProduction;
+  }
+
+  get cookieSameSite(): 'none' | 'lax' | 'strict' {
+    const override = process.env.COOKIE_SAME_SITE as 'none' | 'lax' | 'strict' | undefined;
+    if (override === 'none' || override === 'lax' || override === 'strict') return override;
+    return this.isProduction ? 'none' : 'lax';
   }
 
   get allowedOrigins(): string[] {

@@ -547,33 +547,20 @@ export class AuthService {
 
   private setAuthCookie(response: Response, token: string, rememberMe = false, deviceInfo?: any) {
     const maxAge = rememberMe
-      ? 30 * 24 * 60 * 60 * 1000  // 30 days
-      : 7 * 24 * 60 * 60 * 1000;  // 7 days
+      ? 30 * 24 * 60 * 60 * 1000
+      : 7 * 24 * 60 * 60 * 1000;
 
-    const isProduction = this.envConfig.isProduction;
-
-    // ✅ CRITICAL FIX: Use proper production settings
     const cookieOptions = {
       httpOnly: true,
-      secure: isProduction, // ✅ MUST be true for HTTPS in production
-      sameSite: isProduction ? 'none' as const : 'lax' as const, // ✅ CRITICAL: Use 'none' for cross-origin in production
+      secure: this.envConfig.cookieSecure,
+      sameSite: this.envConfig.cookieSameSite,
       maxAge,
       path: '/',
-      // ✅ NEVER set domain - let browser handle it
+      // NO domain — let the browser scope it to the backend host automatically
     };
-   
 
-    // ✅ Set cookie with proper production settings
     response.cookie('access_token', token, cookieOptions);
-    
-    // ✅ ALWAYS set fallback header in production
-    if (isProduction) {
-      response.setHeader('X-Access-Token', token);
-      response.setHeader('X-Cookie-Fallback', 'true');
-      response.setHeader('X-Cookie-Settings', JSON.stringify(cookieOptions));
-    }
 
-    // ✅ For iOS: Set additional fallback
     if (deviceInfo?.isIOSSafari) {
       response.setHeader('X-iOS-Fallback', 'true');
       response.setHeader('X-iOS-Version', deviceInfo.version || 'unknown');
@@ -581,13 +568,12 @@ export class AuthService {
   }
 
   private setRefreshCookie(response: Response, refreshToken: string, rememberMe = false) {
-    const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days for refresh token
-    const isProduction = this.envConfig.isProduction;
+    const maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
 
     const cookieOptions = {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' as const : 'lax' as const,
+      secure: this.envConfig.cookieSecure,
+      sameSite: this.envConfig.cookieSameSite,
       maxAge,
       path: '/',
     };
@@ -595,40 +581,19 @@ export class AuthService {
     response.cookie('refresh_token', refreshToken, cookieOptions);
   }
 
-  private clearAuthCookie(response: Response, deviceInfo?: any) {
-    const isProduction = this.envConfig.isProduction;
-    
+  private clearAuthCookie(response: Response, _deviceInfo?: any) {
     const cookieOptions = {
       httpOnly: true,
-      secure: isProduction,
-      sameSite: isProduction ? 'none' as const : 'lax' as const,
+      secure: this.envConfig.cookieSecure,
+      sameSite: this.envConfig.cookieSameSite,
       path: '/',
     };
 
-    this.logger.log('Clearing auth cookies:', cookieOptions);
-
-    // Clear both access and refresh token cookies
     response.clearCookie('access_token', cookieOptions);
     response.clearCookie('refresh_token', cookieOptions);
-    
-    // Additional clearing methods
-    if (isProduction) {
-      response.clearCookie('access_token', { path: '/' });
-      response.clearCookie('refresh_token', { path: '/' });
-      response.clearCookie('access_token');
-      response.clearCookie('refresh_token');
-      
-      // Set expired cookies
-      response.cookie('access_token', '', {
-        ...cookieOptions,
-        expires: new Date(0),
-        maxAge: 0
-      });
-      response.cookie('refresh_token', '', {
-        ...cookieOptions,
-        expires: new Date(0),
-        maxAge: 0
-      });
-    }
+
+    // Belt-and-suspenders: also expire them explicitly
+    response.cookie('access_token', '', { ...cookieOptions, expires: new Date(0), maxAge: 0 });
+    response.cookie('refresh_token', '', { ...cookieOptions, expires: new Date(0), maxAge: 0 });
   }
 }
