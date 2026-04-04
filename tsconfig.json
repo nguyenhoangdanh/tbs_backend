@@ -12,6 +12,7 @@
     "rootDir": "./",
     "baseUrl": "./",
     "incremental": true,
+    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
     "skipLibCheck": true,
     "strictNullChecks": false,
     "noImplicitAny": false,
@@ -20,9 +21,8 @@
     "noFallthroughCasesInSwitch": false,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "downlevelIteration": true,
-    "lib": ["ES2021", "DOM"]
+    "lib": ["ES2021"]
   },
   "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "test"]
+  "exclude": ["node_modules", "dist", "test", "prisma"]
 }
