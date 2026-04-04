@@ -44,8 +44,7 @@ export class HealthcareCron {
     }
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
-    const today = format(new Date(), 'yyyy-MM-dd');
-    const fileName = `lichsu_kham_${today}.xlsx`;
+    const fileName = `lichsu_kham_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.xlsx`;
 
     this.logger.log(`📋 Exporting all medical records → ${fileName}`);
     const buffer = await this.healthcareService.exportMedicalRecordsExcel();
