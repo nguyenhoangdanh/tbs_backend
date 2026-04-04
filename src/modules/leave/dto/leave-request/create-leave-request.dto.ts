@@ -27,10 +27,6 @@ export class CreateLeaveRequestDto {
   @IsString()
   attachmentUrl?: string; // URL file đính kèm (giấy viện, ...)
 
-  @IsOptional()
-  @IsBoolean()
-  notifyByEmail?: boolean = false;
-
   /** Nếu true → submit ngay (status = PENDING), false → lưu nháp (DRAFT) */
   @IsOptional()
   @IsBoolean()

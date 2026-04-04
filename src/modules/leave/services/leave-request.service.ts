@@ -124,7 +124,6 @@ export class LeaveRequestService {
         status,
         submittedAt: status !== 'DRAFT' ? new Date() : null,
         approvedAt: status === 'APPROVED' ? new Date() : null,
-        notifyByEmail: dto.notifyByEmail ?? false,
       },
       include: this.requestInclude(),
     });
@@ -167,7 +166,6 @@ export class LeaveRequestService {
     if (dto.endHalfDay !== undefined) updateData.endHalfDay = dto.endHalfDay;
     if (dto.reason !== undefined) updateData.reason = dto.reason;
     if (dto.attachmentUrl !== undefined) updateData.attachmentUrl = dto.attachmentUrl;
-    if (dto.notifyByEmail !== undefined) updateData.notifyByEmail = dto.notifyByEmail;
 
     return this.prisma.leaveRequest.update({
       where: { id: requestId },

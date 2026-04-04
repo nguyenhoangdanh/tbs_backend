@@ -34,7 +34,6 @@ export class LeaveFlowService {
             substitute2Id: l.substitute2Id ?? null,
             timeoutHours: l.timeoutHours ?? null,
             timeoutAction: (l.timeoutAction as any) ?? 'NOTIFY_ONLY',
-            notifyByEmail: l.notifyByEmail ?? false,
             canViewAllRequests: l.canViewAllRequests ?? false,
           })),
         },
@@ -218,7 +217,6 @@ export class LeaveFlowService {
           substitute2Id: l.substitute2Id ?? null,
           timeoutHours: l.timeoutHours ?? null,
           timeoutAction: (l.timeoutAction as any) ?? 'NOTIFY_ONLY',
-          notifyByEmail: l.notifyByEmail ?? false,
           canViewAllRequests: l.canViewAllRequests ?? false,
         })),
       });

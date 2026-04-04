@@ -43,10 +43,6 @@ export class CreateLeaveFlowLevelDto {
 
   @IsOptional()
   @IsBoolean()
-  notifyByEmail?: boolean;
-
-  @IsOptional()
-  @IsBoolean()
   canViewAllRequests?: boolean;
 }
 
