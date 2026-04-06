@@ -620,6 +620,71 @@ export class LeaveRequestService {
     return `LR-${year}-${String(count + 1).padStart(5, '0')}`;
   }
 
+  async getApprovedByMe(
+    approverId: string,
+    companyId: string,
+    params: { year?: number; page?: number; limit?: number } = {},
+  ) {
+    const { year = new Date().getFullYear(), page = 1, limit = 20 } = params;
+    const skip = (page - 1) * limit;
+
+    const where = {
+      approverId,
+      request: {
+        companyId,
+        submittedAt: {
+          gte: new Date(`${year}-01-01`),
+          lt: new Date(`${year + 1}-01-01`),
+        },
+      },
+    };
+
+    const [approvals, total] = await Promise.all([
+      this.prisma.leaveApproval.findMany({
+        where,
+        orderBy: { actionAt: 'desc' },
+        skip,
+        take: limit,
+        select: {
+          id: true,
+          level: true,
+          action: true,
+          actionAt: true,
+          request: {
+            select: {
+              id: true,
+              requestNumber: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              totalDays: true,
+              reason: true,
+              submittedAt: true,
+              user: { select: { id: true, firstName: true, lastName: true, employeeCode: true } },
+              leaveType: { select: { id: true, name: true, nameVi: true, code: true } },
+            },
+          },
+        },
+      }),
+      this.prisma.leaveApproval.count({ where }),
+    ]);
+
+    const data = approvals.map(a => ({
+      ...(a.request as any),
+      myApprovalLevel: a.level,
+      myAction: a.action,
+      myActionAt: a.actionAt,
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
+  }
+
   private requestInclude() {
     return {
       leaveType: {

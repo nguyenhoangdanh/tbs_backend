@@ -24,4 +24,8 @@ export class UpdateLeaveRequestDto {
   @IsOptional()
   @IsString()
   attachmentUrl?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyByEmail?: boolean;
 }

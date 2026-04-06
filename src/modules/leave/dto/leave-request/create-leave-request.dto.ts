@@ -31,4 +31,8 @@ export class CreateLeaveRequestDto {
   @IsOptional()
   @IsBoolean()
   submitImmediately?: boolean = true;
+
+  @IsOptional()
+  @IsBoolean()
+  notifyByEmail?: boolean = false;
 }
