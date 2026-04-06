@@ -152,7 +152,7 @@ export class LeaveRequestService {
         requestNumber,
         userId,
         companyId: user.companyId,
-        leaveTypeId: dto.leaveTypeId,
+        leaveTypeId: leaveType.id,
         flowId: flow?.id ?? null,
         currentLevel: startingLevel,
         startDate,
