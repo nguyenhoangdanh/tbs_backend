@@ -1,17 +1,45 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron } from '@nestjs/schedule';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
+import { Cron, SchedulerRegistry } from '@nestjs/schedule';
 import { format } from 'date-fns';
 import { HealthcareService } from './healthcare.service';
 import { GoogleDriveService } from '../common/google-drive.service';
 
+export interface BackupRecord {
+  triggeredAt: Date;
+  triggeredBy: 'cron' | 'manual';
+  status: 'success' | 'failed';
+  fileName?: string;
+  fileId?: string;
+  error?: string;
+}
+
 @Injectable()
-export class HealthcareCron {
+export class HealthcareCron implements OnApplicationBootstrap {
   private readonly logger = new Logger(HealthcareCron.name);
+  private lastBackup: BackupRecord | null = null;
 
   constructor(
     private readonly healthcareService: HealthcareService,
     private readonly googleDriveService: GoogleDriveService,
+    private readonly schedulerRegistry: SchedulerRegistry,
   ) {}
+
+  onApplicationBootstrap() {
+    const configured = this.googleDriveService.isConfigured();
+    this.logger.log(
+      `🗓  HealthcareCron registered — Google Drive configured: ${configured}` +
+      ` | FOLDER_ID: ${process.env.GOOGLE_DRIVE_FOLDER_ID ? '✅ set' : '❌ missing'}` +
+      ` | OAUTH: ${process.env.GOOGLE_OAUTH_REFRESH_TOKEN ? '✅ set' : '—'}` +
+      ` | SERVICE_ACCOUNT: ${process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY ? '✅ set' : '—'}`,
+    );
+
+    try {
+      const job = this.schedulerRegistry.getCronJob('backupMedicalRecordsToGoogleDrive');
+      this.logger.log(`⏰ Next cron run: ${job.nextDate()}`);
+    } catch {
+      this.logger.warn('⚠️  Could not read nextDate from cron job — check SchedulerRegistry');
+    }
+  }
 
   /**
    * Chạy lúc 9:00 PM giờ Việt Nam (UTC+7) = 14:00 UTC mỗi ngày.
@@ -23,23 +51,56 @@ export class HealthcareCron {
   })
   async handleDailyBackup(): Promise<void> {
     this.logger.log('⏰ [Cron] 9 PM VN — Starting daily medical records backup...');
+    const triggeredAt = new Date();
     try {
-      const result = await this.runBackup();
+      const result = await this.runBackupInternal();
+      this.lastBackup = { triggeredAt, triggeredBy: 'cron', status: 'success', ...result };
       this.logger.log(`✅ [Cron] Backup complete: ${result.fileName} (Drive id: ${result.fileId})`);
     } catch (err) {
-      this.logger.error(`❌ [Cron] Backup failed: ${(err as Error).message}`);
+      const error = (err as Error).message;
+      this.lastBackup = { triggeredAt, triggeredBy: 'cron', status: 'failed', error };
+      this.logger.error(`❌ [Cron] Backup failed: ${error}`);
     }
   }
 
-  /**
-   * Chạy backup thủ công (dùng cho API trigger từ frontend).
-   * Xuất toàn bộ lịch sử khám bệnh, upload lên Google Drive,
-   * giữ tối đa 3 file gần nhất trong folder.
-   */
+  /** Dùng cho API trigger thủ công — throws lỗi để caller biết chi tiết. */
   async runBackup(): Promise<{ fileName: string; fileId: string }> {
+    const triggeredAt = new Date();
+    try {
+      const result = await this.runBackupInternal();
+      this.lastBackup = { triggeredAt, triggeredBy: 'manual', status: 'success', ...result };
+      return result;
+    } catch (err) {
+      const error = (err as Error).message;
+      this.lastBackup = { triggeredAt, triggeredBy: 'manual', status: 'failed', error };
+      throw err;
+    }
+  }
+
+  getStatus(): {
+    driveConfigured: boolean;
+    envVars: Record<string, boolean>;
+    lastBackup: BackupRecord | null;
+  } {
+    return {
+      driveConfigured: this.googleDriveService.isConfigured(),
+      envVars: {
+        GOOGLE_DRIVE_FOLDER_ID: !!(process.env.GOOGLE_DRIVE_FOLDER_ID),
+        GOOGLE_OAUTH_REFRESH_TOKEN: !!(process.env.GOOGLE_OAUTH_REFRESH_TOKEN),
+        GOOGLE_OAUTH_CLIENT_ID: !!(process.env.GOOGLE_OAUTH_CLIENT_ID),
+        GOOGLE_OAUTH_CLIENT_SECRET: !!(process.env.GOOGLE_OAUTH_CLIENT_SECRET),
+        GOOGLE_SERVICE_ACCOUNT_EMAIL: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
+        GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: !!(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY),
+      },
+      lastBackup: this.lastBackup,
+    };
+  }
+
+  private async runBackupInternal(): Promise<{ fileName: string; fileId: string }> {
     if (!this.googleDriveService.isConfigured()) {
       throw new Error(
-        'Google Drive chưa được cấu hình. Cần set GOOGLE_SERVICE_ACCOUNT_EMAIL, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY, GOOGLE_DRIVE_FOLDER_ID trong env.',
+        'Google Drive chưa được cấu hình. Kiểm tra Railway env vars: ' +
+        'GOOGLE_DRIVE_FOLDER_ID, GOOGLE_OAUTH_REFRESH_TOKEN (hoặc GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY).',
       );
     }
 
@@ -52,7 +113,6 @@ export class HealthcareCron {
     this.logger.log(`📤 Uploading to Google Drive folder: ${folderId}`);
     const fileId = await this.googleDriveService.uploadExcelFile(fileName, buffer, folderId);
 
-    // Chỉ giữ 3 file gần nhất, xóa file cũ hơn
     await this.googleDriveService.keepOnlyLatestFiles(folderId, 3);
 
     return { fileName, fileId };

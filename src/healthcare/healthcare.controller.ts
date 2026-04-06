@@ -328,7 +328,17 @@ export class HealthcareController {
     return this.healthcareService.importMedicalRecordsExcel(file.buffer);
   }
 
-  // ─── Backup toàn bộ lịch sử khám lên Google Drive ────────────────────────
+  // ─── Backup status + trigger ────────────────────────────────────────────────
+  @Get('backup/status')
+  @RequirePermissions('healthcare:manage')
+  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
+  @ApiOperation({
+    summary: 'Kiểm tra trạng thái cấu hình Google Drive và lần backup gần nhất',
+  })
+  async getBackupStatus() {
+    return this.healthcareCron.getStatus();
+  }
+
   @Post('backup/trigger')
   @RequirePermissions('healthcare:manage')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
