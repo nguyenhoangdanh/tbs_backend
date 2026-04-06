@@ -766,29 +766,52 @@ let departmentId: string | null = null;
             password: '123456',
           };
 
-          // Create user with additional fields — strip 'role' (not a User scalar field)
+          // Upsert user — update if employeeCode+companyId already exists, create otherwise
           const { role: userRole, ...userFields } = createUserDto;
           const hashedPassword = await bcrypt.hash('123456', 10);
-          const createdUser = await this.prisma.user.create({
-            data: {
-              ...userFields,
-              password: hashedPassword,
-              dateOfBirth: dateOfBirthIso ? new Date(dateOfBirthIso) : undefined,
-              joinDate: joinDateIso ? new Date(joinDateIso) : undefined,
-              sex,
-              isActive: true,
-              companyId: office.companyId,
+          const upsertData = {
+            ...userFields,
+            dateOfBirth: dateOfBirthIso ? new Date(dateOfBirthIso) : undefined,
+            joinDate: joinDateIso ? new Date(joinDateIso) : undefined,
+            sex,
+            isActive: true,
+            companyId: office.companyId,
+          };
+          const createdUser = await this.prisma.user.upsert({
+            where: {
+              employeeCode_companyId: {
+                employeeCode: msnv,
+                companyId: office.companyId,
+              },
+            },
+            create: { ...upsertData, password: hashedPassword },
+            update: {
+              firstName: upsertData.firstName,
+              lastName: upsertData.lastName,
+              phone: upsertData.phone,
+              jobPositionId: upsertData.jobPositionId,
+              officeId: upsertData.officeId,
+              dateOfBirth: upsertData.dateOfBirth,
+              joinDate: upsertData.joinDate,
+              sex: upsertData.sex,
             },
           });
 
-          // Assign role via UserRole table
+          // Assign role via UserRole table (upsert to avoid duplicates)
           if (userRole) {
             const roleDef = await this.prisma.roleDefinition.findUnique({
               where: { code: userRole },
             });
             if (roleDef) {
-              await this.prisma.userRole.create({
-                data: { userId: createdUser.id, roleDefinitionId: roleDef.id },
+              await this.prisma.userRole.upsert({
+                where: {
+                  userId_roleDefinitionId: {
+                    userId: createdUser.id,
+                    roleDefinitionId: roleDef.id,
+                  },
+                },
+                create: { userId: createdUser.id, roleDefinitionId: roleDef.id },
+                update: {},
               });
             }
           }
