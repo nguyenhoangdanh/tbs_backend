@@ -30,13 +30,54 @@ export class LeaveRequestService {
       select: { id: true, companyId: true, officeId: true, jobPositionId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
     });
 
-    const leaveType = await this.prisma.leaveType.findFirst({
+    let leaveType = await this.prisma.leaveType.findFirst({
       where: {
         id: dto.leaveTypeId,
         isActive: true,
         OR: [{ companyId: null }, { companyId: user.companyId }],
       },
     });
+
+    // If not found as a LeaveType, the frontend may have sent a LeaveTypeCategory id
+    // (this happens when the category has no leaf types, e.g. "Việc riêng - VR").
+    // Find-or-create a default leaf LeaveType for that category.
+    if (!leaveType) {
+      const category = await this.prisma.leaveTypeCategory.findFirst({
+        where: {
+          id: dto.leaveTypeId,
+          isActive: true,
+          OR: [{ companyId: null }, { companyId: user.companyId }],
+        },
+      });
+      if (!category) throw new NotFoundException('Loại phép không tồn tại');
+
+      // Try to find an existing default leaf type for this category
+      leaveType = await this.prisma.leaveType.findFirst({
+        where: {
+          categoryId: category.id,
+          code: category.code,
+          OR: [{ companyId: null }, { companyId: user.companyId }],
+        },
+      });
+
+      // Auto-create one if it doesn't exist yet
+      if (!leaveType) {
+        leaveType = await this.prisma.leaveType.create({
+          data: {
+            categoryId: category.id,
+            code: category.code,
+            name: category.name,
+            nameVi: category.nameVi,
+            companyId: category.companyId,
+            isActive: true,
+            isPaid: false,
+            countWorkingDaysOnly: false,
+            allowHalfDay: true,
+          },
+        });
+      }
+    }
+
     if (!leaveType) throw new NotFoundException('Loại phép không tồn tại');
 
     const startDate = new Date(dto.startDate);
@@ -124,6 +165,7 @@ export class LeaveRequestService {
         status,
         submittedAt: status !== 'DRAFT' ? new Date() : null,
         approvedAt: status === 'APPROVED' ? new Date() : null,
+        notifyByEmail: dto.notifyByEmail ?? false,
       },
       include: this.requestInclude(),
     });
@@ -166,6 +208,7 @@ export class LeaveRequestService {
     if (dto.endHalfDay !== undefined) updateData.endHalfDay = dto.endHalfDay;
     if (dto.reason !== undefined) updateData.reason = dto.reason;
     if (dto.attachmentUrl !== undefined) updateData.attachmentUrl = dto.attachmentUrl;
+    if (dto.notifyByEmail !== undefined) updateData.notifyByEmail = dto.notifyByEmail;
 
     return this.prisma.leaveRequest.update({
       where: { id: requestId },
