@@ -174,7 +174,6 @@ model Position {
   level            Int           @default(0)
   priority         Int           @default(0)
   isManagement     Boolean       @default(false)
-  isReportable     Boolean       @default(true)
   canViewHierarchy Boolean       @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -207,8 +206,6 @@ model User {
   gatePassApprovals  GatePassApproval[]         @relation("GatePassApprovals")
   gatePasses         GatePass[]
   ledGroups          Group[]                    @relation("GroupLeader")
-  reports            Report[]
-  evaluations        TaskEvaluation[]
   managedDepartments UserDepartmentManagement[] @relation("UserToManagedDepartments")
   company            Company                    @relation(fields: [companyId], references: [id])
   group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
@@ -251,72 +248,6 @@ model User {
   @@index([firstName, lastName])
   @@index([groupId])
   @@map("users")
-}
-
-model Report {
-  id          String       @id @default(uuid())
-  weekNumber  Int
-  year        Int
-  userId      String
-  isCompleted Boolean      @default(false)
-  isLocked    Boolean      @default(false)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  tasks       ReportTask[]
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([weekNumber, year, userId])
-  @@index([userId])
-  @@index([year, weekNumber])
-  @@index([isCompleted])
-  @@index([isLocked])
-  @@index([createdAt])
-  @@map("reports")
-}
-
-model ReportTask {
-  id            String           @id @default(uuid())
-  reportId      String
-  taskName      String
-  monday        Boolean          @default(false)
-  tuesday       Boolean          @default(false)
-  wednesday     Boolean          @default(false)
-  thursday      Boolean          @default(false)
-  friday        Boolean          @default(false)
-  saturday      Boolean          @default(false)
-  isCompleted   Boolean          @default(false)
-  reasonNotDone String?
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
-  report        Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
-  evaluations   TaskEvaluation[]
-
-  @@index([reportId])
-  @@index([isCompleted])
-  @@map("report_tasks")
-}
-
-model TaskEvaluation {
-  id                     String         @id @default(uuid())
-  taskId                 String
-  evaluatorId            String
-  originalIsCompleted    Boolean        @default(false)
-  evaluatedIsCompleted   Boolean        @default(false)
-  originalReasonNotDone  String?
-  evaluatedReasonNotDone String?
-  evaluatorComment       String?
-  evaluationType         EvaluationType @default(REVIEW)
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
-  evaluator              User           @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
-  task                   ReportTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@unique([taskId, evaluatorId])
-  @@index([taskId])
-  @@index([evaluatorId])
-  @@index([evaluationType])
-  @@index([createdAt])
-  @@map("task_evaluations")
 }
 
 model UserDepartmentManagement {
@@ -848,12 +779,6 @@ enum Sex {
 enum OfficeType {
   HEAD_OFFICE
   FACTORY_OFFICE
-}
-
-enum EvaluationType {
-  REVIEW
-  APPROVAL
-  REJECTION
 }
 
 enum CauseType {

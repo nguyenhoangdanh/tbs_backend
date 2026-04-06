@@ -3,10 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { ReportsModule } from './reports/reports.module';
-import { StatisticsModule } from './statistics/statistics.module';
-import { HierarchyReportsModule } from './hierarchy-reports/hierarchy-reports.module';
-import { TaskEvaluationsModule } from './task-evaluations/task-evaluations.module';
+
 import { ConfigModule } from '@nestjs/config';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
@@ -60,10 +57,6 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     // Feature modules
     AuthModule,
     UsersModule,
-    ReportsModule,
-    StatisticsModule,
-    HierarchyReportsModule,
-    TaskEvaluationsModule,
     ManufacturingModule,
     WorksheetModule,
     WebSocketModule,
