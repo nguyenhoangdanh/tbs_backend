@@ -491,6 +491,72 @@ let departmentId: string | null = null;
 
   // ========== BULK IMPORT FROM EXCEL ==========
 
+  /**
+   * Parse a date string from Excel into ISO format (yyyy-mm-dd).
+   * Handles:
+   *   - Excel serial number (e.g. 44927)
+   *   - dd/mm/yyyy or mm/dd/yyyy (auto-detected: if first part > 12 → day first)
+   *   - yyyy/mm/dd or yyyy-mm-dd
+   *   - dd-mm-yyyy
+   */
+  private parseExcelDate(raw: string): string | undefined {
+    if (!raw) return undefined;
+    const trimmed = raw.trim();
+
+    // Excel serial number
+    const num = Number(trimmed);
+    if (!isNaN(num) && num > 10000 && num < 100000) {
+      const date = new Date((num - 25569) * 86400 * 1000);
+      const y = date.getUTCFullYear();
+      const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(date.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+
+    // slash-separated
+    const slashParts = trimmed.split('/');
+    if (slashParts.length === 3) {
+      const [a, b, c] = slashParts.map((s) => s.trim());
+      if (a.length === 4) {
+        // yyyy/mm/dd
+        return `${a}-${b.padStart(2, '0')}-${c.padStart(2, '0')}`;
+      }
+      if (c.length === 4) {
+        const aNum = parseInt(a, 10);
+        const bNum = parseInt(b, 10);
+        let day: string, month: string;
+        if (aNum > 12) {
+          // a is definitely day → dd/mm/yyyy
+          day = a.padStart(2, '0');
+          month = b.padStart(2, '0');
+        } else if (bNum > 12) {
+          // b is definitely day → mm/dd/yyyy
+          month = a.padStart(2, '0');
+          day = b.padStart(2, '0');
+        } else {
+          // ambiguous → assume dd/mm/yyyy (Vietnamese default)
+          day = a.padStart(2, '0');
+          month = b.padStart(2, '0');
+        }
+        return `${c}-${month}-${day}`;
+      }
+    }
+
+    // dash-separated
+    const dashParts = trimmed.split('-');
+    if (dashParts.length === 3) {
+      const [a, b, c] = dashParts.map((s) => s.trim());
+      if (a.length === 4) {
+        return `${a}-${b.padStart(2, '0')}-${c.padStart(2, '0')}`;
+      }
+      if (c.length === 4) {
+        return `${c}-${b.padStart(2, '0')}-${a.padStart(2, '0')}`;
+      }
+    }
+
+    return undefined;
+  }
+
   async importUsersFromExcel(file: any) {
     try {
       // Read Excel file with proper options to handle styled headers
@@ -545,15 +611,18 @@ let departmentId: string | null = null;
           this.logger.debug(`Processing row ${rowNumber}: ${JSON.stringify(row)}`);
           
           // Parse 12 columns from Excel (A -> L)
-          // Try multiple possible header names in case of encoding issues
+          // Column mapping (10 columns A-J):
+          // A=MSNV, B=HỌ VÀ TÊN, C=CD, D=VTCV, E=Phòng ban,
+          // F=Trực thuộc, G=SĐT, H=Ngày tháng năm sinh, I=Ngày vào làm, J=Giới tính
           const msnv = String(row['MSNV'] || row['msnv'] || '').trim();
           const hoTen = String(row['HỌ VÀ TÊN'] || row['hoTen'] || '').trim();
-          const cd = String(row['CD'] || row['cd'] || '').trim(); // Position
-          const vtcv = String(row['VTCV'] || row['vtcv'] || '').trim(); // Job Position
+          const cd = String(row['CD'] || row['cd'] || '').trim();
+          const vtcv = String(row['VTCV'] || row['vtcv'] || '').trim();
           const phongBan = String(row['Phòng ban'] || row['phongBan'] || '').trim();
-          const trucThuoc = String(row['Trực thuộc'] || row['trucThuoc'] || '').trim(); // Office
+          const trucThuoc = String(row['Trực thuộc'] || row['trucThuoc'] || '').trim();
           const sdt = row['SĐT'] || row['sdt'] ? String(row['SĐT'] || row['sdt']).trim() : undefined;
-          const ngaySinh = row['Ngày tháng năm sinh'] || row['ngaySinh'] ? String(row['Ngày tháng năm sinh'] || row['ngaySinh']).trim() : undefined;
+          const ngaySinhRaw = row['Ngày tháng năm sinh'] || row['ngaySinh'] ? String(row['Ngày tháng năm sinh'] || row['ngaySinh']).trim() : undefined;
+          const ngayVaoLamRaw = row['Ngày vào làm'] || row['ngayVaoLam'] ? String(row['Ngày vào làm'] || row['ngayVaoLam']).trim() : undefined;
           const gioiTinh = row['Giới tính'] || row['gioiTinh'] ? String(row['Giới tính'] || row['gioiTinh']).trim() : undefined;
 
           this.logger.debug(`Parsed values - MSNV: ${msnv}, Họ tên: ${hoTen}, CD: ${cd}, VTCV: ${vtcv}, Phòng ban: ${phongBan}, Trực thuộc: ${trucThuoc}`);
@@ -631,15 +700,9 @@ let departmentId: string | null = null;
             );
           }
 
-          // Parse date of birth (dd/mm/yyyy)
-          let dateOfBirth: string | undefined;
-          if (ngaySinh) {
-            const parts = ngaySinh.split('/');
-            if (parts.length === 3) {
-              const [day, month, year] = parts;
-              dateOfBirth = `${year}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
-            }
-          }
+          // Parse date of birth and join date using smart format detection
+          const dateOfBirthIso = this.parseExcelDate(ngaySinhRaw || '');
+          const joinDateIso = this.parseExcelDate(ngayVaoLamRaw || '');
 
           // Parse sex
           let sex: Sex | undefined;
@@ -676,7 +739,8 @@ let departmentId: string | null = null;
             data: {
               ...userFields,
               password: hashedPassword,
-              dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : undefined,
+              dateOfBirth: dateOfBirthIso ? new Date(dateOfBirthIso) : undefined,
+              joinDate: joinDateIso ? new Date(joinDateIso) : undefined,
               sex,
               isActive: true,
               companyId: office.companyId,
@@ -725,10 +789,8 @@ let departmentId: string | null = null;
         'Phòng ban': 'Phòng Kinh doanh',
         'Trực thuộc': 'VPĐH TH',
         'SĐT': '0123456789',
-        'Cán bộ quản lý trực tiếp Cấp 1': 'NV002',
-        'Cán bộ quản lý trực tiếp Cấp 2': 'NV003',
-        'Cán bộ quản lý trực tiếp Cấp 3': '',
         'Ngày tháng năm sinh': '01/01/1990',
+        'Ngày vào làm': '01/06/2020',
         'Giới tính': 'Nam',
       },
       {
@@ -739,10 +801,8 @@ let departmentId: string | null = null;
         'Phòng ban': 'Phòng Sản xuất',
         'Trực thuộc': 'NM TS1',
         'SĐT': '0987654321',
-        'Cán bộ quản lý trực tiếp Cấp 1': 'TT001',
-        'Cán bộ quản lý trực tiếp Cấp 2': '',
-        'Cán bộ quản lý trực tiếp Cấp 3': '',
         'Ngày tháng năm sinh': '15/05/1995',
+        'Ngày vào làm': '10/03/2022',
         'Giới tính': 'Nữ',
       },
     ];
