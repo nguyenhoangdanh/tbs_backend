@@ -559,30 +559,33 @@ let departmentId: string | null = null;
 
   async importUsersFromExcel(file: any) {
     try {
-      // Read Excel file with proper options to handle styled headers
-      const workbook = XLSX.read(file.buffer, { 
+      // Read Excel file — parse by column position to avoid header encoding issues
+      const workbook = XLSX.read(file.buffer, {
         type: 'buffer',
-        cellStyles: true, // Read cell styles
-        cellDates: true, // Parse dates
+        cellDates: true,
+        raw: false,
       });
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
-      
-      // Parse rows with defval to handle empty cells
-      const rows: any[] = XLSX.utils.sheet_to_json(sheet, {
-        defval: '', // Default value for empty cells
-        raw: false, // Format cell values
+
+      // header:1 → returns raw arrays; first element of each row is col A value
+      const allRows: any[][] = XLSX.utils.sheet_to_json(sheet, {
+        header: 1,
+        defval: '',
+        raw: false,
       });
 
-      // Debug: Log first row to check headers
-      this.logger.debug(`Total rows from Excel: ${rows.length}`);
-      if (rows.length > 0) {
-        this.logger.debug(`First row keys: ${Object.keys(rows[0]).join(', ')}`);
-        this.logger.debug(`First row data: ${JSON.stringify(rows[0])}`);
+      // Skip header row (index 0)
+      const dataRows = allRows.slice(1).filter((r) => r.some((c) => String(c).trim() !== ''));
+
+      this.logger.debug(`Total data rows from Excel: ${dataRows.length}`);
+      if (dataRows.length > 0) {
+        this.logger.debug(`Header row: ${JSON.stringify(allRows[0])}`);
+        this.logger.debug(`First data row: ${JSON.stringify(dataRows[0])}`);
       }
 
       const results = {
-        total: rows.length,
+        total: dataRows.length,
         success: 0,
         failed: 0,
         errors: [] as any[],
@@ -602,28 +605,46 @@ let departmentId: string | null = null;
         }),
       ]);
 
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
+      for (let i = 0; i < dataRows.length; i++) {
+        const cols = dataRows[i];
         const rowNumber = i + 2; // Excel row number (1-based + header)
 
         try {
-          // Debug: Log raw row data
-          this.logger.debug(`Processing row ${rowNumber}: ${JSON.stringify(row)}`);
-          
-          // Parse 12 columns from Excel (A -> L)
-          // Column mapping (10 columns A-J):
-          // A=MSNV, B=HỌ VÀ TÊN, C=CD, D=VTCV, E=Phòng ban,
-          // F=Trực thuộc, G=SĐT, H=Ngày tháng năm sinh, I=Ngày vào làm, J=Giới tính
-          const msnv = String(row['MSNV'] || row['msnv'] || '').trim();
-          const hoTen = String(row['HỌ VÀ TÊN'] || row['hoTen'] || '').trim();
-          const cd = String(row['CD'] || row['cd'] || '').trim();
-          const vtcv = String(row['VTCV'] || row['vtcv'] || '').trim();
-          const phongBan = String(row['Phòng ban'] || row['phongBan'] || '').trim();
-          const trucThuoc = String(row['Trực thuộc'] || row['trucThuoc'] || '').trim();
-          const sdt = row['SĐT'] || row['sdt'] ? String(row['SĐT'] || row['sdt']).trim() : undefined;
-          const ngaySinhRaw = row['Ngày tháng năm sinh'] || row['ngaySinh'] ? String(row['Ngày tháng năm sinh'] || row['ngaySinh']).trim() : undefined;
-          const ngayVaoLamRaw = row['Ngày vào làm'] || row['ngayVaoLam'] ? String(row['Ngày vào làm'] || row['ngayVaoLam']).trim() : undefined;
-          const gioiTinh = row['Giới tính'] || row['gioiTinh'] ? String(row['Giới tính'] || row['gioiTinh']).trim() : undefined;
+          this.logger.debug(`Processing row ${rowNumber}: ${JSON.stringify(cols)}`);
+
+          // Column positions (0-indexed): A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9
+          // Supports both 10-col (new) and 12-col legacy (3 manager cols at G/H/I, date at J, sex at K)
+          const msnv = String(cols[0] ?? '').trim();
+          const hoTen = String(cols[1] ?? '').trim();
+          const cd = String(cols[2] ?? '').trim();
+          const vtcv = String(cols[3] ?? '').trim();
+          const phongBan = String(cols[4] ?? '').trim();
+          const trucThuoc = String(cols[5] ?? '').trim();
+          const sdt = String(cols[6] ?? '').trim() || undefined;
+
+          // Detect layout: 12-col (legacy) has manager cols at index 7/8/9 (skip them)
+          // 10-col (new): index 7=Ngày sinh, 8=Ngày vào làm, 9=Giới tính
+          // Heuristic: if col[7] looks like a name/code (not a date), it's legacy 12-col
+          const col7 = String(cols[7] ?? '').trim();
+          const looksLikeDate = (val: string) =>
+            /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(val) ||
+            /^\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2}$/.test(val) ||
+            /^\d{5}$/.test(val); // Excel serial
+
+          let ngaySinhRaw: string | undefined;
+          let ngayVaoLamRaw: string | undefined;
+          let gioiTinh: string | undefined;
+
+          if (!col7 || looksLikeDate(col7)) {
+            // 10-col new layout
+            ngaySinhRaw = col7 || undefined;
+            ngayVaoLamRaw = String(cols[8] ?? '').trim() || undefined;
+            gioiTinh = String(cols[9] ?? '').trim() || undefined;
+          } else {
+            // 12-col legacy layout: skip cols 7,8,9 (manager codes)
+            ngaySinhRaw = String(cols[10] ?? '').trim() || undefined;
+            gioiTinh = String(cols[11] ?? '').trim() || undefined;
+          }
 
           this.logger.debug(`Parsed values - MSNV: ${msnv}, Họ tên: ${hoTen}, CD: ${cd}, VTCV: ${vtcv}, Phòng ban: ${phongBan}, Trực thuộc: ${trucThuoc}`);
 
@@ -764,7 +785,7 @@ let departmentId: string | null = null;
           results.failed++;
           results.errors.push({
             row: rowNumber,
-            employeeCode: row['MSNV'] || row['msnv'] || '',
+            employeeCode: String(cols[0] ?? '').trim(),
             error: error.message,
           });
         }
