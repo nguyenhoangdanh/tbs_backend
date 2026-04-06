@@ -317,20 +317,29 @@ export class LeaveApprovalService {
       }
       // Scope ROLE_IN_DEPARTMENT: filter by dept, then VTCV-aware
       if (el.approverMode === 'ROLE_IN_DEPARTMENT') {
-        const deptId = el.targetDepartmentId ?? approver.jobPosition?.departmentId;
-        if (deptId) {
-          // VTCV-aware: only show requests from users sharing approver's VTCV in that dept
-          // (approver's own jobName = the VTCV group they supervise)
-          const approverJobName = (approver as any).jobPosition?.jobName;
+        const approverJobName = approver.jobPosition?.jobName ?? null;
+        // Dept từ flow level hoặc dept của approver
+        const primaryDeptId = el.targetDepartmentId ?? approver.jobPosition?.departmentId;
+
+        if (primaryDeptId) {
           if (approverJobName) {
-            // Check if there are users with different VTCV in this dept with this role level
-            // We scope to: requests where user is in dept AND user's VTCV = approver's VTCV
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: deptId, jobName: approverJobName } } });
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId, jobName: approverJobName } } });
           } else {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: deptId } } });
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
           }
-          continue;
         }
+
+        // T.LINE case: approver ở ĐH LINE nhưng quản lý TỔ CD 1, 2... qua UDM
+        // Thêm requests từ các dept mà approver quản lý (khác primaryDeptId) có cùng VTCV
+        for (const { departmentId: managedDeptId } of approver.managedDepartments) {
+          if (managedDeptId === primaryDeptId) continue; // đã xử lý ở trên
+          if (approverJobName) {
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
+          } else {
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
+          }
+        }
+        continue;
       }
       // Scope DEPARTMENT_MANAGERS: VTCV-aware scoping
       if (el.approverMode === 'DEPARTMENT_MANAGERS') {
@@ -440,14 +449,35 @@ export class LeaveApprovalService {
         });
         if (!usersWithRole.length) return false;
         const userIds = usersWithRole.map(u => u.userId);
-        // VTCV-first: if requester has a VTCV, prefer approvers with same VTCV in dept
+
         const requesterJobName = requesterInfo.jobPosition?.jobName;
         if (requesterJobName) {
-          const vtcvMatch = await this.prisma.user.count({
+          // Điều kiện bắt buộc: approver phải có cùng VTCV với requester.
+          // Phòng ban: chấp nhận cùng phòng ban (TT) HOẶC quản lý phòng ban đó qua UDM (T.LINE).
+          // Không fallback sang "cùng phòng ban khác VTCV".
+
+          // Case 1: cùng dept + cùng VTCV (TT duyệt CN)
+          const sameDeptSameVtcv = await this.prisma.user.count({
             where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
           });
-          if (vtcvMatch > 0) return true;
+          if (sameDeptSameVtcv > 0) return true;
+
+          // Case 2: khác dept nhưng quản lý dept của requester qua UDM + cùng VTCV (T.LINE duyệt từ ĐH LINE)
+          const usersWithSameVtcv = await this.prisma.user.findMany({
+            where: { id: { in: userIds }, jobPosition: { jobName: requesterJobName } },
+            select: { id: true },
+          });
+          if (usersWithSameVtcv.length > 0) {
+            const vtcvUserIds = usersWithSameVtcv.map(u => u.id);
+            const managesRequesterDept = await this.prisma.userDepartmentManagement.count({
+              where: { userId: { in: vtcvUserIds }, departmentId: deptId, isActive: true },
+            });
+            if (managesRequesterDept > 0) return true;
+          }
+          return false;
         }
+
+        // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
         const inDept = await this.prisma.user.count({
           where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
         });
@@ -589,27 +619,25 @@ export class LeaveApprovalService {
           },
         });
         const approverDept = approverUser?.jobPosition?.departmentId;
+        const approverJobName = approverUser?.jobPosition?.jobName ?? null;
         const managedDepts = (approverUser as any)?.managedDepartments?.map((d: any) => d.departmentId) ?? [];
-        const inDeptOrManages = approverDept === deptId || managedDepts.includes(deptId);
-        if (!inDeptOrManages) return false;
-
-        // VTCV-aware scoping: if requester has a VTCV, check if there are role-holders
-        // in the same dept AND same VTCV. If yes, only those are eligible (not others).
         const requesterJobName = requesterInfo.jobPosition?.jobName;
-        if (requesterJobName && approverDept === deptId) {
-          const approverJobName = approverUser?.jobPosition?.jobName;
-          if (approverJobName === requesterJobName) return true; // same VTCV → eligible ✅
-          // Approver has different VTCV; check if there IS anyone with same VTCV in dept
-          const sameVtcvCount = await this.prisma.userRole.count({
-            where: {
-              roleDefinitionId,
-              isActive: true,
-              user: { jobPosition: { departmentId: deptId, jobName: requesterJobName } },
-            },
-          });
-          if (sameVtcvCount > 0) return false; // someone with same VTCV exists → this approver is wrong dept-mate
+
+        if (requesterJobName) {
+          // VTCV bắt buộc phải khớp — không chấp nhận khác VTCV dù cùng phòng ban.
+          if (approverJobName !== requesterJobName) return false;
+
+          // Cùng dept (TT duyệt CN) → eligible
+          if (approverDept === deptId) return true;
+
+          // Khác dept nhưng quản lý dept của requester qua UDM + cùng VTCV (T.LINE từ ĐH LINE)
+          if (managedDepts.includes(deptId)) return true;
+
+          return false;
         }
-        return true;
+
+        // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
+        return approverDept === deptId || managedDepts.includes(deptId);
       }
 
       case 'DEPARTMENT_MANAGERS': {
