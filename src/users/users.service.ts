@@ -709,16 +709,29 @@ let departmentId: string | null = null;
           }
 
           // Lookup JobPosition by position, jobName, and department
-          const jobPosition = jobPositions.find(
+          let jobPosition = jobPositions.find(
             (jp) =>
               jp.positionId === position.id &&
               jp.jobName.toLowerCase() === vtcv.toLowerCase() &&
               jp.departmentId === department.id
           );
           if (!jobPosition) {
-            throw new Error(
-              `Không tìm thấy vị trí công việc: ${vtcv} (${cd}) trong phòng ban ${phongBan}`
-            );
+            // Auto-create JobPosition if it doesn't exist
+            const jpCode = `${cd.toUpperCase()}_${vtcv.toUpperCase().replace(/\s+/g, '_').slice(0, 20)}`;
+            const newJp = await this.prisma.jobPosition.create({
+              data: {
+                jobName: vtcv,
+                code: jpCode,
+                positionId: position.id,
+                departmentId: department.id,
+                officeId: office.id,
+                isActive: true,
+              },
+              include: { position: true, department: true, office: true },
+            });
+            this.logger.log(`Auto-created JobPosition: ${vtcv} (${cd}) in ${phongBan}`);
+            jobPositions.push(newJp as any); // cache for subsequent rows
+            jobPosition = newJp as any;
           }
 
           // Parse date of birth and join date using smart format detection
