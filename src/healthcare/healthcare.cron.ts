@@ -105,7 +105,11 @@ export class HealthcareCron implements OnApplicationBootstrap {
     }
 
     const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
-    const fileName = `lichsu_kham_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.xlsx`;
+    // Tên file: lichsu_kham_2024-08-15_21-00.xlsx format for GMT+7 timezone
+    const now = new Date();  // this UTC
+    const vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000); // convert to VN time
+    const fileName = `lichsu_kham_${format(vnTime, 'yyyy-MM-dd_HH-mm')}.xlsx`;
+    // const fileName = `lichsu_kham_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.xlsx`;
 
     this.logger.log(`📋 Exporting all medical records → ${fileName}`);
     const buffer = await this.healthcareService.exportMedicalRecordsExcel();

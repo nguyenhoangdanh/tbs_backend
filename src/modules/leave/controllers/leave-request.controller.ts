@@ -81,6 +81,18 @@ export class LeaveRequestController {
     return this.leaveApprovalService.getPendingRequestsForApprover(approverId, companyId, cursor, limit);
   }
 
+  @Get('approved-by-me')
+  @RequirePermissions('leave-approvals:view')
+  getApprovedByMe(
+    @GetUser('id') approverId: string,
+    @GetUser('companyId') companyId: string,
+    @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year?: number,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit?: number,
+  ) {
+    return this.leaveRequestService.getApprovedByMe(approverId, companyId, { year, page, limit });
+  }
+
   // ── Duyệt hàng loạt ──────────────────────────────────────────
 
   @Post('bulk-approve')
