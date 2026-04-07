@@ -199,12 +199,27 @@ let departmentId: string | null = null;
 
     // Get full permissions (role + custom merged)
     const permissions = await this.permissionsService.getUserPermissions(user.id);
+
+    // Calculate seniority from joinDate
+    let yearsOfService: number | null = null;
+    let monthsOfService: number | null = null;
+    if (user.joinDate) {
+      const now = new Date();
+      const join = new Date(user.joinDate);
+      const totalMonths =
+        (now.getFullYear() - join.getFullYear()) * 12 +
+        (now.getMonth() - join.getMonth());
+      yearsOfService = Math.floor(totalMonths / 12);
+      monthsOfService = totalMonths % 12;
+    }
     
     return {
       ...userWithoutPassword,
       isManager: user.jobPosition.position.isManagement || user.jobPosition.position.canViewHierarchy || false,
       departmentId, // ⭐ Department ID (= Line ID for production departments)
       permissions, // ⭐ Full merged permissions (role + custom)
+      yearsOfService,   // ⭐ Thâm niên (năm)
+      monthsOfService,  // ⭐ Thâm niên (tháng lẻ)
     };
   }
 
