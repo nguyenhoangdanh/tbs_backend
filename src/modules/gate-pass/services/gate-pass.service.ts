@@ -13,6 +13,20 @@ const USER_SELECT = {
   jobPosition: { select: { jobName: true, department: { select: { id: true, name: true } } } },
 };
 
+const CANDIDATE_SELECT = {
+  id: true,
+  firstName: true,
+  lastName: true,
+  employeeCode: true,
+  jobPosition: {
+    select: {
+      jobName: true,
+      position: { select: { name: true, level: true } },
+      department: { select: { id: true, name: true } },
+    },
+  },
+};
+
 @Injectable()
 export class GatePassService {
   private readonly logger = new Logger(GatePassService.name);
@@ -805,5 +819,26 @@ export class GatePassService {
     }
 
     return Object.values(grouped);
+  }
+
+  /** Returns management users (isManagement=true) scoped to an office or department.
+   *  Used by the admin UI to show approver candidates when configuring approval levels. */
+  async getApproverCandidates(officeId?: string, departmentId?: string) {
+    if (!officeId && !departmentId) return [];
+
+    const jobPositionWhere = departmentId
+      ? { departmentId, position: { isManagement: true } }
+      : { department: { officeId }, position: { isManagement: true } };
+
+    const users = await this.prisma.user.findMany({
+      where: { isActive: true, jobPosition: jobPositionWhere },
+      select: CANDIDATE_SELECT,
+      orderBy: [
+        { jobPosition: { position: { level: 'asc' } } },
+        { lastName: 'asc' },
+      ],
+    });
+
+    return users;
   }
 }
