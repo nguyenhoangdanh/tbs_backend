@@ -429,13 +429,26 @@ export class GatePassService {
     // From specific configs
     for (const cfg of specificConfigs) {
       if (cfg.officeId) {
+        // Exclude depts that have their own dept-level config at this level (dept overrides office)
+        const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
+          where: {
+            department: { officeId: cfg.officeId },
+            level: cfg.level,
+            isActive: true,
+          },
+          select: { departmentId: true },
+        });
+        const overriddenDeptIds = deptsWithOwnConfig.map((d) => d.departmentId).filter(Boolean) as string[];
+
+        const userFilter = cfg.requesterJobName
+          ? { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } }
+          : { officeId: cfg.officeId };
+
         conditions.push({
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
-          user: { officeId: cfg.officeId },
-          ...(cfg.requesterJobName
-            ? { user: { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } } }
-            : { user: { officeId: cfg.officeId } }),
+          user: userFilter,
+          ...(overriddenDeptIds.length > 0 ? { NOT: { departmentId: { in: overriddenDeptIds } } } : {}),
         });
       } else if (cfg.departmentId) {
         conditions.push({
@@ -459,7 +472,18 @@ export class GatePassService {
             where: { officeId: cfg.officeId, id: { in: managedDeptIds } },
             select: { id: true },
           });
-          relevantDeptIds = deptsInOffice.map((d) => d.id);
+          // Exclude depts that have their own dept-level config at this level
+          // (dept-level config takes priority over office-level, per getApprovalConfigs)
+          const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
+            where: {
+              departmentId: { in: deptsInOffice.map((d) => d.id) },
+              level: cfg.level,
+              isActive: true,
+            },
+            select: { departmentId: true },
+          });
+          const overriddenDeptIds = new Set(deptsWithOwnConfig.map((d) => d.departmentId));
+          relevantDeptIds = deptsInOffice.map((d) => d.id).filter((id) => !overriddenDeptIds.has(id));
         } else if (cfg.departmentId && managedDeptIds.includes(cfg.departmentId)) {
           relevantDeptIds = [cfg.departmentId];
         } else {
