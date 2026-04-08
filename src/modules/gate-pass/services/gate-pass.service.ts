@@ -270,21 +270,7 @@ export class GatePassService {
     departmentId: string | null,
     officeId: string | null,
   ) {
-    // Try office-level config first
-    if (officeId) {
-      const officeConfigs = await this.prisma.gatePassApprovalConfig.findMany({
-        where: { officeId, isActive: true },
-        orderBy: { level: 'asc' },
-        include: {
-          approver: { select: USER_SELECT },
-          substitute: { select: USER_SELECT },
-          office: { select: { id: true, name: true } },
-        },
-      });
-      if (officeConfigs.length > 0) return { configs: officeConfigs, configType: 'office' as const };
-    }
-
-    // Fall back to department-level config
+    // Department-level config takes precedence (more specific overrides general)
     if (departmentId) {
       const deptConfigs = await this.prisma.gatePassApprovalConfig.findMany({
         where: { departmentId, isActive: true },
@@ -295,7 +281,21 @@ export class GatePassService {
           department: { select: { id: true, name: true } },
         },
       });
-      return { configs: deptConfigs, configType: 'department' as const };
+      if (deptConfigs.length > 0) return { configs: deptConfigs, configType: 'department' as const };
+    }
+
+    // Fall back to office-level config
+    if (officeId) {
+      const officeConfigs = await this.prisma.gatePassApprovalConfig.findMany({
+        where: { officeId, isActive: true },
+        orderBy: { level: 'asc' },
+        include: {
+          approver: { select: USER_SELECT },
+          substitute: { select: USER_SELECT },
+          office: { select: { id: true, name: true } },
+        },
+      });
+      return { configs: officeConfigs, configType: 'office' as const };
     }
 
     return { configs: [], configType: null };
