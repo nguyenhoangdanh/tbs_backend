@@ -148,6 +148,15 @@ export class GatePassController {
     return this.service.getApproverCandidates(officeId, departmentId);
   }
 
+  @Get('config/job-names')
+  @RequirePermissions('gate-passes:manage')
+  getJobNames(
+    @Query('officeId') officeId?: string,
+    @Query('departmentId') departmentId?: string,
+  ) {
+    return this.service.getDistinctJobNames(officeId, departmentId);
+  }
+
   // ── Xem quy trình phê duyệt ──────────────────────────────────
 
   @Get('config/workflow-preview')

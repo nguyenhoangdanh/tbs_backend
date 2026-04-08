@@ -868,4 +868,23 @@ export class GatePassService {
 
     return users;
   }
+
+  /** Returns sorted distinct VTCV (jobName) values for a given office or department.
+   *  Used by the admin config UI for the VTCV filter dropdown. */
+  async getDistinctJobNames(officeId?: string, departmentId?: string): Promise<string[]> {
+    if (!officeId && !departmentId) return [];
+
+    const where = departmentId
+      ? { departmentId }
+      : { department: { officeId } };
+
+    const rows = await this.prisma.jobPosition.findMany({
+      where,
+      select: { jobName: true },
+      distinct: ['jobName'],
+      orderBy: { jobName: 'asc' },
+    });
+
+    return rows.map((r) => r.jobName).filter(Boolean) as string[];
+  }
 }
