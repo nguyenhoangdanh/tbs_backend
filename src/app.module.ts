@@ -17,6 +17,7 @@ import { WebSocketModule } from './modules/websocket/websocket.module';
 import { HealthcareModule } from './healthcare/healthcare.module';
 import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 import { LeaveModule } from './modules/leave/leave.module'; // ⭐ LEAVE MANAGEMENT
+import { GatePassModule } from './modules/gate-pass/gate-pass.module'; // ⭐ GATE PASS
 
 // ✅ New consolidated modules
 import { OrganizationModule } from './modules/organization/organization.module';
@@ -63,6 +64,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     HealthcareModule,
     FeedbackModule, // ⭐ NEW
     LeaveModule,    // ⭐ LEAVE MANAGEMENT
+    GatePassModule, // ⭐ GATE PASS
 
     // ✅ New consolidated modules (Use these for new development)
     OrganizationModule,

@@ -91,6 +91,8 @@ model Company {
   leaveRequests        LeaveRequest[]
   leaveBalances        LeaveBalance[]
   leaveVisibilityRules LeaveVisibilityRule[]
+  gatePassRequests     GatePass[]                @relation("GatePassCompany")
+  gatePassApprovalConfigs GatePassApprovalConfig[] @relation("GatePassApprovalConfigCompany")
 
   @@index([typeId])
   @@index([parentCompanyId])
@@ -140,6 +142,7 @@ model Office {
 
   leaveApprovalFlows   LeaveApprovalFlow[]
   leaveVisibilityRules LeaveVisibilityRule[]
+  gatePassApprovalConfigs GatePassApprovalConfig[] @relation("GatePassApprovalConfigOffice")
 
   @@unique([name, companyId])
   @@index([companyId])
@@ -161,6 +164,8 @@ model Department {
 
   leaveApprovalFlows   LeaveApprovalFlow[]
   targetApprovalLevels LeaveApprovalFlowLevel[] @relation("LevelTargetDepartment")
+  gatePassRequests     GatePass[]               @relation("GatePassDepartment")
+  gatePassApprovalConfigs GatePassApprovalConfig[] @relation("GatePassApprovalConfigDept")
 
   @@unique([name, officeId])
   @@index([officeId])
@@ -174,6 +179,7 @@ model Position {
   level            Int           @default(0)
   priority         Int           @default(0)
   isManagement     Boolean       @default(false)
+  isReportable     Boolean       @default(true)
   canViewHierarchy Boolean       @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
@@ -203,9 +209,13 @@ model User {
   createdAt          DateTime                   @default(now())
   updatedAt          DateTime                   @updatedAt
   attendanceEvents   AttendanceEvent[]
-  gatePassApprovals  GatePassApproval[]         @relation("GatePassApprovals")
-  gatePasses         GatePass[]
+  gatePassApprovals              GatePassApproval[]       @relation("GatePassApprovals")
+  gatePasses                     GatePass[]
+  gatePassApprovalConfigsOwned   GatePassApprovalConfig[] @relation("GatePassApprovalConfigApprover")
+  gatePassApprovalConfigsSub     GatePassApprovalConfig[] @relation("GatePassApprovalConfigSubstitute")
   ledGroups          Group[]                    @relation("GroupLeader")
+  reports            Report[]
+  evaluations        TaskEvaluation[]
   managedDepartments UserDepartmentManagement[] @relation("UserToManagedDepartments")
   company            Company                    @relation(fields: [companyId], references: [id])
   group              Group?                     @relation("GroupMembers", fields: [groupId], references: [id])
@@ -248,6 +258,72 @@ model User {
   @@index([firstName, lastName])
   @@index([groupId])
   @@map("users")
+}
+
+model Report {
+  id          String       @id @default(uuid())
+  weekNumber  Int
+  year        Int
+  userId      String
+  isCompleted Boolean      @default(false)
+  isLocked    Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  tasks       ReportTask[]
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([weekNumber, year, userId])
+  @@index([userId])
+  @@index([year, weekNumber])
+  @@index([isCompleted])
+  @@index([isLocked])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model ReportTask {
+  id            String           @id @default(uuid())
+  reportId      String
+  taskName      String
+  monday        Boolean          @default(false)
+  tuesday       Boolean          @default(false)
+  wednesday     Boolean          @default(false)
+  thursday      Boolean          @default(false)
+  friday        Boolean          @default(false)
+  saturday      Boolean          @default(false)
+  isCompleted   Boolean          @default(false)
+  reasonNotDone String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+  report        Report           @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  evaluations   TaskEvaluation[]
+
+  @@index([reportId])
+  @@index([isCompleted])
+  @@map("report_tasks")
+}
+
+model TaskEvaluation {
+  id                     String         @id @default(uuid())
+  taskId                 String
+  evaluatorId            String
+  originalIsCompleted    Boolean        @default(false)
+  evaluatedIsCompleted   Boolean        @default(false)
+  originalReasonNotDone  String?
+  evaluatedReasonNotDone String?
+  evaluatorComment       String?
+  evaluationType         EvaluationType @default(REVIEW)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+  evaluator              User           @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  task                   ReportTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, evaluatorId])
+  @@index([taskId])
+  @@index([evaluatorId])
+  @@index([evaluationType])
+  @@index([createdAt])
+  @@map("task_evaluations")
 }
 
 model UserDepartmentManagement {
@@ -512,22 +588,32 @@ model AttendanceEvent {
 }
 
 model GatePass {
-  id            String             @id @default(uuid())
-  passNumber    String             @unique
-  userId        String
-  reasonType    GatePassReason
-  reasonDetail  String?
-  startDateTime DateTime
-  endDateTime   DateTime
-  status        GatePassStatus     @default(PENDING)
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
-  approvals     GatePassApproval[]
-  user          User               @relation(fields: [userId], references: [id])
+  id              String         @id @default(uuid())
+  passNumber      String         @unique
+  userId          String
+  departmentId    String?        // phòng ban của người đề nghị
+  companyId       String?
+  reasonType      GatePassReason
+  reasonDetail    String?
+  destination     String?        // địa điểm
+  startDateTime   DateTime
+  endDateTime     DateTime?
+  currentLevel    Int            @default(1)  // cấp duyệt hiện tại
+  status          GatePassStatus @default(PENDING)
+  rejectionReason String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  approvals  GatePassApproval[]
+  user       User               @relation(fields: [userId], references: [id])
+  department Department?        @relation("GatePassDepartment", fields: [departmentId], references: [id])
+  company    Company?           @relation("GatePassCompany", fields: [companyId], references: [id])
 
   @@index([userId])
   @@index([status])
   @@index([startDateTime])
+  @@index([departmentId])
+  @@index([companyId])
   @@map("gate_passes")
 }
 
@@ -549,6 +635,34 @@ model GatePassApproval {
   @@index([gatePassId])
   @@index([approverId])
   @@map("gate_pass_approvals")
+}
+
+// Cấu hình quy trình phê duyệt giấy ra vào cổng theo văn phòng/phòng ban
+model GatePassApprovalConfig {
+  id               String                   @id @default(uuid())
+  officeId         String?                  // Cấu hình cấp văn phòng (NV+)
+  departmentId     String?                  // Cấu hình cấp phòng ban (CN)
+  companyId        String?
+  level            Int                      // 1 = cấp đơn vị, 2 = cấp nhà máy
+  approverType       GatePassApproverType     @default(SPECIFIC_USER)
+  approverUserId     String?                  // Bắt buộc khi approverType = SPECIFIC_USER
+  substituteUserId   String?                  // người ký thay
+  requesterJobName   String?                  // Nếu set, chỉ áp dụng cho người tạo đơn có VTCV này
+  isActive           Boolean                  @default(true)
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  office     Office?     @relation("GatePassApprovalConfigOffice", fields: [officeId], references: [id])
+  department Department? @relation("GatePassApprovalConfigDept", fields: [departmentId], references: [id])
+  approver   User?       @relation("GatePassApprovalConfigApprover", fields: [approverUserId], references: [id])
+  substitute User?       @relation("GatePassApprovalConfigSubstitute", fields: [substituteUserId], references: [id])
+  company    Company?    @relation("GatePassApprovalConfigCompany", fields: [companyId], references: [id])
+
+  @@index([officeId])
+  @@index([departmentId])
+  @@index([approverUserId])
+  @@index([companyId])
+  @@map("gate_pass_approval_configs")
 }
 
 // -------------------------------------Medical Management-------------------------------------
@@ -746,6 +860,11 @@ enum MedicalItemType {
   MEDICAL_EQUIPMENT // Vật tư y tế (XVI)
 }
 
+enum GatePassApproverType {
+  DEPARTMENT_HEAD // Tự động: tìm trưởng phòng qua UserDepartmentManagement
+  SPECIFIC_USER   // Chỉ định người duyệt cụ thể
+}
+
 enum InventoryTransactionType {
   IMPORT // Nhập kho
   EXPORT // Xuất kho (kê đơn)
@@ -779,6 +898,12 @@ enum Sex {
 enum OfficeType {
   HEAD_OFFICE
   FACTORY_OFFICE
+}
+
+enum EvaluationType {
+  REVIEW
+  APPROVAL
+  REJECTION
 }
 
 enum CauseType {

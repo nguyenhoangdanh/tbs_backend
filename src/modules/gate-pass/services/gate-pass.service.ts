@@ -301,6 +301,21 @@ export class GatePassService {
     return { configs: [], configType: null };
   }
 
+  /**
+   * Khi cùng một scope+level có nhiều config (mỗi config cho một VTCV khác nhau),
+   * chọn config phù hợp với VTCV của người tạo đơn.
+   * Ưu tiên: exact match > null (áp dụng cho tất cả).
+   */
+  private pickConfigForRequester(configs: any[], level: number, requesterJobName?: string | null) {
+    const atLevel = configs.filter((c) => c.level === level);
+    if (atLevel.length === 0) return undefined;
+    if (requesterJobName) {
+      const exact = atLevel.find((c) => c.requesterJobName === requesterJobName);
+      if (exact) return exact;
+    }
+    return atLevel.find((c) => !c.requesterJobName) ?? atLevel[0];
+  }
+
   // ── Tạo đơn xin giấy ra vào cổng ────────────────────────────
 
   async create(userId: string, dto: CreateGatePassDto) {
@@ -334,12 +349,14 @@ export class GatePassService {
       },
     });
 
+    const requesterJobName = user.jobPosition?.jobName ?? null;
+
     await this.notifyApprovers(gatePass.id, departmentId, officeId, 1, {
       type: 'GATE_PASS_PENDING_APPROVAL',
       title: 'Có giấy ra vào cổng mới cần duyệt',
       message: `${user.lastName} ${user.firstName} (${user.employeeCode}) vừa tạo giấy ra vào cổng`,
       data: { gatePassId: gatePass.id },
-    });
+    }, requesterJobName);
 
     return this.findById(gatePass.id);
   }
@@ -416,12 +433,18 @@ export class GatePassService {
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
           user: { officeId: cfg.officeId },
+          ...(cfg.requesterJobName
+            ? { user: { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } } }
+            : { user: { officeId: cfg.officeId } }),
         });
       } else if (cfg.departmentId) {
         conditions.push({
           departmentId: cfg.departmentId,
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
+          ...(cfg.requesterJobName
+            ? { user: { jobPosition: { jobName: cfg.requesterJobName } } }
+            : {}),
         });
       }
     }
@@ -519,9 +542,9 @@ export class GatePassService {
       update: { status: GatePassApprovalStatus.APPROVED, approvedAt: new Date(), approverId, comment: dto.comment },
     });
 
-    // Check if there's a next level config
+    // Check if there's a next level config (VTCV-aware)
     const { configs } = await this.getApprovalConfigs('', gatePass.departmentId, officeId);
-    const nextConfig = configs.find(c => c.level === gatePass.currentLevel + 1);
+    const nextConfig = this.pickConfigForRequester(configs, gatePass.currentLevel + 1, requesterJobName);
 
     if (nextConfig) {
       await this.prisma.gatePass.update({
@@ -534,7 +557,7 @@ export class GatePassService {
         title: `Giấy ra vào cổng chờ duyệt cấp ${nextConfig.level}`,
         message: `Giấy ra vào cổng #${gatePass.passNumber} đã qua duyệt cấp ${gatePass.currentLevel}, chờ duyệt cấp ${nextConfig.level}`,
         data: { gatePassId },
-      });
+      }, requesterJobName);
     } else {
       await this.prisma.gatePass.update({
         where: { id: gatePassId },
@@ -643,7 +666,7 @@ export class GatePassService {
     requesterJobName?: string | null,
   ): Promise<boolean> {
     const { configs } = await this.getApprovalConfigs('', departmentId, officeId);
-    const config = configs.find(c => c.level === level);
+    const config = this.pickConfigForRequester(configs, level, requesterJobName);
     if (!config) return false;
 
     if (config.approverType === 'DEPARTMENT_HEAD' && departmentId) {
@@ -659,15 +682,15 @@ export class GatePassService {
     officeId: string | null,
     level: number,
     notification: any,
+    requesterJobName?: string | null,
   ) {
     const { configs } = await this.getApprovalConfigs('', departmentId, officeId);
-    const config = configs.find(c => c.level === level);
+    const config = this.pickConfigForRequester(configs, level, requesterJobName);
     if (!config) return;
 
     let approverIds: string[] = [];
 
     if (config.approverType === 'DEPARTMENT_HEAD' && departmentId) {
-      // Resolve managers via UDM or position-based fallback
       const managers = await this.getDeptManagers(departmentId);
       approverIds = managers.map((m) => m.userId);
       if (config.substituteUserId) approverIds.push(config.substituteUserId);
@@ -714,6 +737,7 @@ export class GatePassService {
         ...(dto.officeId ? { officeId: dto.officeId } : {}),
         ...(dto.departmentId ? { departmentId: dto.departmentId } : {}),
         level: dto.level,
+        requesterJobName: dto.requesterJobName ?? null,
       },
     });
 
@@ -724,6 +748,7 @@ export class GatePassService {
           approverType: dto.approverType as any,
           approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
           substituteUserId: dto.substituteUserId ?? null,
+          requesterJobName: dto.requesterJobName ?? null,
           isActive: true,
           companyId: dto.companyId,
         },
@@ -745,6 +770,7 @@ export class GatePassService {
         approverType: dto.approverType as any,
         approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
         substituteUserId: dto.substituteUserId ?? null,
+        requesterJobName: dto.requesterJobName ?? null,
       },
       include: {
         office: { select: { id: true, name: true } },
@@ -770,6 +796,7 @@ export class GatePassService {
             : {}),
         ...(dto.substituteUserId !== undefined ? { substituteUserId: dto.substituteUserId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...('requesterJobName' in dto ? { requesterJobName: dto.requesterJobName } : {}),
       },
       include: {
         office: { select: { id: true, name: true } },
