@@ -132,6 +132,9 @@ export class LeaveFlowService {
       };
     } else if (approverMode === 'ROLE_IN_OFFICE' && officeId) {
       deptWhere = { officeId };
+    } else if (approverMode === 'ROLE_IN_DEPARTMENT' && !targetDepartmentId && officeId) {
+      // No specific dept selected → show all role holders within the scoped office as preview
+      deptWhere = { officeId };
     }
 
     // Try with dept filter first
@@ -173,16 +176,18 @@ export class LeaveFlowService {
         }
       }
 
-      // Final fallback: return all users with the role in the company (no dept restriction)
+      // Final fallback: return all users with the role scoped by office if available
+      const fallbackWhere = officeId ? { ...baseWhere, officeId } : baseWhere;
       return this.prisma.user.findMany({
-        where: baseWhere,
+        where: fallbackWhere,
         select: { id: true, firstName: true, lastName: true, employeeCode: true },
         take: 20,
       });
     }
 
+    const noScopeWhere = officeId ? { ...baseWhere, officeId } : baseWhere;
     return this.prisma.user.findMany({
-      where: baseWhere,
+      where: noScopeWhere,
       select: { id: true, firstName: true, lastName: true, employeeCode: true },
       take: 20,
     });

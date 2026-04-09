@@ -338,15 +338,15 @@ export class AuthService {
   }
 
   async logout(response: Response, deviceInfo?: any) {
-    this.logger.log('Logout request received', { 
-      deviceInfo: deviceInfo || 'unknown',
-      timestamp: new Date().toISOString()
-    });
+    // this.logger.log('Logout request received', { 
+    //   deviceInfo: deviceInfo || 'unknown',
+    //   timestamp: new Date().toISOString()
+    // });
 
     // Clear auth cookie with device info
     this.clearAuthCookie(response, deviceInfo);
 
-    this.logger.log('Auth cookie cleared successfully');
+    // this.logger.log('Auth cookie cleared successfully');
     return { message: 'Logout successful' };
   }
 
