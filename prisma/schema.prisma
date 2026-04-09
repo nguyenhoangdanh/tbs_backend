@@ -213,6 +213,8 @@ model User {
   gatePasses                     GatePass[]
   gatePassApprovalConfigsOwned   GatePassApprovalConfig[] @relation("GatePassApprovalConfigApprover")
   gatePassApprovalConfigsSub     GatePassApprovalConfig[] @relation("GatePassApprovalConfigSubstitute")
+  gatePassConfigApproverOverrides GatePassConfigApproverOverride[] @relation("GatePassConfigApproverOverrideUser")
+  gatePassConfigRequesterFilters  GatePassConfigRequesterFilter[]  @relation("GatePassConfigRequesterFilterUser")
   ledGroups          Group[]                    @relation("GroupLeader")
   reports            Report[]
   evaluations        TaskEvaluation[]
@@ -652,17 +654,49 @@ model GatePassApprovalConfig {
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
 
-  office     Office?     @relation("GatePassApprovalConfigOffice", fields: [officeId], references: [id])
-  department Department? @relation("GatePassApprovalConfigDept", fields: [departmentId], references: [id])
-  approver   User?       @relation("GatePassApprovalConfigApprover", fields: [approverUserId], references: [id])
-  substitute User?       @relation("GatePassApprovalConfigSubstitute", fields: [substituteUserId], references: [id])
-  company    Company?    @relation("GatePassApprovalConfigCompany", fields: [companyId], references: [id])
+  office            Office?     @relation("GatePassApprovalConfigOffice", fields: [officeId], references: [id])
+  department        Department? @relation("GatePassApprovalConfigDept", fields: [departmentId], references: [id])
+  approver          User?       @relation("GatePassApprovalConfigApprover", fields: [approverUserId], references: [id])
+  substitute        User?       @relation("GatePassApprovalConfigSubstitute", fields: [substituteUserId], references: [id])
+  company           Company?    @relation("GatePassApprovalConfigCompany", fields: [companyId], references: [id])
+  overrideApprovers GatePassConfigApproverOverride[]
+  requesterFilters  GatePassConfigRequesterFilter[]
 
   @@index([officeId])
   @@index([departmentId])
   @@index([approverUserId])
   @@index([companyId])
   @@map("gate_pass_approval_configs")
+}
+
+// Danh sách người duyệt ghi đè cho cấu hình DEPARTMENT_HEAD
+model GatePassConfigApproverOverride {
+  id       String @id @default(uuid())
+  configId String
+  userId   String
+
+  config GatePassApprovalConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  user   User                   @relation("GatePassConfigApproverOverrideUser", fields: [userId], references: [id])
+
+  @@unique([configId, userId])
+  @@index([configId])
+  @@index([userId])
+  @@map("gate_pass_config_approver_overrides")
+}
+
+// Danh sách người tạo đơn được áp dụng bởi cấu hình này (khi cùng phòng ban có nhiều team)
+model GatePassConfigRequesterFilter {
+  id       String @id @default(uuid())
+  configId String
+  userId   String
+
+  config GatePassApprovalConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  user   User                   @relation("GatePassConfigRequesterFilterUser", fields: [userId], references: [id])
+
+  @@unique([configId, userId])
+  @@index([configId])
+  @@index([userId])
+  @@map("gate_pass_config_requester_filters")
 }
 
 // -------------------------------------Medical Management-------------------------------------

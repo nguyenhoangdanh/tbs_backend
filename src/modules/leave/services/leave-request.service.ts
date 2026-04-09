@@ -113,7 +113,8 @@ export class LeaveRequestService {
     // Kiểm tra số ngày phép còn lại (chỉ với loại phép có số dư giới hạn)
     if (leaveType.isAccruable || leaveType.maxDaysPerYear) {
       const year = startDate.getFullYear();
-      const balance = await this.balanceService.getOrCreateBalance(userId, dto.leaveTypeId, year, user.companyId);
+      // Use leaveType.id (resolved/created leaf type), NOT dto.leaveTypeId (may be category id)
+      const balance = await this.balanceService.getOrCreateBalance(userId, leaveType.id, year, user.companyId);
       const available = this.balanceService.calcAvailable(balance);
       if (available < totalDays) {
         throw new BadRequestException(

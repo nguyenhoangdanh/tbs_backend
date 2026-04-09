@@ -144,8 +144,10 @@ export class GatePassController {
   getApproverCandidates(
     @Query('officeId') officeId?: string,
     @Query('departmentId') departmentId?: string,
+    @Query('includeAll') includeAll?: string,
+    @Query('allUsers') allUsers?: string,
   ) {
-    return this.service.getApproverCandidates(officeId, departmentId);
+    return this.service.getApproverCandidates(officeId, departmentId, includeAll === 'true', allUsers === 'true');
   }
 
   @Get('config/job-names')
@@ -157,11 +159,26 @@ export class GatePassController {
     return this.service.getDistinctJobNames(officeId, departmentId);
   }
 
+  @Get('config/dept-heads')
+  @RequirePermissions('gate-passes:manage')
+  getDeptHeads(
+    @Query('departmentId') departmentId?: string,
+    @Query('jobName') jobName?: string,
+  ) {
+    return this.service.getDeptHeadPreview(departmentId, jobName);
+  }
+
   // ── Xem quy trình phê duyệt ──────────────────────────────────
 
   @Get('config/workflow-preview')
   @RequirePermissions('gate-passes:view')
   getWorkflowPreview(@GetUser() currentUser: any, @Query('companyId') companyId?: string) {
     return this.service.getWorkflowPreview(companyId ?? currentUser?.companyId);
+  }
+
+  @Get('my-approver')
+  @RequirePermissions('gate-passes:view')
+  getMyApprover(@GetUser() currentUser: any) {
+    return this.service.getMyApprover(currentUser.id);
   }
 }

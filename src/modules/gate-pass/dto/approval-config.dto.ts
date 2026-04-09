@@ -1,4 +1,4 @@
-import { IsString, IsInt, IsOptional, IsEnum, IsBoolean, Min, Max } from 'class-validator';
+import { IsString, IsInt, IsOptional, IsEnum, IsBoolean, IsArray, Min, Max } from 'class-validator';
 
 export enum GatePassApproverTypeDto {
   DEPARTMENT_HEAD = 'DEPARTMENT_HEAD',
@@ -37,6 +37,16 @@ export class CreateApprovalConfigDto {
   @IsOptional()
   @IsString()
   requesterJobName?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  overrideApproverIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requesterFilterIds?: string[];
 }
 
 export class UpdateApprovalConfigDto {
@@ -59,4 +69,14 @@ export class UpdateApprovalConfigDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  overrideApproverIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requesterFilterIds?: string[];
 }

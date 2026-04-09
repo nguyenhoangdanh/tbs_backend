@@ -75,6 +75,8 @@ export class GatePassService {
     const approverJobName = approverUser?.jobPosition?.jobName ?? null;
     const approverIsManagement = approverUser?.jobPosition?.position?.isManagement ?? false;
     const approverLevel = approverUser?.jobPosition?.position?.level ?? 999;
+    // User must actually be in the dept to manage it via position-based fallback
+    const approverDeptId = approverUser?.jobPosition?.departmentId ?? null;
 
     const result: string[] = [];
     for (const deptId of deptIds) {
@@ -82,9 +84,9 @@ export class GatePassService {
         result.push(deptId);
         continue;
       }
-      // Position-based fallback: user must be in same dept, have isManagement=true,
+      // Position-based fallback: user must be in THIS dept, have isManagement=true,
       // and be the highest-ranked (lowest level) management user for their VTCV in this dept.
-      if (!approverIsManagement || !approverJobName) continue;
+      if (!approverIsManagement || !approverJobName || approverDeptId !== deptId) continue;
 
       const higherOrEqualMgr = await this.prisma.user.findFirst({
         where: {
@@ -155,19 +157,38 @@ export class GatePassService {
   ): Promise<boolean> {
     const managers = await this.getDeptManagers(departmentId);
     const managerIds = managers.map((m) => m.userId);
-    if (!managerIds.includes(userId)) return false;
-    if (!requesterJobName) return true;
 
-    const thisManager = managers.find((m) => m.userId === userId);
-    const managerJobName = thisManager?.jobName ?? null;
-    return this.isDeptMgrEligibleForVtcv(userId, managerJobName, departmentId, requesterJobName, managerIds);
+    if (managerIds.includes(userId)) {
+      if (!requesterJobName) return true;
+      const thisManager = managers.find((m) => m.userId === userId);
+      const managerJobName = thisManager?.jobName ?? null;
+      return this.isDeptMgrEligibleForVtcv(userId, managerJobName, departmentId, requesterJobName, managerIds);
+    }
+
+    // Not in UDM — check if they're a position-based manager (isManagement=true) for the requester's VTCV
+    if (requesterJobName) {
+      const isPosMgrForVtcv = await this.prisma.user.count({
+        where: {
+          id: userId,
+          isActive: true,
+          jobPosition: {
+            departmentId,
+            jobName: requesterJobName,
+            position: { isManagement: true },
+          },
+        },
+      });
+      return isPosMgrForVtcv > 0;
+    }
+
+    return false;
   }
 
   /**
    * VTCV-aware eligibility check (same logic as leave system):
    * - Same VTCV as requester → always eligible
    * - General manager (no non-manager workers share their VTCV) → eligible for all groups
-   *   not covered by a tech-specific TP
+   *   not covered by a tech-specific TP (UDM OR position-based)
    * - Tech-specific TP → only their own VTCV group
    */
   private async isDeptMgrEligibleForVtcv(
@@ -188,27 +209,66 @@ export class GatePassService {
     if (!isGeneralMgr) return false;
 
     // General manager: eligible unless requester's VTCV is covered by a tech-specific TP
+    // Check BOTH UDM managers AND position-based managers not in UDM
     const managers = await this.getDeptManagers(deptId);
-    const techTpForRequester = managers.find((m) => m.jobName === requesterJobName);
-    if (techTpForRequester) {
+    const techTpInUdm = managers.find((m) => m.jobName === requesterJobName);
+    if (techTpInUdm) {
       const nonMgrWithVtcv = await this.prisma.user.count({
         where: { isActive: true, jobPosition: { departmentId: deptId, jobName: requesterJobName }, id: { notIn: mgrIds } },
       });
       if (nonMgrWithVtcv > 0) return false;
     }
+
+    // Also check if there's a position-based manager (isManagement=true) for requesterJobName
+    // who is NOT in UDM — they "own" that VTCV group
+    const posMgrForVtcv = await this.prisma.user.count({
+      where: {
+        isActive: true,
+        id: { notIn: mgrIds },
+        jobPosition: { departmentId: deptId, jobName: requesterJobName, position: { isManagement: true } },
+      },
+    });
+    if (posMgrForVtcv > 0) return false;
+
     return true;
   }
 
   /**
    * Build Prisma filter conditions for pending gate passes this dept head should see.
    * VTCV-aware: tech-specific TPs see only their VTCV; general managers see all others.
+   * Checks both UDM and position-based managers.
+   * If overrideApproverIds is set, user must be in the list; conditions show passes in scope
+   * (still filtered by requesterJobName or requesterFilterIds if set).
    */
   private async buildDeptHeadPendingConditions(
     approverId: string,
     managedDeptIds: string[],
     configLevel: number,
+    overrideApproverIds?: string[],
+    requesterJobName?: string | null,
+    requesterFilterIds?: string[],
   ): Promise<any[]> {
     if (managedDeptIds.length === 0) return [];
+
+    // Build requester scope condition (requesterFilterIds > requesterJobName)
+    const requesterCondition: any = {};
+    if (requesterFilterIds && requesterFilterIds.length > 0) {
+      requesterCondition.userId = { in: requesterFilterIds };
+    } else if (requesterJobName) {
+      requesterCondition.user = { jobPosition: { jobName: requesterJobName } };
+    }
+
+    // Override list: if approverId is in the list → see passes in scope
+    if (overrideApproverIds && overrideApproverIds.length > 0) {
+      if (!overrideApproverIds.includes(approverId)) return [];
+      return managedDeptIds.map((deptId) => ({
+        departmentId: deptId,
+        currentLevel: configLevel,
+        status: GatePassStatus.PENDING,
+        NOT: { userId: approverId },
+        ...requesterCondition,
+      }));
+    }
 
     const approverUser = await this.prisma.user.findUnique({
       where: { id: approverId },
@@ -227,13 +287,22 @@ export class GatePassService {
       })) === 0;
 
       if (!isGeneralMgr) {
-        conditions.push({
+        // Tech-specific manager: only sees their VTCV, still within requester filter
+        const condition: any = {
           departmentId: deptId,
           currentLevel: configLevel,
           status: GatePassStatus.PENDING,
+          NOT: { userId: approverId },
           user: { jobPosition: { jobName: approverJobName } },
-        });
+        };
+        // If requesterFilterIds is set, further restrict to those users
+        if (requesterFilterIds && requesterFilterIds.length > 0) {
+          condition.userId = { in: requesterFilterIds };
+          delete condition.user; // userId filter takes priority
+        }
+        conditions.push(condition);
       } else {
+        // Collect VTCVs covered by tech-specific TPs (from UDM)
         const techSpecificVtcvs: string[] = [];
         for (const mgr of managers) {
           if (mgr.userId === approverId) continue;
@@ -244,8 +313,30 @@ export class GatePassService {
           });
           if (nonMgr > 0) techSpecificVtcvs.push(vtcv);
         }
-        const base: any = { departmentId: deptId, currentLevel: configLevel, status: GatePassStatus.PENDING };
-        if (techSpecificVtcvs.length > 0) {
+        // Also collect VTCVs covered by position-based managers NOT in UDM
+        const posMgrsNotInUdm = await this.prisma.jobPosition.findMany({
+          where: {
+            departmentId: deptId,
+            position: { isManagement: true },
+            users: { some: { isActive: true, id: { notIn: [...mgrIds, approverId] } } },
+          },
+          select: { jobName: true },
+          distinct: ['jobName'],
+        });
+        for (const pm of posMgrsNotInUdm) {
+          if (pm.jobName && !techSpecificVtcvs.includes(pm.jobName)) {
+            techSpecificVtcvs.push(pm.jobName);
+          }
+        }
+
+        const base: any = {
+          departmentId: deptId,
+          currentLevel: configLevel,
+          status: GatePassStatus.PENDING,
+          NOT: { userId: approverId }, // never show own pass
+          ...requesterCondition,
+        };
+        if (techSpecificVtcvs.length > 0 && !requesterCondition.userId && !requesterCondition.user) {
           base.user = { jobPosition: { jobName: { notIn: techSpecificVtcvs } } };
         }
         conditions.push(base);
@@ -270,50 +361,88 @@ export class GatePassService {
     departmentId: string | null,
     officeId: string | null,
   ) {
-    // Department-level config takes precedence (more specific overrides general)
-    if (departmentId) {
-      const deptConfigs = await this.prisma.gatePassApprovalConfig.findMany({
-        where: { departmentId, isActive: true },
-        orderBy: { level: 'asc' },
-        include: {
-          approver: { select: USER_SELECT },
-          substitute: { select: USER_SELECT },
-          department: { select: { id: true, name: true } },
-        },
-      });
-      if (deptConfigs.length > 0) return { configs: deptConfigs, configType: 'department' as const };
+    const overrideInclude = {
+      overrideApprovers: { select: { userId: true } },
+      requesterFilters: { select: { userId: true } },
+    };
+
+    // Merge dept-level and office-level configs.
+    // Dept-level takes precedence per level (replaces office-level for the same level number).
+    const deptConfigs = departmentId
+      ? await this.prisma.gatePassApprovalConfig.findMany({
+          where: { departmentId, isActive: true },
+          orderBy: { level: 'asc' },
+          include: {
+            approver: { select: USER_SELECT },
+            substitute: { select: USER_SELECT },
+            department: { select: { id: true, name: true } },
+            ...overrideInclude,
+          },
+        })
+      : [];
+
+    const officeConfigs = officeId
+      ? await this.prisma.gatePassApprovalConfig.findMany({
+          where: { officeId, isActive: true },
+          orderBy: { level: 'asc' },
+          include: {
+            approver: { select: USER_SELECT },
+            substitute: { select: USER_SELECT },
+            office: { select: { id: true, name: true } },
+            ...overrideInclude,
+          },
+        })
+      : [];
+
+    if (deptConfigs.length === 0 && officeConfigs.length === 0) {
+      return { configs: [], configType: null };
     }
 
-    // Fall back to office-level config
-    if (officeId) {
-      const officeConfigs = await this.prisma.gatePassApprovalConfig.findMany({
-        where: { officeId, isActive: true },
-        orderBy: { level: 'asc' },
-        include: {
-          approver: { select: USER_SELECT },
-          substitute: { select: USER_SELECT },
-          office: { select: { id: true, name: true } },
-        },
-      });
-      return { configs: officeConfigs, configType: 'office' as const };
-    }
+    // Build merged list: dept-level overrides office-level for the same level number
+    const deptLevels = new Set(deptConfigs.map((c) => c.level));
+    const merged = [
+      ...deptConfigs,
+      ...officeConfigs.filter((c) => !deptLevels.has(c.level)),
+    ].sort((a, b) => a.level - b.level);
 
-    return { configs: [], configType: null };
+    // Normalise: add overrideApproverIds and requesterFilterIds as string[] for easy access
+    const normalised = merged.map((c: any) => ({
+      ...c,
+      overrideApproverIds: (c.overrideApprovers ?? []).map((o: any) => o.userId),
+      requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
+    }));
+
+    const configType = deptConfigs.length > 0 ? 'department' : 'office';
+    return { configs: normalised, configType: configType as 'department' | 'office' };
   }
 
   /**
-   * Khi cùng một scope+level có nhiều config (mỗi config cho một VTCV khác nhau),
-   * chọn config phù hợp với VTCV của người tạo đơn.
-   * Ưu tiên: exact match > null (áp dụng cho tất cả).
+   * Khi cùng một scope+level có nhiều config (mỗi config cho một VTCV hoặc danh sách người dùng khác nhau),
+   * chọn config phù hợp nhất với người tạo đơn.
+   * Ưu tiên: requesterFilterIds (chứa requesterId) > requesterJobName > null (áp dụng cho tất cả).
    */
-  private pickConfigForRequester(configs: any[], level: number, requesterJobName?: string | null) {
+  private pickConfigForRequester(configs: any[], level: number, requesterJobName?: string | null, requesterId?: string) {
     const atLevel = configs.filter((c) => c.level === level);
     if (atLevel.length === 0) return undefined;
-    if (requesterJobName) {
-      const exact = atLevel.find((c) => c.requesterJobName === requesterJobName);
+
+    // Priority 1: specific requester filter containing this user
+    if (requesterId) {
+      const exact = atLevel.find(
+        (c) => c.requesterFilterIds?.length > 0 && c.requesterFilterIds.includes(requesterId),
+      );
       if (exact) return exact;
     }
-    return atLevel.find((c) => !c.requesterJobName) ?? atLevel[0];
+
+    // Priority 2: VTCV filter (no requester filter)
+    if (requesterJobName) {
+      const exact = atLevel.find(
+        (c) => c.requesterJobName === requesterJobName && !(c.requesterFilterIds?.length > 0),
+      );
+      if (exact) return exact;
+    }
+
+    // Priority 3: catch-all (no VTCV and no requester filter)
+    return atLevel.find((c) => !c.requesterJobName && !(c.requesterFilterIds?.length > 0)) ?? atLevel[0];
   }
 
   // ── Tạo đơn xin giấy ra vào cổng ────────────────────────────
@@ -356,7 +485,7 @@ export class GatePassService {
       title: 'Có giấy ra vào cổng mới cần duyệt',
       message: `${user.lastName} ${user.firstName} (${user.employeeCode}) vừa tạo giấy ra vào cổng`,
       data: { gatePassId: gatePass.id },
-    }, requesterJobName);
+    }, requesterJobName, userId);
 
     return this.findById(gatePass.id);
   }
@@ -395,22 +524,37 @@ export class GatePassService {
     const { page = 1, limit = 20 } = query;
 
     // Case 1: User is SPECIFIC_USER approver/substitute in some config
-    const specificConfigs = await this.prisma.gatePassApprovalConfig.findMany({
+    const specificConfigsRaw = await this.prisma.gatePassApprovalConfig.findMany({
       where: {
         isActive: true,
         approverType: 'SPECIFIC_USER',
         OR: [{ approverUserId: approverId }, { substituteUserId: approverId }],
       },
+      include: { requesterFilters: { select: { userId: true } } },
     });
+    const specificConfigs = specificConfigsRaw.map((c: any) => ({
+      ...c,
+      requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
+    }));
 
     // Case 2: DEPARTMENT_HEAD configs — resolve via UDM or position-based fallback
     const allDeptHeadConfigs = await this.prisma.gatePassApprovalConfig.findMany({
       where: { isActive: true, approverType: 'DEPARTMENT_HEAD' },
+      include: {
+        overrideApprovers: { select: { userId: true } },
+        requesterFilters: { select: { userId: true } },
+      },
     });
+    // Normalise overrideApproverIds and requesterFilterIds
+    const deptHeadCfgs = allDeptHeadConfigs.map((c: any) => ({
+      ...c,
+      overrideApproverIds: (c.overrideApprovers ?? []).map((o: any) => o.userId),
+      requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
+    }));
 
     // Collect all dept IDs that appear in these configs (via office or direct dept)
     const candidateDeptIds = new Set<string>();
-    for (const cfg of allDeptHeadConfigs) {
+    for (const cfg of deptHeadCfgs) {
       if (cfg.officeId) {
         const depts = await this.prisma.department.findMany({
           where: { officeId: cfg.officeId },
@@ -426,10 +570,15 @@ export class GatePassService {
 
     const conditions: any[] = [];
 
-    // From specific configs
+    // From specific configs — NEVER show the approver's own passes
     for (const cfg of specificConfigs) {
+      // Build requester scope condition (requesterFilterIds > requesterJobName)
+      const specRequesterCond: any = {};
+      if (cfg.requesterFilterIds?.length > 0) {
+        specRequesterCond.userId = { in: cfg.requesterFilterIds };
+      }
+
       if (cfg.officeId) {
-        // Exclude depts that have their own dept-level config at this level (dept overrides office)
         const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
           where: {
             department: { officeId: cfg.officeId },
@@ -440,61 +589,75 @@ export class GatePassService {
         });
         const overriddenDeptIds = deptsWithOwnConfig.map((d) => d.departmentId).filter(Boolean) as string[];
 
-        const userFilter = cfg.requesterJobName
-          ? { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } }
-          : { officeId: cfg.officeId };
+        const userFilter = cfg.requesterFilterIds?.length > 0
+          ? undefined
+          : cfg.requesterJobName
+            ? { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } }
+            : { officeId: cfg.officeId };
 
         conditions.push({
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
-          user: userFilter,
-          ...(overriddenDeptIds.length > 0 ? { NOT: { departmentId: { in: overriddenDeptIds } } } : {}),
+          ...(userFilter ? { user: userFilter } : {}),
+          ...specRequesterCond,
+          NOT: [
+            ...(overriddenDeptIds.length > 0 ? [{ departmentId: { in: overriddenDeptIds } }] : []),
+            { userId: approverId },
+          ],
         });
       } else if (cfg.departmentId) {
         conditions.push({
           departmentId: cfg.departmentId,
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
-          ...(cfg.requesterJobName
-            ? { user: { jobPosition: { jobName: cfg.requesterJobName } } }
-            : {}),
+          NOT: { userId: approverId },
+          ...(cfg.requesterFilterIds?.length > 0
+            ? { userId: { in: cfg.requesterFilterIds } }
+            : cfg.requesterJobName
+              ? { user: { jobPosition: { jobName: cfg.requesterJobName } } }
+              : {}),
         });
       }
     }
 
-    // From department head configs
-    if (managedDeptIds.length > 0) {
-      for (const cfg of allDeptHeadConfigs) {
-        let relevantDeptIds: string[];
+    // From department head configs — check both natural management and override list
+    for (const cfg of deptHeadCfgs) {
+      let scopeDeptIds: string[];
 
-        if (cfg.officeId) {
-          const deptsInOffice = await this.prisma.department.findMany({
-            where: { officeId: cfg.officeId, id: { in: managedDeptIds } },
-            select: { id: true },
-          });
-          // Exclude depts that have their own dept-level config at this level
-          // (dept-level config takes priority over office-level, per getApprovalConfigs)
-          const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
-            where: {
-              departmentId: { in: deptsInOffice.map((d) => d.id) },
-              level: cfg.level,
-              isActive: true,
-            },
-            select: { departmentId: true },
-          });
-          const overriddenDeptIds = new Set(deptsWithOwnConfig.map((d) => d.departmentId));
-          relevantDeptIds = deptsInOffice.map((d) => d.id).filter((id) => !overriddenDeptIds.has(id));
-        } else if (cfg.departmentId && managedDeptIds.includes(cfg.departmentId)) {
-          relevantDeptIds = [cfg.departmentId];
-        } else {
-          relevantDeptIds = [];
-        }
-
-        if (relevantDeptIds.length === 0) continue;
-
-        const vtcvConditions = await this.buildDeptHeadPendingConditions(approverId, relevantDeptIds, cfg.level);
-        conditions.push(...vtcvConditions);
+      if (cfg.officeId) {
+        const deptsInOffice = await this.prisma.department.findMany({
+          where: { officeId: cfg.officeId },
+          select: { id: true },
+        });
+        const allInOffice = deptsInOffice.map((d) => d.id);
+        // Exclude depts overridden by their own dept-level config
+        const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
+          where: {
+            departmentId: { in: allInOffice },
+            level: cfg.level,
+            isActive: true,
+          },
+          select: { departmentId: true },
+        });
+        const overriddenDeptIds = new Set(deptsWithOwnConfig.map((d) => d.departmentId));
+        scopeDeptIds = allInOffice.filter((id) => !overriddenDeptIds.has(id));
+      } else if (cfg.departmentId) {
+        scopeDeptIds = [cfg.departmentId];
+      } else {
+        continue;
       }
+
+      if (scopeDeptIds.length === 0) continue;
+
+      const hasOverride = cfg.overrideApproverIds.includes(approverId);
+      const naturallyManagedInScope = scopeDeptIds.filter((id) => managedDeptIds.includes(id));
+      if (!hasOverride && naturallyManagedInScope.length === 0) continue;
+
+      const relevantDeptIds = hasOverride ? scopeDeptIds : naturallyManagedInScope;
+      const vtcvConditions = await this.buildDeptHeadPendingConditions(
+        approverId, relevantDeptIds, cfg.level, cfg.overrideApproverIds, cfg.requesterJobName, cfg.requesterFilterIds,
+      );
+      conditions.push(...vtcvConditions);
     }
 
     if (conditions.length === 0) return { data: [], total: 0, page, limit };
@@ -555,9 +718,13 @@ export class GatePassService {
       throw new BadRequestException('Giấy ra vào cổng không ở trạng thái chờ duyệt');
     }
 
+    if (approverId === gatePass.userId) {
+      throw new ForbiddenException('Không thể tự duyệt đơn của chính mình');
+    }
+
     const officeId = await this.getUserOfficeId(gatePass.userId);
     const requesterJobName = (gatePass.user as any).jobPosition?.jobName ?? null;
-    const canApprove = await this.verifyApprover(approverId, gatePass.departmentId, officeId, gatePass.currentLevel, requesterJobName);
+    const canApprove = await this.verifyApprover(approverId, gatePass.departmentId, officeId, gatePass.currentLevel, requesterJobName, gatePass.userId);
     if (!canApprove) throw new ForbiddenException('Bạn không có quyền duyệt đơn này');
 
     await this.prisma.gatePassApproval.upsert({
@@ -568,7 +735,7 @@ export class GatePassService {
 
     // Check if there's a next level config (VTCV-aware)
     const { configs } = await this.getApprovalConfigs('', gatePass.departmentId, officeId);
-    const nextConfig = this.pickConfigForRequester(configs, gatePass.currentLevel + 1, requesterJobName);
+    const nextConfig = this.pickConfigForRequester(configs, gatePass.currentLevel + 1, requesterJobName, gatePass.userId);
 
     if (nextConfig) {
       await this.prisma.gatePass.update({
@@ -581,7 +748,7 @@ export class GatePassService {
         title: `Giấy ra vào cổng chờ duyệt cấp ${nextConfig.level}`,
         message: `Giấy ra vào cổng #${gatePass.passNumber} đã qua duyệt cấp ${gatePass.currentLevel}, chờ duyệt cấp ${nextConfig.level}`,
         data: { gatePassId },
-      }, requesterJobName);
+      }, requesterJobName, gatePass.userId);
     } else {
       await this.prisma.gatePass.update({
         where: { id: gatePassId },
@@ -611,7 +778,7 @@ export class GatePassService {
 
     const officeId = await this.getUserOfficeId(gatePass.userId);
     const requesterJobName = (gatePass.user as any).jobPosition?.jobName ?? null;
-    const canApprove = await this.verifyApprover(approverId, gatePass.departmentId, officeId, gatePass.currentLevel, requesterJobName);
+    const canApprove = await this.verifyApprover(approverId, gatePass.departmentId, officeId, gatePass.currentLevel, requesterJobName, gatePass.userId);
     if (!canApprove) throw new ForbiddenException('Bạn không có quyền duyệt đơn này');
 
     await this.prisma.gatePassApproval.upsert({
@@ -688,12 +855,21 @@ export class GatePassService {
     officeId: string | null,
     level: number,
     requesterJobName?: string | null,
+    requesterId?: string,
   ): Promise<boolean> {
     const { configs } = await this.getApprovalConfigs('', departmentId, officeId);
-    const config = this.pickConfigForRequester(configs, level, requesterJobName);
+    const config = this.pickConfigForRequester(configs, level, requesterJobName, requesterId);
     if (!config) return false;
 
+    // If config has requesterFilterIds and requester is not in the list, deny
+    if (config.requesterFilterIds?.length > 0 && requesterId && !config.requesterFilterIds.includes(requesterId)) {
+      return false;
+    }
+
     if (config.approverType === 'DEPARTMENT_HEAD' && departmentId) {
+      if (config.overrideApproverIds?.length > 0) {
+        return config.overrideApproverIds.includes(approverId);
+      }
       return this.isDeptHead(approverId, departmentId, requesterJobName);
     }
 
@@ -707,16 +883,36 @@ export class GatePassService {
     level: number,
     notification: any,
     requesterJobName?: string | null,
+    requesterId?: string,
   ) {
     const { configs } = await this.getApprovalConfigs('', departmentId, officeId);
-    const config = this.pickConfigForRequester(configs, level, requesterJobName);
+    const config = this.pickConfigForRequester(configs, level, requesterJobName, requesterId);
     if (!config) return;
 
     let approverIds: string[] = [];
 
     if (config.approverType === 'DEPARTMENT_HEAD' && departmentId) {
-      const managers = await this.getDeptManagers(departmentId);
-      approverIds = managers.map((m) => m.userId);
+      if (config.overrideApproverIds?.length > 0) {
+        // Use override list directly
+        approverIds = [...config.overrideApproverIds];
+      } else {
+        // Auto-detect: UDM managers + position-based managers for requester's VTCV
+        const managers = await this.getDeptManagers(departmentId);
+        approverIds = managers.map((m) => m.userId);
+        // Also include position-based managers for the requester's specific VTCV (not in UDM)
+        if (requesterJobName) {
+          const mgrIds = managers.map((m) => m.userId);
+          const posMgrs = await this.prisma.user.findMany({
+            where: {
+              isActive: true,
+              id: { notIn: mgrIds },
+              jobPosition: { departmentId, jobName: requesterJobName, position: { isManagement: true } },
+            },
+            select: { id: true },
+          });
+          posMgrs.forEach((u) => { if (!approverIds.includes(u.id)) approverIds.push(u.id); });
+        }
+      }
       if (config.substituteUserId) approverIds.push(config.substituteUserId);
     } else if (config.approverUserId) {
       approverIds = [config.approverUserId];
@@ -734,7 +930,7 @@ export class GatePassService {
   // ── Approval Config CRUD ─────────────────────────────────────
 
   async getConfigs(companyId?: string) {
-    return this.prisma.gatePassApprovalConfig.findMany({
+    const configs = await this.prisma.gatePassApprovalConfig.findMany({
       where: companyId
         ? { OR: [{ companyId }, { companyId: null }] }
         : undefined,
@@ -744,8 +940,15 @@ export class GatePassService {
         department: { select: { id: true, name: true, officeId: true } },
         approver: { select: USER_SELECT },
         substitute: { select: USER_SELECT },
+        overrideApprovers: { include: { user: { select: CANDIDATE_SELECT } } },
+        requesterFilters: { include: { user: { select: CANDIDATE_SELECT } } },
       },
     });
+    return configs.map((c) => ({
+      ...c,
+      overrideApproverIds: (c.overrideApprovers ?? []).map((o: any) => o.userId),
+      requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
+    }));
   }
 
   async createConfig(dto: CreateApprovalConfigDto) {
@@ -765,51 +968,66 @@ export class GatePassService {
       },
     });
 
+    const configId = existing?.id ?? undefined;
+
+    const upsertData: any = {
+      approverType: dto.approverType as any,
+      approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
+      substituteUserId: dto.substituteUserId ?? null,
+      requesterJobName: dto.requesterJobName ?? null,
+      isActive: true,
+      companyId: dto.companyId,
+    };
+
+    const configInclude = {
+      office: { select: { id: true, name: true } },
+      department: { select: { id: true, name: true } },
+      approver: { select: USER_SELECT },
+      substitute: { select: USER_SELECT },
+      overrideApprovers: { include: { user: { select: CANDIDATE_SELECT } } },
+      requesterFilters: { include: { user: { select: CANDIDATE_SELECT } } },
+    };
+
+    let savedConfig: any;
     if (existing) {
-      return this.prisma.gatePassApprovalConfig.update({
+      savedConfig = await this.prisma.gatePassApprovalConfig.update({
         where: { id: existing.id },
+        data: upsertData,
+        include: configInclude,
+      });
+    } else {
+      savedConfig = await this.prisma.gatePassApprovalConfig.create({
         data: {
-          approverType: dto.approverType as any,
-          approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
-          substituteUserId: dto.substituteUserId ?? null,
-          requesterJobName: dto.requesterJobName ?? null,
-          isActive: true,
+          officeId: dto.officeId,
+          departmentId: dto.departmentId,
           companyId: dto.companyId,
+          level: dto.level,
+          ...upsertData,
         },
-        include: {
-          office: { select: { id: true, name: true } },
-          department: { select: { id: true, name: true } },
-          approver: { select: USER_SELECT },
-          substitute: { select: USER_SELECT },
-        },
+        include: configInclude,
       });
     }
 
-    return this.prisma.gatePassApprovalConfig.create({
-      data: {
-        officeId: dto.officeId,
-        departmentId: dto.departmentId,
-        companyId: dto.companyId,
-        level: dto.level,
-        approverType: dto.approverType as any,
-        approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
-        substituteUserId: dto.substituteUserId ?? null,
-        requesterJobName: dto.requesterJobName ?? null,
-      },
-      include: {
-        office: { select: { id: true, name: true } },
-        department: { select: { id: true, name: true } },
-        approver: { select: USER_SELECT },
-        substitute: { select: USER_SELECT },
-      },
-    });
+    const needsSync = dto.overrideApproverIds !== undefined || dto.requesterFilterIds !== undefined;
+    if (needsSync) {
+      if (dto.overrideApproverIds !== undefined) await this.syncOverrideApprovers(savedConfig.id, dto.overrideApproverIds ?? []);
+      if (dto.requesterFilterIds !== undefined) await this.syncRequesterFilters(savedConfig.id, dto.requesterFilterIds ?? []);
+      return this.prisma.gatePassApprovalConfig.findUnique({ where: { id: savedConfig.id }, include: configInclude });
+    }
+    return savedConfig;
   }
 
   async updateConfig(id: string, dto: UpdateApprovalConfigDto) {
-    if (dto.approverType === 'SPECIFIC_USER' && dto.approverUserId === undefined) {
-      // Don't wipe approverUserId if not provided
-    }
-    return this.prisma.gatePassApprovalConfig.update({
+    const configInclude = {
+      office: { select: { id: true, name: true } },
+      department: { select: { id: true, name: true } },
+      approver: { select: USER_SELECT },
+      substitute: { select: USER_SELECT },
+      overrideApprovers: { include: { user: { select: CANDIDATE_SELECT } } },
+      requesterFilters: { include: { user: { select: CANDIDATE_SELECT } } },
+    };
+
+    const updated = await this.prisma.gatePassApprovalConfig.update({
       where: { id },
       data: {
         ...(dto.approverType !== undefined ? { approverType: dto.approverType as any } : {}),
@@ -822,13 +1040,99 @@ export class GatePassService {
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...('requesterJobName' in dto ? { requesterJobName: dto.requesterJobName } : {}),
       },
-      include: {
-        office: { select: { id: true, name: true } },
-        department: { select: { id: true, name: true } },
-        approver: { select: USER_SELECT },
-        substitute: { select: USER_SELECT },
+      include: configInclude,
+    });
+
+    const needsSync = dto.overrideApproverIds !== undefined || dto.requesterFilterIds !== undefined;
+    if (needsSync) {
+      if (dto.overrideApproverIds !== undefined) await this.syncOverrideApprovers(id, dto.overrideApproverIds ?? []);
+      if (dto.requesterFilterIds !== undefined) await this.syncRequesterFilters(id, dto.requesterFilterIds ?? []);
+      return this.prisma.gatePassApprovalConfig.findUnique({ where: { id }, include: configInclude });
+    }
+    return updated;
+  }
+
+  /** Returns the approver(s) who would approve a gate pass for the given user.
+   *  Used by the frontend to show "Your approver" info when creating a pass. */
+  async getMyApprover(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        officeId: true,
+        jobPosition: { select: { jobName: true, departmentId: true } },
       },
     });
+    if (!user) return [];
+
+    const departmentId = user.jobPosition?.departmentId ?? null;
+    const officeId = user.officeId ?? null;
+    const requesterJobName = user.jobPosition?.jobName ?? null;
+
+    if (!departmentId && !officeId) return [];
+
+    const { configs } = await this.getApprovalConfigs('', departmentId, officeId);
+    const level1Config = this.pickConfigForRequester(configs, 1, requesterJobName, userId);
+    if (!level1Config) return [];
+
+    if (level1Config.approverType === 'DEPARTMENT_HEAD' && departmentId) {
+      if (level1Config.overrideApproverIds?.length > 0) {
+        const users = await this.prisma.user.findMany({
+          where: { id: { in: level1Config.overrideApproverIds }, isActive: true },
+          select: CANDIDATE_SELECT,
+        });
+        return users;
+      }
+      const managers = await this.getDeptManagers(departmentId);
+      let approverIds = managers.map((m) => m.userId);
+      if (requesterJobName) {
+        const mgrIds = managers.map((m) => m.userId);
+        const posMgrs = await this.prisma.user.findMany({
+          where: {
+            isActive: true,
+            id: { notIn: mgrIds },
+            jobPosition: { departmentId, jobName: requesterJobName, position: { isManagement: true } },
+          },
+          select: { id: true },
+        });
+        posMgrs.forEach((u) => { if (!approverIds.includes(u.id)) approverIds.push(u.id); });
+      }
+      approverIds = approverIds.filter((id) => id !== userId);
+      if (approverIds.length === 0) return [];
+      return this.prisma.user.findMany({
+        where: { id: { in: approverIds }, isActive: true },
+        select: CANDIDATE_SELECT,
+      });
+    }
+
+    if (level1Config.approverUserId) {
+      const approver = await this.prisma.user.findUnique({
+        where: { id: level1Config.approverUserId },
+        select: CANDIDATE_SELECT,
+      });
+      return approver ? [approver] : [];
+    }
+
+    return [];
+  }
+
+  private async syncOverrideApprovers(configId: string, userIds: string[]) {
+    await this.prisma.gatePassConfigApproverOverride.deleteMany({ where: { configId } });
+    if (userIds.length > 0) {
+      await this.prisma.gatePassConfigApproverOverride.createMany({
+        data: userIds.map((userId) => ({ configId, userId })),
+        skipDuplicates: true,
+      });
+    }
+  }
+
+  private async syncRequesterFilters(configId: string, userIds: string[]) {
+    await this.prisma.gatePassConfigRequesterFilter.deleteMany({ where: { configId } });
+    if (userIds.length > 0) {
+      await this.prisma.gatePassConfigRequesterFilter.createMany({
+        data: userIds.map((userId) => ({ configId, userId })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   async deleteConfig(id: string) {
@@ -873,13 +1177,22 @@ export class GatePassService {
   }
 
   /** Returns management users (isManagement=true) scoped to an office or department.
-   *  Used by the admin UI to show approver candidates when configuring approval levels. */
-  async getApproverCandidates(officeId?: string, departmentId?: string) {
+   /**  When includeAll=true, returns all active users in scope except NV/CN level positions
+   *  (only those eligible to approve, i.e. position name not in NV/CN).
+   *  When allUsers=true, returns ALL active users regardless of position (for requester filter). */
+  async getApproverCandidates(officeId?: string, departmentId?: string, includeAll?: boolean, allUsers?: boolean) {
     if (!officeId && !departmentId) return [];
 
+    const NV_CN_NAMES = ['NV', 'CN'];
+    const positionFilter = allUsers
+      ? undefined
+      : includeAll
+        ? { name: { notIn: NV_CN_NAMES } }
+        : { isManagement: true };
+
     const jobPositionWhere = departmentId
-      ? { departmentId, position: { isManagement: true } }
-      : { department: { officeId }, position: { isManagement: true } };
+      ? { departmentId, ...(positionFilter ? { position: positionFilter } : {}) }
+      : { department: { officeId }, ...(positionFilter ? { position: positionFilter } : {}) };
 
     const users = await this.prisma.user.findMany({
       where: { isActive: true, jobPosition: jobPositionWhere },
@@ -910,5 +1223,56 @@ export class GatePassService {
     });
 
     return rows.map((r) => r.jobName).filter(Boolean) as string[];
+  }
+
+  /**
+   * Preview which user(s) would be the auto-resolved dept head for a given dept + optional VTCV.
+   * Used in the admin config UI to show "Người duyệt sẽ là: ..." when DEPARTMENT_HEAD is selected.
+   */
+  async getDeptHeadPreview(
+    departmentId?: string,
+    jobName?: string,
+  ): Promise<typeof CANDIDATE_SELECT extends object ? any[] : never> {
+    if (!departmentId) return [];
+
+    const managers = await this.getDeptManagers(departmentId);
+    if (managers.length === 0) return [];
+
+    const mgrIds = managers.map((m) => m.userId);
+
+    let resolvedIds: string[];
+
+    if (jobName) {
+      // Find managers eligible for this specific VTCV
+      const eligible: string[] = [];
+      for (const mgr of managers) {
+        const ok = await this.isDeptMgrEligibleForVtcv(mgr.userId, mgr.jobName, departmentId, jobName, mgrIds);
+        if (ok) eligible.push(mgr.userId);
+      }
+      // Also include position-based managers (not in UDM) with matching VTCV
+      const posMgrs = await this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          id: { notIn: mgrIds },
+          jobPosition: { departmentId, jobName, position: { isManagement: true } },
+        },
+        select: { id: true },
+      });
+      posMgrs.forEach((u) => { if (!eligible.includes(u.id)) eligible.push(u.id); });
+      resolvedIds = eligible;
+    } else {
+      resolvedIds = mgrIds;
+    }
+
+    if (resolvedIds.length === 0) return [];
+
+    return this.prisma.user.findMany({
+      where: { id: { in: resolvedIds }, isActive: true },
+      select: CANDIDATE_SELECT,
+      orderBy: [
+        { jobPosition: { position: { level: 'asc' } } },
+        { lastName: 'asc' },
+      ],
+    });
   }
 }
