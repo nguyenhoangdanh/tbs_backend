@@ -359,22 +359,37 @@ export class LeaveApprovalService {
         // Dept từ flow level hoặc dept của approver
         const primaryDeptId = el.targetDepartmentId ?? approver.jobPosition?.departmentId;
 
-        if (primaryDeptId) {
+        if (el.targetDepartmentId) {
+          // Explicit target dept: scope tightly to that dept
           if (approverJobName) {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId, jobName: approverJobName } } });
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId, jobName: approverJobName } } });
           } else {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId } } });
+          }
+        } else {
+          // No explicit target dept → office-head fallback:
+          // Show requests from ALL depts in approver's same office (e.g. T.LINE sees all LINE PHỤ TRỢ)
+          if (approver.officeId) {
+            whereConditions.push({ ...base, user: { officeId: approver.officeId } });
+          } else if (primaryDeptId) {
+            if (approverJobName) {
+              whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId, jobName: approverJobName } } });
+            } else {
+              whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
+            }
           }
         }
 
         // T.LINE case: approver ở ĐH LINE nhưng quản lý TỔ CD 1, 2... qua UDM
         // Thêm requests từ các dept mà approver quản lý (khác primaryDeptId) có cùng VTCV
-        for (const { departmentId: managedDeptId } of approver.managedDepartments) {
-          if (managedDeptId === primaryDeptId) continue; // đã xử lý ở trên
-          if (approverJobName) {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
-          } else {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
+        if (el.targetDepartmentId) {
+          for (const { departmentId: managedDeptId } of approver.managedDepartments) {
+            if (managedDeptId === primaryDeptId) continue;
+            if (approverJobName) {
+              whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
+            } else {
+              whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
+            }
           }
         }
         continue;
@@ -480,7 +495,7 @@ export class LeaveApprovalService {
 
       case 'ROLE_IN_DEPARTMENT': {
         const deptId = targetDepartmentId ?? requesterInfo.jobPosition?.departmentId;
-        if (!deptId) return true;
+        if (!deptId && !requesterInfo.officeId) return true;
         const usersWithRole = await this.prisma.userRole.findMany({
           where: { roleDefinitionId, isActive: true, userId: { not: excludeUserId } },
           select: { userId: true },
@@ -488,32 +503,43 @@ export class LeaveApprovalService {
         if (!usersWithRole.length) return false;
         const userIds = usersWithRole.map(u => u.userId);
 
-        const requesterJobName = requesterInfo.jobPosition?.jobName;
-        if (requesterJobName) {
-          // Case 1: cùng dept + cùng VTCV (TT duyệt CN)
-          const sameDeptSameVtcv = await this.prisma.user.count({
-            where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
-          });
-          if (sameDeptSameVtcv > 0) return true;
+        if (deptId) {
+          const requesterJobName = requesterInfo.jobPosition?.jobName;
+          if (requesterJobName) {
+            // Case 1: cùng dept + cùng VTCV (TT duyệt CN)
+            const sameDeptSameVtcv = await this.prisma.user.count({
+              where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
+            });
+            if (sameDeptSameVtcv > 0) return true;
 
-          // Case 2: UDM cross-dept manager (bất kể VTCV — general manager như GĐ quản lý nhiều phòng)
-          const udmManagers = await this.prisma.userDepartmentManagement.count({
-            where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
-          });
-          if (udmManagers > 0) return true;
-
-          return false;
+            // Case 2: UDM cross-dept manager
+            const udmManagers = await this.prisma.userDepartmentManagement.count({
+              where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
+            });
+            if (udmManagers > 0) return true;
+          } else {
+            // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
+            const inDept = await this.prisma.user.count({
+              where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
+            });
+            if (inDept > 0) return true;
+            const managesDept = await this.prisma.userDepartmentManagement.count({
+              where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
+            });
+            if (managesDept > 0) return true;
+          }
         }
 
-        // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
-        const inDept = await this.prisma.user.count({
-          where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
-        });
-        if (inDept > 0) return true;
-        const managesDept = await this.prisma.userDepartmentManagement.count({
-          where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
-        });
-        return managesDept > 0;
+        // Office-head fallback: khi không có explicit targetDept, approver cùng office là đủ
+        // (e.g. T.LINE ở ĐH LINE duyệt cho TỔ SX DÂY KÉO trong cùng office LINE PHỤ TRỢ)
+        if (!targetDepartmentId && requesterInfo.officeId) {
+          const inOffice = await this.prisma.user.count({
+            where: { id: { in: userIds }, officeId: requesterInfo.officeId },
+          });
+          return inOffice > 0;
+        }
+
+        return false;
       }
 
       case 'DEPARTMENT_MANAGERS': {
@@ -569,22 +595,32 @@ export class LeaveApprovalService {
 
       case 'ROLE_IN_DEPARTMENT': {
         const deptId = targetDepartmentId ?? requesterInfo.jobPosition?.departmentId;
-        if (!deptId) return true;
+        if (!deptId && !requesterInfo.officeId) return true;
         const usersWithRole = await this.prisma.userRole.findMany({
           where: { roleDefinitionId, isActive: true },
           select: { userId: true },
         });
         if (!usersWithRole.length) return false;
         const userIds = usersWithRole.map(u => u.userId);
-        // Check approver in same dept OR manages the dept
-        const inDept = await this.prisma.user.count({
-          where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
-        });
-        if (inDept > 0) return true;
-        const managesDept = await this.prisma.userDepartmentManagement.count({
-          where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
-        });
-        return managesDept > 0;
+        if (deptId) {
+          // Check approver in same dept OR manages the dept
+          const inDept = await this.prisma.user.count({
+            where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
+          });
+          if (inDept > 0) return true;
+          const managesDept = await this.prisma.userDepartmentManagement.count({
+            where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
+          });
+          if (managesDept > 0) return true;
+        }
+        // Office-head fallback
+        if (!targetDepartmentId && requesterInfo.officeId) {
+          const inOffice = await this.prisma.user.count({
+            where: { id: { in: userIds }, officeId: requesterInfo.officeId },
+          });
+          return inOffice > 0;
+        }
+        return false;
       }
 
       case 'DEPARTMENT_MANAGERS': {
@@ -638,7 +674,7 @@ export class LeaveApprovalService {
         });
         if (!hasRole) return false;
         const deptId = targetDepartmentId ?? requesterInfo.jobPosition?.departmentId;
-        if (!deptId) return true; // no dept constraint → any dept OK
+        if (!deptId && !requesterInfo.officeId) return true; // no constraint at all
         const approverUser = await this.prisma.user.findUnique({
           where: { id: userId },
           include: {
@@ -648,22 +684,28 @@ export class LeaveApprovalService {
         });
         const approverDept = approverUser?.jobPosition?.departmentId;
         const approverJobName = approverUser?.jobPosition?.jobName ?? null;
+        const approverOffice = (approverUser as any)?.officeId ?? null;
         const managedDepts = (approverUser as any)?.managedDepartments?.map((d: any) => d.departmentId) ?? [];
         const requesterJobName = requesterInfo.jobPosition?.jobName;
 
-        if (requesterJobName) {
-          // UDM cross-dept manager (e.g., GĐ quản lý nhiều phòng ban qua UDM)
-          // → eligible bất kể VTCV vì họ là người quản lý tổng thể của phòng ban đó
-          if (managedDepts.includes(deptId)) return true;
-
-          // Cùng dept + cùng VTCV (TT duyệt CN)
-          if (approverJobName === requesterJobName && approverDept === deptId) return true;
-
-          return false;
+        if (deptId) {
+          if (requesterJobName) {
+            // UDM cross-dept manager
+            if (managedDepts.includes(deptId)) return true;
+            // Cùng dept + cùng VTCV (TT duyệt CN)
+            if (approverJobName === requesterJobName && approverDept === deptId) return true;
+          } else {
+            if (approverDept === deptId || managedDepts.includes(deptId)) return true;
+          }
         }
 
-        // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
-        return approverDept === deptId || managedDepts.includes(deptId);
+        // Office-head fallback: khi không có explicit targetDept, approver cùng office là đủ
+        // (e.g. T.LINE ở ĐH LINE duyệt cho TỔ SX DÂY KÉO trong cùng office LINE PHỤ TRỢ)
+        if (!targetDepartmentId && requesterInfo.officeId && approverOffice === requesterInfo.officeId) {
+          return true;
+        }
+
+        return false;
       }
 
       case 'DEPARTMENT_MANAGERS': {
