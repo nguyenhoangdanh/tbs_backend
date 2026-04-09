@@ -225,15 +225,26 @@ export class LeaveFlowService {
     const requesterJobNames: string[] | undefined = (dto as any).requesterJobNames;
     const requesterFilterIds: string[] | undefined = (dto as any).requesterFilterIds;
 
+    // Extract scalar FK fields and convert to Prisma relation syntax
+    const officeId: string | undefined | null = (flowData as any).officeId;
+    const departmentId: string | undefined | null = (flowData as any).departmentId;
+    const leaveTypeId: string | undefined | null = (flowData as any).leaveTypeId;
+    // Remove raw FK fields — Prisma requires relation objects
+    delete (flowData as any).officeId;
+    delete (flowData as any).departmentId;
+    delete (flowData as any).leaveTypeId;
+    delete (flowData as any).requesterFilterIds;
+
     await this.findOne(id);
 
     // Fetch companyId for auto-detection
     const flowMeta = await this.prisma.leaveApprovalFlow.findUnique({ where: { id }, select: { companyId: true } });
 
     // Auto-detect officeId when name indicates VPĐH flow and no officeId provided
-    if (name && !flowData.officeId && flowMeta) {
+    let resolvedOfficeId = officeId;
+    if (name && resolvedOfficeId === undefined && flowMeta) {
       const autoOfficeId = await this.detectVpdhOfficeId(name, flowMeta.companyId);
-      if (autoOfficeId) (flowData as any).officeId = autoOfficeId;
+      if (autoOfficeId) resolvedOfficeId = autoOfficeId;
     }
 
     if (levels) {
@@ -260,8 +271,21 @@ export class LeaveFlowService {
       await this.syncRequesterFilters(id, requesterFilterIds);
     }
 
-    const updatePayload: any = { ...(name ? { name } : {}), ...flowData };
+    // Build Prisma-compatible update payload using relation objects
+    const updatePayload: any = { ...flowData };
+    if (name) updatePayload.name = name;
     if (requesterJobNames !== undefined) updatePayload.requesterJobNames = requesterJobNames;
+
+    // Use Prisma relation syntax for FK fields
+    if (resolvedOfficeId !== undefined) {
+      updatePayload.office = resolvedOfficeId ? { connect: { id: resolvedOfficeId } } : { disconnect: true };
+    }
+    if (departmentId !== undefined) {
+      updatePayload.department = departmentId ? { connect: { id: departmentId } } : { disconnect: true };
+    }
+    if (leaveTypeId !== undefined) {
+      updatePayload.leaveType = leaveTypeId ? { connect: { id: leaveTypeId } } : { disconnect: true };
+    }
 
     const updated = await this.prisma.leaveApprovalFlow.update({
       where: { id },
