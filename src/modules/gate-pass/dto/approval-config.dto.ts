@@ -41,12 +41,17 @@ export class CreateApprovalConfigDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  overrideApproverIds?: string[];
+  requesterJobNames?: string[];
 
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
   requesterFilterIds?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  overrideApproverIds?: string[];
 }
 
 export class UpdateApprovalConfigDto {
@@ -65,6 +70,11 @@ export class UpdateApprovalConfigDto {
   @IsOptional()
   @IsString()
   requesterJobName?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requesterJobNames?: string[];
 
   @IsOptional()
   @IsBoolean()

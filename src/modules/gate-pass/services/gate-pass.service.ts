@@ -247,15 +247,21 @@ export class GatePassService {
     overrideApproverIds?: string[],
     requesterJobName?: string | null,
     requesterFilterIds?: string[],
+    requesterJobNames?: string[],
   ): Promise<any[]> {
     if (managedDeptIds.length === 0) return [];
 
-    // Build requester scope condition (requesterFilterIds > requesterJobName)
+    // Normalize: use requesterJobNames array, fall back to legacy single requesterJobName
+    const effectiveJobNames: string[] = requesterJobNames?.length ? requesterJobNames : (requesterJobName ? [requesterJobName] : []);
+
+    // Build requester scope condition (requesterFilterIds > requesterJobNames)
     const requesterCondition: any = {};
     if (requesterFilterIds && requesterFilterIds.length > 0) {
       requesterCondition.userId = { in: requesterFilterIds };
-    } else if (requesterJobName) {
-      requesterCondition.user = { jobPosition: { jobName: requesterJobName } };
+    } else if (effectiveJobNames.length > 0) {
+      requesterCondition.user = {
+        jobPosition: { jobName: effectiveJobNames.length === 1 ? effectiveJobNames[0] : { in: effectiveJobNames } },
+      };
     }
 
     // Override list: if approverId is in the list → see passes in scope
@@ -433,16 +439,21 @@ export class GatePassService {
       if (exact) return exact;
     }
 
-    // Priority 2: VTCV filter (no requester filter)
+    // Priority 2: VTCV filter (no requester filter) — supports both array and legacy single string
     if (requesterJobName) {
-      const exact = atLevel.find(
-        (c) => c.requesterJobName === requesterJobName && !(c.requesterFilterIds?.length > 0),
-      );
+      const exact = atLevel.find((c) => {
+        if (c.requesterFilterIds?.length > 0) return false;
+        const names: string[] = c.requesterJobNames?.length > 0 ? c.requesterJobNames : (c.requesterJobName ? [c.requesterJobName] : []);
+        return names.includes(requesterJobName);
+      });
       if (exact) return exact;
     }
 
     // Priority 3: catch-all (no VTCV and no requester filter)
-    return atLevel.find((c) => !c.requesterJobName && !(c.requesterFilterIds?.length > 0)) ?? atLevel[0];
+    return atLevel.find((c) => {
+      const names: string[] = c.requesterJobNames?.length > 0 ? c.requesterJobNames : (c.requesterJobName ? [c.requesterJobName] : []);
+      return names.length === 0 && !(c.requesterFilterIds?.length > 0);
+    }) ?? atLevel[0];
   }
 
   // ── Tạo đơn xin giấy ra vào cổng ────────────────────────────
@@ -589,10 +600,11 @@ export class GatePassService {
         });
         const overriddenDeptIds = deptsWithOwnConfig.map((d) => d.departmentId).filter(Boolean) as string[];
 
+        const specJobNames: string[] = cfg.requesterJobNames?.length > 0 ? cfg.requesterJobNames : (cfg.requesterJobName ? [cfg.requesterJobName] : []);
         const userFilter = cfg.requesterFilterIds?.length > 0
           ? undefined
-          : cfg.requesterJobName
-            ? { officeId: cfg.officeId, jobPosition: { jobName: cfg.requesterJobName } }
+          : specJobNames.length > 0
+            ? { officeId: cfg.officeId, jobPosition: { jobName: specJobNames.length === 1 ? specJobNames[0] : { in: specJobNames } } }
             : { officeId: cfg.officeId };
 
         conditions.push({
@@ -613,9 +625,10 @@ export class GatePassService {
           NOT: { userId: approverId },
           ...(cfg.requesterFilterIds?.length > 0
             ? { userId: { in: cfg.requesterFilterIds } }
-            : cfg.requesterJobName
-              ? { user: { jobPosition: { jobName: cfg.requesterJobName } } }
-              : {}),
+            : (() => {
+                const jns: string[] = cfg.requesterJobNames?.length > 0 ? cfg.requesterJobNames : (cfg.requesterJobName ? [cfg.requesterJobName] : []);
+                return jns.length > 0 ? { user: { jobPosition: { jobName: jns.length === 1 ? jns[0] : { in: jns } } } } : {};
+              })()),
         });
       }
     }
@@ -655,7 +668,7 @@ export class GatePassService {
 
       const relevantDeptIds = hasOverride ? scopeDeptIds : naturallyManagedInScope;
       const vtcvConditions = await this.buildDeptHeadPendingConditions(
-        approverId, relevantDeptIds, cfg.level, cfg.overrideApproverIds, cfg.requesterJobName, cfg.requesterFilterIds,
+        approverId, relevantDeptIds, cfg.level, cfg.overrideApproverIds, cfg.requesterJobName, cfg.requesterFilterIds, cfg.requesterJobNames,
       );
       conditions.push(...vtcvConditions);
     }
@@ -965,6 +978,7 @@ export class GatePassService {
         ...(dto.departmentId ? { departmentId: dto.departmentId } : {}),
         level: dto.level,
         requesterJobName: dto.requesterJobName ?? null,
+        requesterJobNames: { equals: dto.requesterJobNames ?? [] },
       },
     });
 
@@ -975,6 +989,7 @@ export class GatePassService {
       approverUserId: dto.approverType === 'SPECIFIC_USER' ? dto.approverUserId : null,
       substituteUserId: dto.substituteUserId ?? null,
       requesterJobName: dto.requesterJobName ?? null,
+      requesterJobNames: dto.requesterJobNames ?? [],
       isActive: true,
       companyId: dto.companyId,
     };
@@ -1039,6 +1054,7 @@ export class GatePassService {
         ...(dto.substituteUserId !== undefined ? { substituteUserId: dto.substituteUserId } : {}),
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...('requesterJobName' in dto ? { requesterJobName: dto.requesterJobName } : {}),
+        ...('requesterJobNames' in dto ? { requesterJobNames: dto.requesterJobNames } : {}),
       },
       include: configInclude,
     });
@@ -1185,14 +1201,14 @@ export class GatePassService {
 
     const NV_CN_NAMES = ['NV', 'CN'];
     const positionFilter = allUsers
-      ? undefined
+      ? { name: { in: NV_CN_NAMES } }  // requester filter: only NV/CN employees
       : includeAll
         ? { name: { notIn: NV_CN_NAMES } }
         : { isManagement: true };
 
     const jobPositionWhere = departmentId
-      ? { departmentId, ...(positionFilter ? { position: positionFilter } : {}) }
-      : { department: { officeId }, ...(positionFilter ? { position: positionFilter } : {}) };
+      ? { departmentId, position: positionFilter }
+      : { department: { officeId }, position: positionFilter };
 
     const users = await this.prisma.user.findMany({
       where: { isActive: true, jobPosition: jobPositionWhere },

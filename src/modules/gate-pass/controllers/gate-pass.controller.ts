@@ -72,6 +72,12 @@ export class GatePassController {
 
   // ── Chi tiết ────────────────────────────────────────────────
 
+  @Get('my-approver')
+  @RequirePermissions('gate-passes:view')
+  getMyApprover(@GetUser() currentUser: any) {
+    return this.service.getMyApprover(currentUser.id);
+  }
+
   @Get(':id')
   @RequirePermissions('gate-passes:view')
   findOne(@Param('id', ParseUUIDPipe) id: string) {
@@ -175,10 +181,5 @@ export class GatePassController {
   getWorkflowPreview(@GetUser() currentUser: any, @Query('companyId') companyId?: string) {
     return this.service.getWorkflowPreview(companyId ?? currentUser?.companyId);
   }
-
-  @Get('my-approver')
-  @RequirePermissions('gate-passes:view')
-  getMyApprover(@GetUser() currentUser: any) {
-    return this.service.getMyApprover(currentUser.id);
-  }
 }
+

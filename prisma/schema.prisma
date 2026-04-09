@@ -649,7 +649,8 @@ model GatePassApprovalConfig {
   approverType       GatePassApproverType     @default(SPECIFIC_USER)
   approverUserId     String?                  // Bắt buộc khi approverType = SPECIFIC_USER
   substituteUserId   String?                  // người ký thay
-  requesterJobName   String?                  // Nếu set, chỉ áp dụng cho người tạo đơn có VTCV này
+  requesterJobName   String?                  // Deprecated: dùng requesterJobNames thay thế
+  requesterJobNames  String[]                 @default([]) // Nếu set, chỉ áp dụng cho người tạo đơn có VTCV trong danh sách này
   isActive           Boolean                  @default(true)
   createdAt        DateTime                 @default(now())
   updatedAt        DateTime                 @updatedAt
