@@ -8,6 +8,8 @@ export class LeaveFlowService {
 
   async create(dto: CreateLeaveFlowDto & { companyId: string }) {
     const { levels, companyId, name, description, leaveTypeId, officeId, departmentId, priority, isDefault } = dto;
+    const requesterJobNames: string[] = (dto as any).requesterJobNames ?? [];
+    const requesterFilterIds: string[] = (dto as any).requesterFilterIds ?? [];
 
     // Auto-detect officeId: if flow name contains VPĐH/VPDh/VPDH and no officeId given,
     // automatically scope it to the VPĐH TH office to prevent it from matching factory users.
@@ -21,6 +23,7 @@ export class LeaveFlowService {
         leaveTypeId: leaveTypeId ?? null,
         officeId: resolvedOfficeId ?? null,
         departmentId: departmentId ?? null,
+        requesterJobNames,
         priority: priority ?? 0,
         isDefault: isDefault ?? false,
         levels: {
@@ -38,17 +41,24 @@ export class LeaveFlowService {
           })),
         },
       },
-      include: { levels: { orderBy: { level: 'asc' } } },
+      include: {
+        levels: { orderBy: { level: 'asc' } },
+        requesterFilters: { select: { userId: true } },
+      },
     });
+
+    if (requesterFilterIds.length > 0) {
+      await this.syncRequesterFilters(flow.id, requesterFilterIds);
+    }
 
     // Retroactively attach flowId to matching PENDING requests that have no flow yet
     await this.reattachPendingRequests(flow);
 
-    return flow;
+    return { ...flow, requesterFilterIds: requesterFilterIds };
   }
 
   async findAll(companyId: string) {
-    return this.prisma.leaveApprovalFlow.findMany({
+    const flows = await this.prisma.leaveApprovalFlow.findMany({
       where: { companyId, isActive: true },
       include: {
         levels: {
@@ -65,9 +75,19 @@ export class LeaveFlowService {
         leaveType: { select: { id: true, code: true, name: true } },
         office: { select: { id: true, name: true } },
         department: { select: { id: true, name: true } },
+        requesterFilters: {
+          select: {
+            userId: true,
+            user: { select: { id: true, firstName: true, lastName: true, employeeCode: true, jobPosition: { select: { jobName: true, position: { select: { name: true } } } } } },
+          },
+        },
       },
       orderBy: { priority: 'desc' },
     });
+    return flows.map((f) => ({
+      ...f,
+      requesterFilterIds: f.requesterFilters.map((r) => r.userId),
+    }));
   }
 
   async previewApprovers(
@@ -183,14 +203,23 @@ export class LeaveFlowService {
             targetDepartment: { select: { id: true, name: true } },
           },
         },
+        requesterFilters: {
+          select: {
+            userId: true,
+            user: { select: { id: true, firstName: true, lastName: true, employeeCode: true, jobPosition: { select: { jobName: true, position: { select: { name: true } } } } } },
+          },
+        },
       },
     });
     if (!flow) throw new NotFoundException('Flow duyệt không tồn tại');
-    return flow;
+    return { ...flow, requesterFilterIds: flow.requesterFilters.map((r) => r.userId) };
   }
 
   async update(id: string, dto: Partial<CreateLeaveFlowDto>) {
     const { levels, name, ...flowData } = dto;
+    const requesterJobNames: string[] | undefined = (dto as any).requesterJobNames;
+    const requesterFilterIds: string[] | undefined = (dto as any).requesterFilterIds;
+
     await this.findOne(id);
 
     // Fetch companyId for auto-detection
@@ -222,14 +251,34 @@ export class LeaveFlowService {
       });
     }
 
+    if (requesterFilterIds !== undefined) {
+      await this.syncRequesterFilters(id, requesterFilterIds);
+    }
+
+    const updatePayload: any = { ...(name ? { name } : {}), ...flowData };
+    if (requesterJobNames !== undefined) updatePayload.requesterJobNames = requesterJobNames;
+
     const updated = await this.prisma.leaveApprovalFlow.update({
       where: { id },
-      data: { ...(name ? { name } : {}), ...flowData } as any,
-      include: { levels: { orderBy: { level: 'asc' } } },
+      data: updatePayload,
+      include: {
+        levels: { orderBy: { level: 'asc' } },
+        requesterFilters: { select: { userId: true } },
+      },
     });
 
     await this.reattachPendingRequests(updated);
-    return updated;
+    return { ...updated, requesterFilterIds: updated.requesterFilters.map((r: any) => r.userId) };
+  }
+
+  private async syncRequesterFilters(flowId: string, userIds: string[]) {
+    await this.prisma.leaveFlowRequesterFilter.deleteMany({ where: { flowId } });
+    if (userIds.length > 0) {
+      await this.prisma.leaveFlowRequesterFilter.createMany({
+        data: userIds.map((userId) => ({ id: require('crypto').randomUUID(), flowId, userId })),
+        skipDuplicates: true,
+      });
+    }
   }
 
   async remove(id: string) {

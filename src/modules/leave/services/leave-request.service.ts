@@ -129,6 +129,8 @@ export class LeaveRequestService {
       dto.leaveTypeId,
       user.officeId,
       user.jobPosition?.departmentId ?? null,
+      userId,
+      user.jobPosition?.jobName ?? null,
     );
 
     // Tính level bắt đầu (bỏ qua nếu người tạo là người duyệt hoặc không có ai duyệt)

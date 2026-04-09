@@ -215,6 +215,7 @@ model User {
   gatePassApprovalConfigsSub     GatePassApprovalConfig[] @relation("GatePassApprovalConfigSubstitute")
   gatePassConfigApproverOverrides GatePassConfigApproverOverride[] @relation("GatePassConfigApproverOverrideUser")
   gatePassConfigRequesterFilters  GatePassConfigRequesterFilter[]  @relation("GatePassConfigRequesterFilterUser")
+  leaveFlowRequesterFilters       LeaveFlowRequesterFilter[]        @relation("LeaveFlowRequesterFilterUser")
   ledGroups          Group[]                    @relation("GroupLeader")
   reports            Report[]
   evaluations        TaskEvaluation[]
@@ -1288,6 +1289,8 @@ model LeaveApprovalFlow {
   leaveTypeId  String? // null = áp dụng cho tất cả loại phép
   officeId     String? // null = áp dụng cho tất cả văn phòng
   departmentId String? // null = áp dụng cho tất cả phòng ban
+  // Lọc theo VTCV của người tạo đơn (nếu set, chỉ match khi requester có VTCV trong danh sách)
+  requesterJobNames String[] @default([])
   priority     Int      @default(0) // ưu tiên cao hơn → dùng trước khi có nhiều flow match
   isDefault    Boolean  @default(false) // flow mặc định fallback
   isActive     Boolean  @default(true)
@@ -1299,8 +1302,9 @@ model LeaveApprovalFlow {
   office     Office?     @relation(fields: [officeId], references: [id])
   department Department? @relation(fields: [departmentId], references: [id])
 
-  levels   LeaveApprovalFlowLevel[]
-  requests LeaveRequest[]
+  levels           LeaveApprovalFlowLevel[]
+  requests         LeaveRequest[]
+  requesterFilters LeaveFlowRequesterFilter[]
 
   @@index([companyId, isActive])
   @@index([leaveTypeId])
@@ -1350,6 +1354,21 @@ model LeaveApprovalFlowLevel {
   @@index([substitute2Id])
   @@index([approverMode])
   @@map("leave_approval_flow_levels")
+}
+
+// Lọc requester cụ thể cho một flow (dùng khi nhiều nhóm trong cùng phòng ban cần flow khác nhau)
+model LeaveFlowRequesterFilter {
+  id     String @id @default(uuid())
+  flowId String
+  userId String
+
+  flow LeaveApprovalFlow @relation(fields: [flowId], references: [id], onDelete: Cascade)
+  user User              @relation("LeaveFlowRequesterFilterUser", fields: [userId], references: [id])
+
+  @@unique([flowId, userId])
+  @@index([flowId])
+  @@index([userId])
+  @@map("leave_flow_requester_filters")
 }
 
 // Đơn xin nghỉ phép

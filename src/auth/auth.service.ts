@@ -170,10 +170,6 @@ export class AuthService {
       const userAgent = request?.headers['user-agent'] || '';
       const deviceInfo = this.detectiOSDevice(userAgent);
       
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.log(`Device Detection:`, deviceInfo, `UA: ${userAgent.substring(0, 100)}`);
-      }
-
       // Validate input
       if (!employeeCode || !password) {
         this.logger.warn(`Login failed: Missing employeeCode or password`);
@@ -181,9 +177,9 @@ export class AuthService {
       }
 
       // Only log in development
-      if (process.env.NODE_ENV !== 'production') {
-        this.logger.log(`Login attempt for employee: ${employeeCode}, rememberMe: ${rememberMe}`);
-      }
+      // if (process.env.NODE_ENV !== 'production') {
+      //   this.logger.log(`Login attempt for employee: ${employeeCode}, rememberMe: ${rememberMe}`);
+      // }
 
       // Ensure database connection before query
       // await this.prisma.ensureConnection();

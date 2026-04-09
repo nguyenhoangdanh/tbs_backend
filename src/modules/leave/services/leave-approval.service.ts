@@ -38,6 +38,8 @@ export class LeaveApprovalService {
     leaveTypeId: string,
     officeId: string | null,
     departmentId: string | null,
+    requesterId?: string,
+    requesterJobName?: string | null,
   ) {
     const officeConditions = officeId
       ? [{ officeId }, { officeId: null }]
@@ -60,20 +62,53 @@ export class LeaveApprovalService {
           { OR: deptConditions },
         ],
       },
-      include: { levels: { where: { isActive: true }, orderBy: { level: 'asc' } } },
+      include: {
+        levels: { where: { isActive: true }, orderBy: { level: 'asc' } },
+        requesterFilters: { select: { userId: true } },
+      },
       orderBy: { priority: 'desc' },
     });
 
     if (!flows.length) return null;
 
-    // Ưu tiên: exact companyId match > parent match, then more specific conditions > priority
-    return flows.sort((a, b) => {
-      const exactA = a.companyId === companyId ? 8 : 0;
-      const exactB = b.companyId === companyId ? 8 : 0;
-      const scoreA = exactA + (a.leaveTypeId ? 4 : 0) + (a.officeId ? 2 : 0) + (a.departmentId ? 1 : 0);
-      const scoreB = exactB + (b.leaveTypeId ? 4 : 0) + (b.officeId ? 2 : 0) + (b.departmentId ? 1 : 0);
+    // Đính kèm requesterFilterIds để dễ xử lý
+    const enriched = flows.map((f) => ({
+      ...f,
+      requesterFilterIds: f.requesterFilters.map((r) => r.userId),
+    }));
+
+    // Loại bỏ flows có requesterFilter mà requesterId không nằm trong danh sách
+    const eligible = enriched.filter((f) => {
+      if (f.requesterFilterIds.length > 0) {
+        return requesterId ? f.requesterFilterIds.includes(requesterId) : false;
+      }
+      return true;
+    });
+
+    if (!eligible.length) return null;
+
+    // Ưu tiên: requesterFilter match > requesterJobNames match > catch-all
+    // Sau đó: exact companyId > parent, more specific scope > priority
+    return eligible.sort((a, b) => {
+      // Flows with requesterFilter have highest priority
+      const filterA = a.requesterFilterIds.length > 0 ? 16 : 0;
+      const filterB = b.requesterFilterIds.length > 0 ? 16 : 0;
+      // Flows with requesterJobNames that match the requester's VTCV
+      const vtcvMatchA = a.requesterJobNames.length > 0 && requesterJobName && a.requesterJobNames.includes(requesterJobName) ? 8 : 0;
+      const vtcvMatchB = b.requesterJobNames.length > 0 && requesterJobName && b.requesterJobNames.includes(requesterJobName) ? 8 : 0;
+      // Skip flows with requesterJobNames that DON'T match
+      const vtcvMismatchA = a.requesterJobNames.length > 0 && !vtcvMatchA ? -100 : 0;
+      const vtcvMismatchB = b.requesterJobNames.length > 0 && !vtcvMatchB ? -100 : 0;
+
+      const exactA = a.companyId === companyId ? 4 : 0;
+      const exactB = b.companyId === companyId ? 4 : 0;
+      const scopeA = (a.leaveTypeId ? 2 : 0) + (a.departmentId ? 1 : 0);
+      const scopeB = (b.leaveTypeId ? 2 : 0) + (b.departmentId ? 1 : 0);
+
+      const scoreA = filterA + vtcvMatchA + vtcvMismatchA + exactA + scopeA;
+      const scoreB = filterB + vtcvMatchB + vtcvMismatchB + exactB + scopeB;
       return scoreB - scoreA || b.priority - a.priority;
-    })[0];
+    })[0] ?? null;
   }
 
   // ── Thực hiện phê duyệt/từ chối ──────────────────────────────
@@ -200,6 +235,9 @@ export class LeaveApprovalService {
       },
     });
     if (!request || request.status !== 'PENDING') return false;
+
+    // Không được phép tự duyệt đơn của chính mình
+    if ((request as any).userId === userId) return false;
 
     // Nếu người này đã duyệt rồi thì không duyệt lại nữa (chặn double-approval)
     const alreadyApproved = (request as any).approvals?.some((a: any) => a.approverId === userId);
@@ -452,28 +490,18 @@ export class LeaveApprovalService {
 
         const requesterJobName = requesterInfo.jobPosition?.jobName;
         if (requesterJobName) {
-          // Điều kiện bắt buộc: approver phải có cùng VTCV với requester.
-          // Phòng ban: chấp nhận cùng phòng ban (TT) HOẶC quản lý phòng ban đó qua UDM (T.LINE).
-          // Không fallback sang "cùng phòng ban khác VTCV".
-
           // Case 1: cùng dept + cùng VTCV (TT duyệt CN)
           const sameDeptSameVtcv = await this.prisma.user.count({
             where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
           });
           if (sameDeptSameVtcv > 0) return true;
 
-          // Case 2: khác dept nhưng quản lý dept của requester qua UDM + cùng VTCV (T.LINE duyệt từ ĐH LINE)
-          const usersWithSameVtcv = await this.prisma.user.findMany({
-            where: { id: { in: userIds }, jobPosition: { jobName: requesterJobName } },
-            select: { id: true },
+          // Case 2: UDM cross-dept manager (bất kể VTCV — general manager như GĐ quản lý nhiều phòng)
+          const udmManagers = await this.prisma.userDepartmentManagement.count({
+            where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
           });
-          if (usersWithSameVtcv.length > 0) {
-            const vtcvUserIds = usersWithSameVtcv.map(u => u.id);
-            const managesRequesterDept = await this.prisma.userDepartmentManagement.count({
-              where: { userId: { in: vtcvUserIds }, departmentId: deptId, isActive: true },
-            });
-            if (managesRequesterDept > 0) return true;
-          }
+          if (udmManagers > 0) return true;
+
           return false;
         }
 
@@ -624,14 +652,12 @@ export class LeaveApprovalService {
         const requesterJobName = requesterInfo.jobPosition?.jobName;
 
         if (requesterJobName) {
-          // VTCV bắt buộc phải khớp — không chấp nhận khác VTCV dù cùng phòng ban.
-          if (approverJobName !== requesterJobName) return false;
-
-          // Cùng dept (TT duyệt CN) → eligible
-          if (approverDept === deptId) return true;
-
-          // Khác dept nhưng quản lý dept của requester qua UDM + cùng VTCV (T.LINE từ ĐH LINE)
+          // UDM cross-dept manager (e.g., GĐ quản lý nhiều phòng ban qua UDM)
+          // → eligible bất kể VTCV vì họ là người quản lý tổng thể của phòng ban đó
           if (managedDepts.includes(deptId)) return true;
+
+          // Cùng dept + cùng VTCV (TT duyệt CN)
+          if (approverJobName === requesterJobName && approverDept === deptId) return true;
 
           return false;
         }
