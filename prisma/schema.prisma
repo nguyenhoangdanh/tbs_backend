@@ -968,12 +968,14 @@ enum GatePassReason {
 }
 
 enum GatePassStatus {
+  DRAFT
   PENDING
   APPROVED
   REJECTED
   EXPIRED
   USED
   CANCELLATION_REQUESTED
+  CANCELLED
 }
 
 enum GatePassApprovalStatus {

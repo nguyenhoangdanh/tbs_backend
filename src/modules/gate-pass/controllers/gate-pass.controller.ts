@@ -120,6 +120,22 @@ export class GatePassController {
     return this.service.update(id, userId, dto);
   }
 
+  // ── Huỷ đơn ──────────────────────────────────────────────────
+
+  @Patch(':id/cancel')
+  @RequirePermissions('gate-passes:create')
+  cancel(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') userId: string) {
+    return this.service.cancel(id, userId);
+  }
+
+  // ── Nộp nháp ─────────────────────────────────────────────────
+
+  @Patch(':id/submit')
+  @RequirePermissions('gate-passes:create')
+  submitDraft(@Param('id', ParseUUIDPipe) id: string, @GetUser('id') userId: string) {
+    return this.service.submitDraft(id, userId);
+  }
+
   // ── Xoá ──────────────────────────────────────────────────────
 
   @Delete(':id')

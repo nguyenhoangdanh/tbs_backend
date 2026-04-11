@@ -473,6 +473,8 @@ export class GatePassService {
     const officeId = user.officeId ?? null;
     const passNumber = await this.generatePassNumber(user.companyId);
 
+    const isDraft = (dto as any).draft === true;
+
     const gatePass = await this.prisma.gatePass.create({
       data: {
         passNumber,
@@ -484,21 +486,75 @@ export class GatePassService {
         destination: dto.destination,
         startDateTime: new Date(dto.startDateTime),
         endDateTime: dto.endDateTime ? new Date(dto.endDateTime) : null,
-        status: GatePassStatus.PENDING,
-        currentLevel: 1,
+        status: isDraft ? GatePassStatus.DRAFT : GatePassStatus.PENDING,
+        currentLevel: isDraft ? null : 1,
       },
     });
 
-    const requesterJobName = user.jobPosition?.jobName ?? null;
-
-    await this.notifyApprovers(gatePass.id, departmentId, officeId, 1, {
-      type: 'GATE_PASS_PENDING_APPROVAL',
-      title: 'Có giấy ra vào cổng mới cần duyệt',
-      message: `${user.lastName} ${user.firstName} (${user.employeeCode}) vừa tạo giấy ra vào cổng`,
-      data: { gatePassId: gatePass.id },
-    }, requesterJobName, userId);
+    if (!isDraft) {
+      const requesterJobName = user.jobPosition?.jobName ?? null;
+      await this.notifyApprovers(gatePass.id, departmentId, officeId, 1, {
+        type: 'GATE_PASS_PENDING_APPROVAL',
+        title: 'Có giấy ra vào cổng mới cần duyệt',
+        message: `${user.lastName} ${user.firstName} (${user.employeeCode}) vừa tạo giấy ra vào cổng`,
+        data: { gatePassId: gatePass.id },
+      }, requesterJobName, userId);
+    }
 
     return this.findById(gatePass.id);
+  }
+
+  // ── Nộp nháp ─────────────────────────────────────────────────
+
+  async submitDraft(id: string, userId: string) {
+    const gatePass = await this.findById(id);
+    if (gatePass.userId !== userId) throw new ForbiddenException('Không có quyền nộp đơn này');
+    if (gatePass.status !== GatePassStatus.DRAFT) {
+      throw new BadRequestException('Chỉ có thể nộp đơn ở trạng thái nháp');
+    }
+
+    await this.prisma.gatePass.update({
+      where: { id },
+      data: { status: GatePassStatus.PENDING, currentLevel: 1 },
+    });
+
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        firstName: true, lastName: true, employeeCode: true, officeId: true,
+        jobPosition: { select: { jobName: true, department: { select: { id: true } } } },
+      },
+    });
+    const departmentId = user.jobPosition?.department?.id ?? null;
+    const officeId = user.officeId ?? null;
+    const requesterJobName = user.jobPosition?.jobName ?? null;
+
+    await this.notifyApprovers(id, departmentId, officeId, 1, {
+      type: 'GATE_PASS_PENDING_APPROVAL',
+      title: 'Có giấy ra vào cổng mới cần duyệt',
+      message: `${user.lastName} ${user.firstName} (${user.employeeCode}) vừa nộp giấy ra vào cổng`,
+      data: { gatePassId: id },
+    }, requesterJobName, userId);
+
+    return this.findById(id);
+  }
+
+  // ── Huỷ đơn (chỉ khi chưa có ai duyệt) ─────────────────────
+
+  async cancel(id: string, userId: string) {
+    const gatePass = await this.findById(id);
+    if (gatePass.userId !== userId) throw new ForbiddenException('Không có quyền huỷ đơn này');
+    if (gatePass.status !== GatePassStatus.PENDING) {
+      throw new BadRequestException('Chỉ có thể huỷ đơn khi còn chờ duyệt');
+    }
+    const actioned = (gatePass as any).approvals?.some(
+      (a: any) => a.status === 'APPROVED' || a.status === 'REJECTED',
+    );
+    if (actioned) {
+      throw new BadRequestException('Không thể huỷ đơn khi đã có người duyệt');
+    }
+    await this.prisma.gatePass.update({ where: { id }, data: { status: GatePassStatus.CANCELLED } });
+    return this.findById(id);
   }
 
   // ── Danh sách đơn của tôi ────────────────────────────────────
@@ -872,8 +928,9 @@ export class GatePassService {
   async delete(id: string, userId: string) {
     const gatePass = await this.findById(id);
     if (gatePass.userId !== userId) throw new ForbiddenException('Không có quyền xoá đơn này');
-    if (gatePass.status !== GatePassStatus.PENDING) {
-      throw new BadRequestException('Chỉ có thể xoá đơn khi còn chờ duyệt');
+    const deletable = [GatePassStatus.DRAFT, GatePassStatus.CANCELLED] as string[];
+    if (!deletable.includes(gatePass.status as string)) {
+      throw new BadRequestException('Chỉ có thể xoá đơn nháp hoặc đã huỷ');
     }
     await this.prisma.gatePass.delete({ where: { id } });
     return { message: 'Đã xoá giấy ra vào cổng' };
