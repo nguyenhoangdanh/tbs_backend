@@ -364,6 +364,159 @@ export class LeaveRequestService {
 
   // ── Query ───────────────────────────────────────────────────────
 
+  async getMyApprover(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: {
+        id: true, companyId: true, officeId: true,
+        jobPosition: { select: { departmentId: true, jobName: true } },
+      },
+    });
+
+    const flow = await this.approvalService.findMatchingFlow(
+      user.companyId,
+      null as any,
+      user.officeId ?? null,
+      user.jobPosition?.departmentId ?? null,
+      userId,
+      user.jobPosition?.jobName ?? null,
+    );
+
+    if (!flow) return { approvers: [], levelInfo: null };
+
+    const levels: any[] = ((flow as any).levels ?? []).sort((a: any, b: any) => a.level - b.level);
+    if (!levels.length) return { approvers: [], levelInfo: null };
+
+    const userSelect = {
+      id: true, firstName: true, lastName: true, employeeCode: true,
+      jobPosition: { select: { jobName: true, department: { select: { id: true, name: true } } } },
+    };
+
+    const requesterDeptId = user.jobPosition?.departmentId ?? null;
+    const requesterJobName = user.jobPosition?.jobName ?? null;
+    const requesterOfficeId = user.officeId ?? null;
+
+    for (const lvl of levels) {
+      const approvers = await this.resolveApproversForLevel(
+        lvl, requesterDeptId, requesterJobName, requesterOfficeId, userId, userSelect,
+      );
+      if (approvers.length > 0) {
+        return {
+          approvers,
+          levelInfo: { level: lvl.level, approverMode: lvl.approverMode },
+        };
+      }
+    }
+
+    return { approvers: [], levelInfo: null };
+  }
+
+  private async resolveApproversForLevel(
+    lvl: any,
+    requesterDeptId: string | null,
+    requesterJobName: string | null,
+    requesterOfficeId: string | null,
+    excludeUserId: string,
+    userSelect: any,
+  ): Promise<any[]> {
+    const { approverMode, specificUserId, substitute1Id, substitute2Id,
+            roleDefinitionId, targetDepartmentId } = lvl;
+
+    switch (approverMode) {
+      case 'SPECIFIC_USER': {
+        if (!specificUserId) return [];
+        const ids = [specificUserId, substitute1Id, substitute2Id].filter(Boolean) as string[];
+        return this.prisma.user.findMany({ where: { id: { in: ids }, isActive: true }, select: userSelect });
+      }
+
+      case 'DEPARTMENT_MANAGERS': {
+        const deptId = targetDepartmentId ?? requesterDeptId;
+        if (!deptId) return [];
+        const records = await this.prisma.userDepartmentManagement.findMany({
+          where: { departmentId: deptId, isActive: true },
+          include: { user: { select: userSelect } },
+        });
+        return records.map((r: any) => r.user).filter((u: any) => u.id !== excludeUserId);
+      }
+
+      case 'ROLE_IN_DEPARTMENT': {
+        if (!roleDefinitionId) return [];
+        const roleUsers = await this.prisma.userRole.findMany({
+          where: { roleDefinitionId, isActive: true },
+          select: { userId: true },
+        });
+        const ids = roleUsers.map((r: any) => r.userId).filter((id: string) => id !== excludeUserId);
+        if (!ids.length) return [];
+
+        const deptId = targetDepartmentId ?? requesterDeptId;
+
+        if (deptId && requesterJobName) {
+          // VTCV-first: same dept + same VTCV
+          const vtcvApprovers = await this.prisma.user.findMany({
+            where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
+            select: userSelect,
+          });
+          if (vtcvApprovers.length) return vtcvApprovers;
+
+          // Fallback: UDM managers of requester's dept
+          const udmRecords = await this.prisma.userDepartmentManagement.findMany({
+            where: { departmentId: deptId, isActive: true, userId: { in: ids } },
+            select: { userId: true },
+          });
+          const udmIds = udmRecords.map((r: any) => r.userId);
+          if (udmIds.length) {
+            const udmApprovers = await this.prisma.user.findMany({
+              where: { id: { in: udmIds }, isActive: true },
+              select: userSelect,
+            });
+            if (udmApprovers.length) return udmApprovers;
+          }
+        }
+
+        if (deptId) {
+          return this.prisma.user.findMany({
+            where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId } },
+            select: userSelect,
+          });
+        }
+
+        return [];
+      }
+
+      case 'ROLE_IN_OFFICE': {
+        if (!roleDefinitionId || !requesterOfficeId) return [];
+        const roleUsers = await this.prisma.userRole.findMany({
+          where: { roleDefinitionId, isActive: true },
+          select: { userId: true },
+        });
+        const ids = roleUsers.map((r: any) => r.userId).filter((id: string) => id !== excludeUserId);
+        if (!ids.length) return [];
+        return this.prisma.user.findMany({
+          where: { id: { in: ids }, officeId: requesterOfficeId, isActive: true },
+          select: userSelect,
+        });
+      }
+
+      case 'ROLE_IN_COMPANY': {
+        if (!roleDefinitionId) return [];
+        const roleUsers = await this.prisma.userRole.findMany({
+          where: { roleDefinitionId, isActive: true },
+          select: { userId: true },
+        });
+        const ids = roleUsers.map((r: any) => r.userId).filter((id: string) => id !== excludeUserId);
+        if (!ids.length) return [];
+        return this.prisma.user.findMany({
+          where: { id: { in: ids }, isActive: true },
+          select: userSelect,
+          take: 5,
+        });
+      }
+
+      default:
+        return [];
+    }
+  }
+
   async getMyRequests(userId: string, companyId: string, filters: {
     status?: string; leaveTypeId?: string; year?: number; page?: number; limit?: number;
   }) {
