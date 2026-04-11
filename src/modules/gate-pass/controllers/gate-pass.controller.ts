@@ -152,8 +152,10 @@ export class GatePassController {
     @Query('departmentId') departmentId?: string,
     @Query('includeAll') includeAll?: string,
     @Query('allUsers') allUsers?: string,
+    @Query('allPositions') allPositions?: string,
+    @Query('jobName') jobName?: string,
   ) {
-    return this.service.getApproverCandidates(officeId, departmentId, includeAll === 'true', allUsers === 'true');
+    return this.service.getApproverCandidates(officeId, departmentId, includeAll === 'true', allUsers === 'true', allPositions === 'true', jobName);
   }
 
   @Get('config/job-names')

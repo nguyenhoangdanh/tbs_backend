@@ -1196,19 +1196,28 @@ export class GatePassService {
    /**  When includeAll=true, returns all active users in scope except NV/CN level positions
    *  (only those eligible to approve, i.e. position name not in NV/CN).
    *  When allUsers=true, returns ALL active users regardless of position (for requester filter). */
-  async getApproverCandidates(officeId?: string, departmentId?: string, includeAll?: boolean, allUsers?: boolean) {
+  async getApproverCandidates(officeId?: string, departmentId?: string, includeAll?: boolean, allUsers?: boolean, allPositions?: boolean, jobName?: string) {
     if (!officeId && !departmentId) return [];
 
     const NV_CN_NAMES = ['NV', 'CN'];
-    const positionFilter = allUsers
-      ? { name: { in: NV_CN_NAMES } }  // requester filter: only NV/CN employees
-      : includeAll
-        ? { name: { notIn: NV_CN_NAMES } }
-        : { isManagement: true };
+    let positionFilter: any;
+    if (allPositions) {
+      positionFilter = undefined; // no restriction
+    } else if (allUsers) {
+      positionFilter = { name: { in: NV_CN_NAMES } };
+    } else if (includeAll) {
+      positionFilter = { name: { notIn: NV_CN_NAMES } };
+    } else {
+      positionFilter = { isManagement: true };
+    }
 
-    const jobPositionWhere = departmentId
-      ? { departmentId, position: positionFilter }
-      : { department: { officeId }, position: positionFilter };
+    const jobPositionWhere: any = departmentId
+      ? { departmentId, ...(positionFilter ? { position: positionFilter } : {}) }
+      : { department: { officeId }, ...(positionFilter ? { position: positionFilter } : {}) };
+
+    if (jobName) {
+      jobPositionWhere.jobName = jobName;
+    }
 
     const users = await this.prisma.user.findMany({
       where: { isActive: true, jobPosition: jobPositionWhere },
