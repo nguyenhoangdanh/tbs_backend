@@ -1260,6 +1260,16 @@ export class GatePassService {
   ): Promise<typeof CANDIDATE_SELECT extends object ? any[] : never> {
     if (!departmentId) return [];
 
+    // If VTCV filter is specified, skip depts that have no employees with that VTCV at all.
+    // This prevents "general managers" (TGĐ, P.TGĐ, etc.) from leaking into results
+    // when querying across all depts of an office.
+    if (jobName) {
+      const hasVtcvMembers = await this.prisma.user.count({
+        where: { isActive: true, jobPosition: { departmentId, jobName } },
+      });
+      if (hasVtcvMembers === 0) return [];
+    }
+
     const managers = await this.getDeptManagers(departmentId);
     if (managers.length === 0) return [];
 
