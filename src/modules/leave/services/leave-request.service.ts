@@ -422,6 +422,41 @@ export class LeaveRequestService {
     const { approverMode, specificUserId, substitute1Id, substitute2Id,
             roleDefinitionId, targetDepartmentId } = lvl;
 
+    const mainApprovers = await this.resolveMainApprovers(
+      approverMode, specificUserId, substitute1Id, substitute2Id,
+      roleDefinitionId, targetDepartmentId,
+      requesterDeptId, requesterJobName, requesterOfficeId,
+      excludeUserId, userSelect,
+    );
+
+    // Always append substitutes (they can approve regardless of mode)
+    const subIds = [substitute1Id, substitute2Id]
+      .filter((id: string | undefined) => id && id !== excludeUserId) as string[];
+    if (subIds.length && approverMode !== 'SPECIFIC_USER') {
+      const existingIds = new Set(mainApprovers.map((u: any) => u.id));
+      const subs = await this.prisma.user.findMany({
+        where: { id: { in: subIds }, isActive: true, NOT: { id: { in: [...existingIds] } } },
+        select: userSelect,
+      });
+      return [...mainApprovers, ...subs];
+    }
+
+    return mainApprovers;
+  }
+
+  private async resolveMainApprovers(
+    approverMode: string,
+    specificUserId: string | null,
+    substitute1Id: string | null,
+    substitute2Id: string | null,
+    roleDefinitionId: string | null,
+    targetDepartmentId: string | null,
+    requesterDeptId: string | null,
+    requesterJobName: string | null,
+    requesterOfficeId: string | null,
+    excludeUserId: string,
+    userSelect: any,
+  ): Promise<any[]> {
     switch (approverMode) {
       case 'SPECIFIC_USER': {
         if (!specificUserId) return [];
@@ -458,16 +493,7 @@ export class LeaveRequestService {
             });
             if (vtcvApprovers.length) return vtcvApprovers;
           }
-          // No same-VTCV role approver found. Check substitutes configured for this level.
-          const subIds = [substitute1Id, substitute2Id].filter((id: string | undefined) => id && id !== excludeUserId) as string[];
-          if (subIds.length) {
-            const subApprovers = await this.prisma.user.findMany({
-              where: { id: { in: subIds }, isActive: true },
-              select: userSelect,
-            });
-            if (subApprovers.length) return subApprovers;
-          }
-          // User has VTCV but no matching approver or substitute → skip level
+          // User has VTCV but no same-VTCV role approver → skip (substitutes added by caller)
           return [];
         }
 
