@@ -117,79 +117,32 @@ export class LeaveFlowService {
     const userIds = roleRows.map(r => r.userId);
     if (!userIds.length) return [];
 
-    // Base user filter — NOT filtering by companyId here because SUPERADMIN may belong
-    // to parent company while employees are in child companies. Dept/role filters are sufficient.
+    // Base user filter
     const baseWhere: any = { id: { in: userIds }, isActive: true };
 
-    // Dept/office scoping
+    // Dept/office scoping — strict: prefer targetDepartmentId, then officeId
     let deptWhere: any = undefined;
-    if (approverMode === 'ROLE_IN_DEPARTMENT' && targetDepartmentId) {
-      deptWhere = {
-        OR: [
-          { jobPosition: { departmentId: targetDepartmentId } },
-          { managedDepartments: { some: { departmentId: targetDepartmentId, isActive: true } } },
-        ],
-      };
+    if (approverMode === 'ROLE_IN_DEPARTMENT') {
+      if (targetDepartmentId) {
+        deptWhere = {
+          OR: [
+            { jobPosition: { departmentId: targetDepartmentId } },
+            { managedDepartments: { some: { departmentId: targetDepartmentId, isActive: true } } },
+          ],
+        };
+      } else if (officeId) {
+        // Flow is office-scoped with no specific dept → show all role holders within that office
+        deptWhere = { officeId };
+      }
     } else if (approverMode === 'ROLE_IN_OFFICE' && officeId) {
       deptWhere = { officeId };
-    } else if (approverMode === 'ROLE_IN_DEPARTMENT' && !targetDepartmentId && officeId) {
-      // No specific dept selected → show all role holders within the scoped office as preview
-      deptWhere = { officeId };
     }
 
-    // Try with dept filter first
-    if (deptWhere) {
-      const withDept = await this.prisma.user.findMany({
-        where: { ...baseWhere, ...deptWhere },
-        select: { id: true, firstName: true, lastName: true, employeeCode: true },
-        take: 20,
-      });
-      if (withDept.length > 0) return withDept;
-
-      // Fallback: also try matching by department NAME across all depts in the company
-      // (handles case where user selected QTNNL from a different office)
-      if (targetDepartmentId) {
-        const targetDept = await this.prisma.department.findUnique({
-          where: { id: targetDepartmentId },
-          select: { name: true },
-        });
-        if (targetDept) {
-          const sameName = await this.prisma.department.findMany({
-            where: { name: targetDept.name },
-            select: { id: true },
-          });
-          const sameNameIds = sameName.map(d => d.id);
-          if (sameNameIds.length > 1) {
-            const withNameMatch = await this.prisma.user.findMany({
-              where: {
-                ...baseWhere,
-                OR: [
-                  { jobPosition: { departmentId: { in: sameNameIds } } },
-                  { managedDepartments: { some: { departmentId: { in: sameNameIds }, isActive: true } } },
-                ],
-              },
-              select: { id: true, firstName: true, lastName: true, employeeCode: true },
-              take: 20,
-            });
-            if (withNameMatch.length > 0) return withNameMatch;
-          }
-        }
-      }
-
-      // Final fallback: return all users with the role scoped by office if available
-      const fallbackWhere = officeId ? { ...baseWhere, officeId } : baseWhere;
-      return this.prisma.user.findMany({
-        where: fallbackWhere,
-        select: { id: true, firstName: true, lastName: true, employeeCode: true },
-        take: 20,
-      });
-    }
-
-    const noScopeWhere = officeId ? { ...baseWhere, officeId } : baseWhere;
+    const finalWhere = deptWhere ? { ...baseWhere, ...deptWhere } : (officeId ? { ...baseWhere, officeId } : baseWhere);
     return this.prisma.user.findMany({
-      where: noScopeWhere,
+      where: finalWhere,
       select: { id: true, firstName: true, lastName: true, employeeCode: true },
-      take: 20,
+      take: 50,
     });
   }
 
