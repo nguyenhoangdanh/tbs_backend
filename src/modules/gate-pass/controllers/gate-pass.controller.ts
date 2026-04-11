@@ -108,6 +108,18 @@ export class GatePassController {
     return this.service.reject(id, userId, dto);
   }
 
+  // ── Chỉnh sửa ────────────────────────────────────────────────
+
+  @Patch(':id')
+  @RequirePermissions('gate-passes:create')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+    @Body() dto: CreateGatePassDto,
+  ) {
+    return this.service.update(id, userId, dto);
+  }
+
   // ── Xoá ──────────────────────────────────────────────────────
 
   @Delete(':id')

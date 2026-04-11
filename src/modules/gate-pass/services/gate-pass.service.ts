@@ -842,6 +842,33 @@ export class GatePassService {
 
   // ── Xoá đơn (chỉ khi còn PENDING và là chủ đơn) ────────────
 
+  async update(id: string, userId: string, dto: CreateGatePassDto) {
+    const gatePass = await this.findById(id);
+    if (gatePass.userId !== userId) throw new ForbiddenException('Không có quyền chỉnh sửa đơn này');
+    if (gatePass.status !== GatePassStatus.PENDING) {
+      throw new BadRequestException('Chỉ có thể chỉnh sửa đơn khi còn chờ duyệt');
+    }
+    // Disallow edit if any approval has already been acted on (approved or rejected)
+    const actioned = (gatePass as any).approvals?.some(
+      (a: any) => a.status === 'APPROVED' || a.status === 'REJECTED',
+    );
+    if (actioned) {
+      throw new BadRequestException('Không thể chỉnh sửa đơn khi đã có người duyệt');
+    }
+
+    await this.prisma.gatePass.update({
+      where: { id },
+      data: {
+        reasonType: dto.reasonType,
+        reasonDetail: dto.reasonDetail ?? null,
+        destination: dto.destination ?? null,
+        startDateTime: new Date(dto.startDateTime),
+        endDateTime: dto.endDateTime ? new Date(dto.endDateTime) : null,
+      },
+    });
+    return this.findById(id);
+  }
+
   async delete(id: string, userId: string) {
     const gatePass = await this.findById(id);
     if (gatePass.userId !== userId) throw new ForbiddenException('Không có quyền xoá đơn này');
