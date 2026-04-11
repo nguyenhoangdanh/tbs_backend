@@ -446,40 +446,50 @@ export class LeaveRequestService {
           select: { userId: true },
         });
         const ids = roleUsers.map((r: any) => r.userId).filter((id: string) => id !== excludeUserId);
-        if (!ids.length) return [];
 
         const deptId = targetDepartmentId ?? requesterDeptId;
 
         if (deptId && requesterJobName) {
-          // VTCV-first: same dept + same VTCV
-          const vtcvApprovers = await this.prisma.user.findMany({
-            where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
+          // VTCV-first: strictly same dept + same VTCV only
+          if (ids.length) {
+            const vtcvApprovers = await this.prisma.user.findMany({
+              where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
+              select: userSelect,
+            });
+            if (vtcvApprovers.length) return vtcvApprovers;
+          }
+          // No same-VTCV role approver found. Check substitutes configured for this level.
+          const subIds = [substitute1Id, substitute2Id].filter((id: string | undefined) => id && id !== excludeUserId) as string[];
+          if (subIds.length) {
+            const subApprovers = await this.prisma.user.findMany({
+              where: { id: { in: subIds }, isActive: true },
+              select: userSelect,
+            });
+            if (subApprovers.length) return subApprovers;
+          }
+          // User has VTCV but no matching approver or substitute → skip level
+          return [];
+        }
+
+        if (deptId && ids.length) {
+          // No VTCV constraint: any role user in same dept or UDM manager
+          const inDept = await this.prisma.user.findMany({
+            where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId } },
             select: userSelect,
           });
-          if (vtcvApprovers.length) return vtcvApprovers;
-
-          // Fallback: UDM managers of requester's dept
+          if (inDept.length) return inDept;
+          // UDM fallback only when requester has no VTCV
           const udmRecords = await this.prisma.userDepartmentManagement.findMany({
             where: { departmentId: deptId, isActive: true, userId: { in: ids } },
             select: { userId: true },
           });
           const udmIds = udmRecords.map((r: any) => r.userId);
           if (udmIds.length) {
-            const udmApprovers = await this.prisma.user.findMany({
+            return this.prisma.user.findMany({
               where: { id: { in: udmIds }, isActive: true },
               select: userSelect,
             });
-            if (udmApprovers.length) return udmApprovers;
           }
-          // User has VTCV but no matching approver → return [] to skip level
-          return [];
-        }
-
-        if (deptId) {
-          return this.prisma.user.findMany({
-            where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId } },
-            select: userSelect,
-          });
         }
 
         return [];
