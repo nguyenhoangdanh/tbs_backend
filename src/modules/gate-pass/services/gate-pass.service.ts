@@ -473,7 +473,7 @@ export class GatePassService {
     const officeId = user.officeId ?? null;
     const passNumber = await this.generatePassNumber(user.companyId);
 
-    const isDraft = (dto as any).draft === true;
+    const isDraft = dto.draft === true;
 
     const gatePass = await this.prisma.gatePass.create({
       data: {

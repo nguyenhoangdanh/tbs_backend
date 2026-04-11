@@ -1,4 +1,4 @@
-import { IsString, IsDateString, IsEnum, IsOptional } from 'class-validator';
+import { IsString, IsDateString, IsEnum, IsOptional, IsBoolean } from 'class-validator';
 import { GatePassReason } from '@prisma/client';
 
 export class CreateGatePassDto {
@@ -19,4 +19,8 @@ export class CreateGatePassDto {
   @IsOptional()
   @IsDateString()
   endDateTime?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  draft?: boolean;
 }
