@@ -367,29 +367,27 @@ export class LeaveApprovalService {
             whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId } } });
           }
         } else {
-          // No explicit target dept → office-head fallback:
-          // Show requests from ALL depts in approver's same office (e.g. T.LINE sees all LINE PHỤ TRỢ)
-          if (approver.officeId) {
-            whereConditions.push({ ...base, user: { officeId: approver.officeId } });
-          } else if (primaryDeptId) {
+          // No explicit target dept → use approver's own dept + VTCV (strict 3-condition check)
+          // + UDM-managed depts (cross-dept manager via UserDepartmentManagement)
+          if (primaryDeptId) {
             if (approverJobName) {
               whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId, jobName: approverJobName } } });
             } else {
               whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
             }
+          } else if (approver.officeId) {
+            // Approver has no dept → office-wide (pure management role)
+            whereConditions.push({ ...base, user: { officeId: approver.officeId } });
           }
         }
 
-        // T.LINE case: approver ở ĐH LINE nhưng quản lý TỔ CD 1, 2... qua UDM
-        // Thêm requests từ các dept mà approver quản lý (khác primaryDeptId) có cùng VTCV
-        if (el.targetDepartmentId) {
-          for (const { departmentId: managedDeptId } of approver.managedDepartments) {
-            if (managedDeptId === primaryDeptId) continue;
-            if (approverJobName) {
-              whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
-            } else {
-              whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
-            }
+        // UDM cross-dept: approver manages other depts (applied regardless of targetDepartmentId)
+        for (const { departmentId: managedDeptId } of approver.managedDepartments) {
+          if (managedDeptId === primaryDeptId) continue;
+          if (approverJobName) {
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
+          } else {
+            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
           }
         }
         continue;
@@ -506,13 +504,13 @@ export class LeaveApprovalService {
         if (deptId) {
           const requesterJobName = requesterInfo.jobPosition?.jobName;
           if (requesterJobName) {
-            // Case 1: cùng dept + cùng VTCV (TT duyệt CN)
+            // Case 1: same dept + same VTCV (strict 3-condition)
             const sameDeptSameVtcv = await this.prisma.user.count({
               where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
             });
             if (sameDeptSameVtcv > 0) return true;
 
-            // Case 2: UDM cross-dept manager
+            // Case 2: UDM cross-dept manager (manages requester's dept)
             const udmManagers = await this.prisma.userDepartmentManagement.count({
               where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
             });
@@ -528,15 +526,6 @@ export class LeaveApprovalService {
             });
             if (managesDept > 0) return true;
           }
-        }
-
-        // Office-head fallback: khi không có explicit targetDept, approver cùng office là đủ
-        // (e.g. T.LINE ở ĐH LINE duyệt cho TỔ SX DÂY KÉO trong cùng office LINE PHỤ TRỢ)
-        if (!targetDepartmentId && requesterInfo.officeId) {
-          const inOffice = await this.prisma.user.count({
-            where: { id: { in: userIds }, officeId: requesterInfo.officeId },
-          });
-          return inOffice > 0;
         }
 
         return false;
@@ -684,25 +673,18 @@ export class LeaveApprovalService {
         });
         const approverDept = approverUser?.jobPosition?.departmentId;
         const approverJobName = approverUser?.jobPosition?.jobName ?? null;
-        const approverOffice = (approverUser as any)?.officeId ?? null;
         const managedDepts = (approverUser as any)?.managedDepartments?.map((d: any) => d.departmentId) ?? [];
         const requesterJobName = requesterInfo.jobPosition?.jobName;
 
         if (deptId) {
           if (requesterJobName) {
-            // UDM cross-dept manager
+            // UDM cross-dept manager (manages requester's dept)
             if (managedDepts.includes(deptId)) return true;
-            // Cùng dept + cùng VTCV (TT duyệt CN)
+            // Same dept + same VTCV (strict 3-condition: office + dept + VTCV)
             if (approverJobName === requesterJobName && approverDept === deptId) return true;
           } else {
             if (approverDept === deptId || managedDepts.includes(deptId)) return true;
           }
-        }
-
-        // Office-head fallback: khi không có explicit targetDept, approver cùng office là đủ
-        // (e.g. T.LINE ở ĐH LINE duyệt cho TỔ SX DÂY KÉO trong cùng office LINE PHỤ TRỢ)
-        if (!targetDepartmentId && requesterInfo.officeId && approverOffice === requesterInfo.officeId) {
-          return true;
         }
 
         return false;

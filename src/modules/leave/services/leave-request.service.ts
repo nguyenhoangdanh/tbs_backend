@@ -537,8 +537,25 @@ export class LeaveRequestService {
                   take: 3,
                 });
                 if (vtcvApprovers.length > 0) { approvers = vtcvApprovers; break; }
+
+                // Fallback: UDM managers of requester's dept (cross-dept managers)
+                if (requesterDeptId) {
+                  const udmRecords = await this.prisma.userDepartmentManagement.findMany({
+                    where: { departmentId: requesterDeptId, isActive: true, userId: { in: ids } },
+                    select: { userId: true },
+                  });
+                  const udmIds = udmRecords.map((r: any) => r.userId);
+                  if (udmIds.length > 0) {
+                    approvers = await this.prisma.user.findMany({
+                      where: { id: { in: udmIds }, isActive: true },
+                      select: { id: true, firstName: true, lastName: true, employeeCode: true },
+                      take: 3,
+                    });
+                    if (approvers.length > 0) break;
+                  }
+                }
               }
-              // Fallback: any approver in same dept (no VTCV match found)
+              // No VTCV constraint: any approver in same dept
               approvers = await this.prisma.user.findMany({
                 where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: requesterDeptId } },
                 select: { id: true, firstName: true, lastName: true, employeeCode: true },
