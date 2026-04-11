@@ -601,7 +601,7 @@ model GatePass {
   destination     String?        // địa điểm
   startDateTime   DateTime
   endDateTime     DateTime?
-  currentLevel    Int            @default(1)  // cấp duyệt hiện tại
+  currentLevel    Int?                          // cấp duyệt hiện tại (null = chưa nộp)
   status          GatePassStatus @default(PENDING)
   rejectionReason String?
   createdAt       DateTime       @default(now())
