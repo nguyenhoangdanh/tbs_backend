@@ -319,8 +319,8 @@ export class LeaveRequestService {
 
   async deleteRequest(requestId: string, userId: string) {
     const request = await this.findRequestForUser(requestId, userId);
-    if (request.status !== 'DRAFT') {
-      throw new BadRequestException('Chỉ có thể xóa đơn ở trạng thái Nháp');
+    if (request.status !== 'DRAFT' && request.status !== 'CANCELLED') {
+      throw new BadRequestException('Chỉ có thể xóa đơn ở trạng thái Nháp hoặc Đã hủy');
     }
     await this.prisma.leaveRequest.delete({ where: { id: requestId } });
     return { success: true };
