@@ -471,6 +471,8 @@ export class LeaveRequestService {
             });
             if (udmApprovers.length) return udmApprovers;
           }
+          // User has VTCV but no matching approver → return [] to skip level
+          return [];
         }
 
         if (deptId) {
