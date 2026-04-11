@@ -82,4 +82,14 @@ export class CreateLeaveFlowDto {
   @ValidateNested({ each: true })
   @Type(() => CreateLeaveFlowLevelDto)
   levels: CreateLeaveFlowLevelDto[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  requesterJobNames?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsUUID(undefined, { each: true })
+  requesterFilterIds?: string[];
 }
