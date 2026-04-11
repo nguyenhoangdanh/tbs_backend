@@ -695,8 +695,9 @@ export class LeaveRequestService {
             id: true,
             code: true,
             name: true,
+            categoryId: true,
             colorCode: true,
-            category: { select: { code: true, name: true, leaveCategory: true } },
+            category: { select: { id: true, code: true, name: true, leaveCategory: true } },
           },
         },
       user: {
