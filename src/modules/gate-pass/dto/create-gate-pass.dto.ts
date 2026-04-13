@@ -9,10 +9,6 @@ export class CreateGatePassDto {
   @IsString()
   reasonDetail?: string;
 
-  @IsOptional()
-  @IsString()
-  destination?: string;
-
   @IsDateString()
   startDateTime: string;
 

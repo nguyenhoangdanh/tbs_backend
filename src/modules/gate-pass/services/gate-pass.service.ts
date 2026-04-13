@@ -528,6 +528,12 @@ export class GatePassService {
 
     const departmentId = user.jobPosition?.department?.id ?? null;
     const officeId = user.officeId ?? null;
+
+    const startDateTime = new Date(dto.startDateTime);
+    const endDateTime = dto.endDateTime ? new Date(dto.endDateTime) : null;
+
+    await this.checkTimeOverlap(userId, startDateTime, endDateTime);
+
     const passNumber = await this.generatePassNumberSafe(user.companyId);
 
     const isDraft = dto.draft === true;
@@ -540,9 +546,8 @@ export class GatePassService {
         companyId: user.companyId,
         reasonType: dto.reasonType,
         reasonDetail: dto.reasonDetail,
-        destination: dto.destination,
-        startDateTime: new Date(dto.startDateTime),
-        endDateTime: dto.endDateTime ? new Date(dto.endDateTime) : null,
+        startDateTime,
+        endDateTime,
         status: isDraft ? GatePassStatus.DRAFT : GatePassStatus.PENDING,
         currentLevel: isDraft ? null : 1,
       },
@@ -1000,14 +1005,19 @@ export class GatePassService {
       throw new BadRequestException('Không thể chỉnh sửa đơn khi đã có người duyệt');
     }
 
+    const startDateTime = new Date(dto.startDateTime);
+    const endDateTime = dto.endDateTime ? new Date(dto.endDateTime) : null;
+
+    // Check overlap excluding the current pass being edited
+    await this.checkTimeOverlap(userId, startDateTime, endDateTime, id);
+
     await this.prisma.gatePass.update({
       where: { id },
       data: {
         reasonType: dto.reasonType,
         reasonDetail: dto.reasonDetail ?? null,
-        destination: dto.destination ?? null,
-        startDateTime: new Date(dto.startDateTime),
-        endDateTime: dto.endDateTime ? new Date(dto.endDateTime) : null,
+        startDateTime,
+        endDateTime,
       },
     });
 
@@ -1045,6 +1055,65 @@ export class GatePassService {
   }
 
   // ── Helpers ──────────────────────────────────────────────────
+
+  /**
+   * Throws BadRequestException if the user already has an active (PENDING/DRAFT)
+   * gate pass whose time window overlaps with [startDateTime, endDateTime].
+   * Two passes overlap when: startA < endB AND startB < endA.
+   * If endDateTime is null (open-ended), any existing pass starting on the same
+   * day at the same time is considered a conflict.
+   *
+   * @param excludeId - pass ID to exclude (used when editing an existing pass)
+   */
+  private async checkTimeOverlap(
+    userId: string,
+    startDateTime: Date,
+    endDateTime: Date | null,
+    excludeId?: string,
+  ): Promise<void> {
+    const activeStatuses = [GatePassStatus.PENDING, GatePassStatus.DRAFT];
+
+    // Build the overlap condition.
+    // For a new pass [newStart, newEnd]:
+    //   overlap if existingStart < newEnd  AND  newStart < existingEnd
+    // When either end is null/open-ended, treat it as "far future" by checking
+    // only that the start times don't match exactly (simple but safe heuristic).
+    const overlapping = await this.prisma.gatePass.findFirst({
+      where: {
+        userId,
+        status: { in: activeStatuses },
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+        AND: [
+          // existingStart < newEnd (or newEnd is null → no upper bound check)
+          endDateTime ? { startDateTime: { lt: endDateTime } } : {},
+          // newStart < existingEnd (or existingEnd is null → open-ended, always overlaps)
+          {
+            OR: [
+              { endDateTime: null },
+              { endDateTime: { gt: startDateTime } },
+            ],
+          },
+          // Also catch exact same startDateTime even if both have no endDateTime
+          {
+            OR: [
+              { startDateTime: { gte: startDateTime } },
+              { endDateTime: { gt: startDateTime } },
+            ],
+          },
+        ],
+      },
+      select: { id: true, passNumber: true, startDateTime: true, endDateTime: true },
+    });
+
+    if (overlapping) {
+      const fmt = (d: Date | null) =>
+        d ? d.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false }) : '...';
+      throw new BadRequestException(
+        `Thời gian bị trùng với đơn #${(overlapping as any).passNumber} ` +
+        `(${fmt(overlapping.startDateTime)} – ${fmt(overlapping.endDateTime)})`,
+      );
+    }
+  }
 
   private async getUserOfficeId(userId: string): Promise<string | null> {
     const user = await this.prisma.user.findUnique({

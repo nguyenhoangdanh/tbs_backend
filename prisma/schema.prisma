@@ -598,7 +598,6 @@ model GatePass {
   companyId       String?
   reasonType      GatePassReason
   reasonDetail    String?
-  destination     String?        // địa điểm
   startDateTime   DateTime
   endDateTime     DateTime?
   currentLevel    Int?                          // cấp duyệt hiện tại (null = chưa nộp)
