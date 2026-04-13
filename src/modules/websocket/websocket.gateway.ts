@@ -35,8 +35,24 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
 
   async handleConnection(client: Socket) {
     try {
-      // Extract token from auth or query
-      const token = client.handshake.auth?.token || client.handshake.query?.token;
+      // Extract token: 1) from handshake auth/query (iOS/token mode)
+      //                2) from httpOnly cookie (web cookie mode)
+      let token: string | undefined = client.handshake.auth?.token || client.handshake.query?.token as string;
+
+      if (!token) {
+        // Parse cookie header manually (httpOnly cookies ARE sent in WS handshake)
+        const cookieHeader = client.handshake.headers?.cookie || '';
+        const cookieMap = cookieHeader.split(';').reduce((acc, pair) => {
+          const idx = pair.indexOf('=');
+          if (idx > 0) {
+            const key = pair.slice(0, idx).trim();
+            const val = pair.slice(idx + 1).trim();
+            acc[key] = decodeURIComponent(val);
+          }
+          return acc;
+        }, {} as Record<string, string>);
+        token = cookieMap['access_token'];
+      }
       
       if (!token) {
         this.logger.warn(`Client ${client.id} connected without token`);
