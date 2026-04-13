@@ -8,9 +8,10 @@ import {
   ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { UseGuards, Logger } from '@nestjs/common';
+import { UseGuards, Logger, Inject, forwardRef } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { JwtService } from '@nestjs/jwt';
+import { PushNotificationService } from '../push-notification/push-notification.service';
 
 @NestWebSocketGateway({
   namespace: 'notifications',
@@ -26,7 +27,11 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   private readonly logger = new Logger(WebSocketGateway.name);
   private connectedUsers = new Map<string, { socketId: string; userId: string }>(); // socketId -> user info
 
-  constructor(private jwtService: JwtService) {}
+  constructor(
+    private jwtService: JwtService,
+    @Inject(forwardRef(() => PushNotificationService))
+    private pushService: PushNotificationService,
+  ) {}
 
   async handleConnection(client: Socket) {
     try {
@@ -127,6 +132,13 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
   sendNotification(userId: string, notification: any) {
     this.server.to(`user_${userId}`).emit('notification', notification);
     this.logger.debug(`Notification sent to user ${userId}:`, notification);
+    // Also send Web Push for background delivery
+    this.pushService.sendToUser(userId, {
+      title: notification.title,
+      body: notification.message,
+      tag: notification.data?.gatePassId ?? notification.data?.leaveId ?? notification.type,
+      url: notification.data?.gatePassId ? '/gate-pass' : notification.data?.leaveId ? '/leave' : '/',
+    }).catch(() => {});
   }
 
   // Send notification to multiple users

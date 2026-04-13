@@ -18,6 +18,7 @@ import { HealthcareModule } from './healthcare/healthcare.module';
 import { FeedbackModule } from './feedback/feedback.module'; // ⭐ NEW
 import { LeaveModule } from './modules/leave/leave.module'; // ⭐ LEAVE MANAGEMENT
 import { GatePassModule } from './modules/gate-pass/gate-pass.module'; // ⭐ GATE PASS
+import { PushNotificationModule } from './modules/push-notification/push-notification.module'; // ⭐ WEB PUSH
 
 // ✅ New consolidated modules
 import { OrganizationModule } from './modules/organization/organization.module';
@@ -65,6 +66,7 @@ import { CommonModule } from './common/common.module'; // ⭐ ADD
     FeedbackModule, // ⭐ NEW
     LeaveModule,    // ⭐ LEAVE MANAGEMENT
     GatePassModule, // ⭐ GATE PASS
+    PushNotificationModule, // ⭐ WEB PUSH
 
     // ✅ New consolidated modules (Use these for new development)
     OrganizationModule,

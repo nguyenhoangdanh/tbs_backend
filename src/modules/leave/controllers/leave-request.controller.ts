@@ -54,6 +54,12 @@ export class LeaveRequestController {
 
   // ── Xem đơn của mình ─────────────────────────────────────────
 
+  @Get('my-approver')
+  @RequirePermissions('leave-requests:view')
+  getMyApprover(@GetUser('id') userId: string) {
+    return this.leaveRequestService.getMyApprover(userId);
+  }
+
   @Get('my')
   @RequirePermissions('leave-requests:view')
   getMyRequests(
