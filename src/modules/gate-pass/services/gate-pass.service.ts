@@ -354,10 +354,39 @@ export class GatePassService {
 
   private async generatePassNumber(companyId?: string): Promise<string> {
     const year = new Date().getFullYear().toString().slice(-2);
-    const count = await this.prisma.gatePass.count({
-      where: { createdAt: { gte: new Date(new Date().getFullYear(), 0, 1) } },
+    const prefix = `GP${year}`;
+
+    // Find the highest existing passNumber for this year to avoid collisions
+    // (count-based approach breaks when records are deleted or on concurrent inserts)
+    const last = await this.prisma.gatePass.findFirst({
+      where: { passNumber: { startsWith: prefix } },
+      orderBy: { passNumber: 'desc' },
+      select: { passNumber: true },
     });
-    return `GP${year}${String(count + 1).padStart(4, '0')}`;
+
+    let next = 1;
+    if (last?.passNumber) {
+      const seq = parseInt(last.passNumber.slice(prefix.length), 10);
+      if (!isNaN(seq)) next = seq + 1;
+    }
+
+    // Retry with incremented sequence on collision (P2002)
+    return `${prefix}${String(next).padStart(4, '0')}`;
+  }
+
+  private async generatePassNumberSafe(companyId?: string): Promise<string> {
+    // Retry up to 5 times on collision
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = await this.generatePassNumber(companyId);
+      const exists = await this.prisma.gatePass.findUnique({
+        where: { passNumber: candidate },
+        select: { passNumber: true },
+      });
+      if (!exists) return candidate;
+    }
+    // Last resort: append random suffix to guarantee uniqueness
+    const year = new Date().getFullYear().toString().slice(-2);
+    return `GP${year}${Date.now().toString().slice(-6)}`;
   }
 
   // ── Lấy approver configs theo officeId hoặc departmentId ──────
@@ -471,7 +500,7 @@ export class GatePassService {
 
     const departmentId = user.jobPosition?.department?.id ?? null;
     const officeId = user.officeId ?? null;
-    const passNumber = await this.generatePassNumber(user.companyId);
+    const passNumber = await this.generatePassNumberSafe(user.companyId);
 
     const isDraft = dto.draft === true;
 
