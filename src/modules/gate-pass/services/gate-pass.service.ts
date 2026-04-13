@@ -619,6 +619,8 @@ export class GatePassService {
   async getPendingMyApproval(approverId: string, query: { page?: number; limit?: number }) {
     const { page = 1, limit = 20 } = query;
 
+    this.logger.debug(`[getPendingMyApproval] approverId=${approverId}`);
+
     // Case 1: User is SPECIFIC_USER approver/substitute in some config
     const specificConfigsRaw = await this.prisma.gatePassApprovalConfig.findMany({
       where: {
@@ -632,6 +634,8 @@ export class GatePassService {
       ...c,
       requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
     }));
+
+    this.logger.debug(`[getPendingMyApproval] specificConfigs=${specificConfigs.length}, ids=${specificConfigs.map(c => c.id).join(',')}`);
 
     // Case 2: DEPARTMENT_HEAD configs — resolve via UDM or position-based fallback
     const allDeptHeadConfigs = await this.prisma.gatePassApprovalConfig.findMany({
@@ -664,6 +668,8 @@ export class GatePassService {
 
     const managedDeptIds = await this.getManagedDeptIds(approverId, [...candidateDeptIds]);
 
+    this.logger.debug(`[getPendingMyApproval] candidateDeptIds=${[...candidateDeptIds].join(',')}, managedDeptIds=${managedDeptIds.join(',')}`);
+
     const conditions: any[] = [];
 
     // From specific configs — NEVER show the approver's own passes
@@ -675,6 +681,13 @@ export class GatePassService {
       }
 
       if (cfg.officeId) {
+        // Find all dept IDs in this office to filter by departmentId (more reliable than user.officeId)
+        const deptsInOffice = await this.prisma.department.findMany({
+          where: { officeId: cfg.officeId },
+          select: { id: true },
+        });
+        const allDeptIdsInOffice = deptsInOffice.map((d) => d.id);
+
         const deptsWithOwnConfig = await this.prisma.gatePassApprovalConfig.findMany({
           where: {
             department: { officeId: cfg.officeId },
@@ -683,25 +696,30 @@ export class GatePassService {
           },
           select: { departmentId: true },
         });
-        const overriddenDeptIds = deptsWithOwnConfig.map((d) => d.departmentId).filter(Boolean) as string[];
+        const overriddenDeptIds = new Set(deptsWithOwnConfig.map((d) => d.departmentId).filter(Boolean) as string[]);
+        const scopeDeptIds = allDeptIdsInOffice.filter((id) => !overriddenDeptIds.has(id));
+
+        if (scopeDeptIds.length === 0) continue;
 
         const specJobNames: string[] = cfg.requesterJobNames?.length > 0 ? cfg.requesterJobNames : (cfg.requesterJobName ? [cfg.requesterJobName] : []);
-        const userFilter = cfg.requesterFilterIds?.length > 0
-          ? undefined
-          : specJobNames.length > 0
-            ? { officeId: cfg.officeId, jobPosition: { jobName: specJobNames.length === 1 ? specJobNames[0] : { in: specJobNames } } }
-            : { officeId: cfg.officeId };
 
-        conditions.push({
+        const condition: any = {
           currentLevel: cfg.level,
           status: GatePassStatus.PENDING,
-          ...(userFilter ? { user: userFilter } : {}),
+          NOT: { userId: approverId },
           ...specRequesterCond,
-          NOT: [
-            ...(overriddenDeptIds.length > 0 ? [{ departmentId: { in: overriddenDeptIds } }] : []),
-            { userId: approverId },
-          ],
-        });
+        };
+
+        if (specRequesterCond.userId) {
+          // requesterFilterIds takes priority — no further dept/user filter needed
+        } else if (specJobNames.length > 0) {
+          condition.departmentId = { in: scopeDeptIds };
+          condition.user = { jobPosition: { jobName: specJobNames.length === 1 ? specJobNames[0] : { in: specJobNames } } };
+        } else {
+          condition.departmentId = { in: scopeDeptIds };
+        }
+
+        conditions.push(condition);
       } else if (cfg.departmentId) {
         conditions.push({
           departmentId: cfg.departmentId,
@@ -757,6 +775,8 @@ export class GatePassService {
       );
       conditions.push(...vtcvConditions);
     }
+
+    this.logger.debug(`[getPendingMyApproval] total conditions=${conditions.length}: ${JSON.stringify(conditions)}`);
 
     if (conditions.length === 0) return { data: [], total: 0, page, limit };
 
