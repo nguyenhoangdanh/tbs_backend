@@ -1010,7 +1010,27 @@ export class GatePassService {
         endDateTime: dto.endDateTime ? new Date(dto.endDateTime) : null,
       },
     });
-    return this.findById(id);
+
+    const updated = await this.findById(id);
+
+    // Notify approvers so their UI refreshes without manual page reload
+    const officeId = await this.getUserOfficeId(userId);
+    await this.notifyApprovers(
+      id,
+      updated.departmentId ?? null,
+      officeId,
+      updated.currentLevel ?? 1,
+      {
+        type: 'GATE_PASS_UPDATED',
+        title: 'Giấy ra vào cổng đã được chỉnh sửa',
+        message: `${(updated as any).user?.fullName ?? 'Người dùng'} vừa cập nhật thông tin giấy ra vào cổng #${(updated as any).gatePassCode}`,
+        data: { gatePassId: id },
+      },
+      (updated as any).user?.jobName ?? null,
+      userId,
+    );
+
+    return updated;
   }
 
   async delete(id: string, userId: string) {
