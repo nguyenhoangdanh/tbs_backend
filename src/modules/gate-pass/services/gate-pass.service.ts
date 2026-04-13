@@ -158,11 +158,27 @@ export class GatePassService {
     const managers = await this.getDeptManagers(departmentId);
     const managerIds = managers.map((m) => m.userId);
 
+    // Check system role first — MANAGER/ADMIN always qualify
+    const approverUser = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        roles: { where: { isActive: true }, select: { roleDefinition: { select: { code: true } } } },
+      },
+    });
+    const roleCodes = (approverUser?.roles ?? []).map((r: any) => r.roleDefinition?.code ?? '');
+    const isHighRole = roleCodes.some((c: string) => ['SUPERADMIN', 'ADMIN', 'MANAGER'].includes(c));
+
     if (managerIds.includes(userId)) {
-      if (!requesterJobName) return true;
+      if (!requesterJobName || isHighRole) return true;
       const thisManager = managers.find((m) => m.userId === userId);
       const managerJobName = thisManager?.jobName ?? null;
-      return this.isDeptMgrEligibleForVtcv(userId, managerJobName, departmentId, requesterJobName, managerIds);
+      return this.isDeptMgrEligibleForVtcv(userId, managerJobName, departmentId, requesterJobName, managerIds, isHighRole);
+    }
+
+    // Not in UDM — high-role users can still approve if they manage this dept
+    if (isHighRole) {
+      const managedIds = await this.getManagedDeptIds(userId, [departmentId]);
+      if (managedIds.includes(departmentId)) return true;
     }
 
     // Not in UDM — check if they're a position-based manager (isManagement=true) for the requester's VTCV
@@ -197,12 +213,13 @@ export class GatePassService {
     deptId: string,
     requesterJobName: string,
     managerIds?: string[],
+    isHighRole?: boolean,
   ): Promise<boolean> {
     if (managerJobName === requesterJobName) return true;
 
     const mgrIds = managerIds ?? (await this.getDeptManagers(deptId)).map((m) => m.userId);
 
-    const isGeneralMgr = !managerJobName || (await this.prisma.user.count({
+    const isGeneralMgr = isHighRole || !managerJobName || (await this.prisma.user.count({
       where: { isActive: true, jobPosition: { departmentId: deptId, jobName: managerJobName }, id: { notIn: mgrIds } },
     })) === 0;
 
