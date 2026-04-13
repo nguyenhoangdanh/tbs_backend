@@ -1104,8 +1104,12 @@ export class GatePassService {
       if (config.substituteUserId) approverIds.push(config.substituteUserId);
     }
 
-    if (approverIds.length > 0) {
-      await this.wsGateway.sendNotificationToUsers(approverIds, {
+    // Deduplicate and exclude the requester (prevents self-notification when a manager
+    // creates/cancels their own pass and is also auto-detected as an approver)
+    const uniqueApproverIds = [...new Set(approverIds)].filter(id => id !== requesterId);
+
+    if (uniqueApproverIds.length > 0) {
+      await this.wsGateway.sendNotificationToUsers(uniqueApproverIds, {
         ...notification,
         timestamp: new Date(),
       });
