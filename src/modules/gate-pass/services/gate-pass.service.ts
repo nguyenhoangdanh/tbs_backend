@@ -278,9 +278,19 @@ export class GatePassService {
 
     const approverUser = await this.prisma.user.findUnique({
       where: { id: approverId },
-      select: { jobPosition: { select: { jobName: true } } },
+      select: {
+        jobPosition: { select: { jobName: true } },
+        roles: {
+          where: { isActive: true },
+          select: { roleDefinition: { select: { code: true } } },
+        },
+      },
     });
     const approverJobName = approverUser?.jobPosition?.jobName ?? null;
+    const approverRoleCodes = (approverUser?.roles ?? []).map((r: any) => r.roleDefinition?.code ?? '');
+    const approverIsHighRole = approverRoleCodes.some((c: string) =>
+      ['SUPERADMIN', 'ADMIN', 'MANAGER'].includes(c),
+    );
 
     const conditions: any[] = [];
 
@@ -288,7 +298,8 @@ export class GatePassService {
       const managers = await this.getDeptManagers(deptId);
       const mgrIds = managers.map((m) => m.userId);
 
-      const isGeneralMgr = !approverJobName || (await this.prisma.user.count({
+      // General manager if: high system role, no VTCV, or no non-management users share their VTCV
+      const isGeneralMgr = approverIsHighRole || !approverJobName || (await this.prisma.user.count({
         where: { isActive: true, jobPosition: { departmentId: deptId, jobName: approverJobName }, id: { notIn: mgrIds } },
       })) === 0;
 
