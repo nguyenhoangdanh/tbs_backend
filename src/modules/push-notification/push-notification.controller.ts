@@ -1,5 +1,6 @@
 import { Controller, Post, Delete, Get, Body, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { Public } from '../../common/decorators/public.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { PushNotificationService, PushSubscriptionDto } from './push-notification.service';
 
@@ -7,6 +8,7 @@ import { PushNotificationService, PushSubscriptionDto } from './push-notificatio
 export class PushNotificationController {
   constructor(private readonly service: PushNotificationService) {}
 
+  @Public()
   @Get('vapid-public-key')
   getVapidPublicKey() {
     return { publicKey: this.service.getVapidPublicKey() };
