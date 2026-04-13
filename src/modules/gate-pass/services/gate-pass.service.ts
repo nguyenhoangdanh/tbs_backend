@@ -611,6 +611,17 @@ export class GatePassService {
       throw new BadRequestException('Không thể huỷ đơn khi đã có người duyệt');
     }
     await this.prisma.gatePass.update({ where: { id }, data: { status: GatePassStatus.CANCELLED } });
+
+    // Notify approvers so their pending list refreshes
+    const officeId = await this.getUserOfficeId(userId);
+    const requesterJobName = (gatePass.user as any)?.jobPosition?.jobName ?? null;
+    await this.notifyApprovers(id, gatePass.departmentId, officeId, gatePass.currentLevel ?? 1, {
+      type: 'GATE_PASS_CANCELLED',
+      title: 'Giấy ra vào cổng đã bị huỷ',
+      message: `Giấy ra vào cổng #${(gatePass as any).passNumber} đã bị người dùng huỷ`,
+      data: { gatePassId: id },
+    }, requesterJobName, userId);
+
     return this.findById(id);
   }
 
