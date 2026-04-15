@@ -38,21 +38,17 @@ export class GoogleDriveService {
     const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
     const hasServiceAccount = !!(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
 
-    // Prefer service account — it uses a fresh JWT on every call and never expires.
-    // OAuth2 refresh tokens expire after ~6 months of inactivity (causes invalid_grant).
-    // Only fall back to OAuth2 when service account is NOT configured.
-    if (hasServiceAccount) {
-      const { client_email, private_key } = this.parseCredentials();
-      const auth = new google.auth.GoogleAuth({
-        credentials: { client_email, private_key },
-        scopes: ['https://www.googleapis.com/auth/drive'],
-      });
-      return google.drive({ version: 'v3', auth });
-    }
+    // Strategy:
+    // - OAuth2 refresh token: works with PERSONAL My Drive folders (user owns the folder).
+    //   Downside: expires after ~6 months of inactivity → invalid_grant error.
+    // - Service account JWT: works ONLY with Shared Drives (Team Drives), NOT personal Drive.
+    //   Downside: "Service Accounts do not have storage quota" on personal folders.
+    //
+    // Priority: OAuth2 first (matches personal Drive folder), service account as fallback.
+    // If OAuth2 refresh token expired → regenerate via:
+    //   node scripts/get-refresh-token.js  (or re-run Google OAuth consent flow)
 
     if (refreshToken) {
-      // OAuth2 with user refresh token — works with personal My Drive folders.
-      // NOTE: refresh tokens expire after ~6 months of inactivity (invalid_grant error).
       const oauth2 = new google.auth.OAuth2(
         process.env.GOOGLE_OAUTH_CLIENT_ID,
         process.env.GOOGLE_OAUTH_CLIENT_SECRET,
@@ -61,7 +57,17 @@ export class GoogleDriveService {
       return google.drive({ version: 'v3', auth: oauth2 });
     }
 
-    throw new Error('No Google credentials configured. Set GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY or GOOGLE_OAUTH_REFRESH_TOKEN.');
+    if (hasServiceAccount) {
+      // Only works if GOOGLE_DRIVE_FOLDER_ID points to a Shared Drive folder.
+      const { client_email, private_key } = this.parseCredentials();
+      const auth = new google.auth.GoogleAuth({
+        credentials: { client_email, private_key },
+        scopes: ['https://www.googleapis.com/auth/drive'],
+      });
+      return google.drive({ version: 'v3', auth });
+    }
+
+    throw new Error('No Google credentials configured. Set GOOGLE_OAUTH_REFRESH_TOKEN (for personal Drive) or GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY (for Shared Drive).');
   }
 
   isConfigured(): boolean {
