@@ -244,6 +244,7 @@ model User {
   // Leave management
   joinDate             DateTime?                @db.Date // Ngày vào làm → tính thâm niên & accrual
   leaveRequests        LeaveRequest[]           @relation("UserLeaveRequests")
+  createdLeaveRequests LeaveRequest[]           @relation("LeaveRequestCreator")
   leaveApprovalsGiven  LeaveApproval[]          @relation("LeaveApprovalApprover")
   leaveApprovalsTarget LeaveApproval[]          @relation("LeaveApprovalTarget")
   leaveBalances        LeaveBalance[]
@@ -1396,6 +1397,7 @@ model LeaveRequest {
   cancelReason  String?
   // Email notification config (impl sau — chỉ lưu preference)
   notifyByEmail Boolean            @default(false)
+  createdById   String?            // Người tạo đơn (có thể là HR/admin tạo thay)
   createdAt     DateTime           @default(now())
   updatedAt     DateTime           @updatedAt
 
@@ -1403,6 +1405,7 @@ model LeaveRequest {
   company   Company            @relation(fields: [companyId], references: [id])
   leaveType LeaveType          @relation(fields: [leaveTypeId], references: [id])
   flow      LeaveApprovalFlow? @relation(fields: [flowId], references: [id])
+  createdBy User?              @relation("LeaveRequestCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
   approvals LeaveApproval[]
   comments  LeaveRequestComment[]
@@ -1413,6 +1416,7 @@ model LeaveRequest {
   @@index([startDate, endDate])
   @@index([status, currentLevel, companyId]) // approval queue lookup
   @@index([submittedAt])
+  @@index([createdById])
   @@map("leave_requests")
 }
 

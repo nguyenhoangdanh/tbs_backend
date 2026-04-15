@@ -10,6 +10,8 @@ import { CreateLeaveRequestDto } from '../dto/leave-request/create-leave-request
 import { UpdateLeaveRequestDto } from '../dto/leave-request/update-leave-request.dto';
 import { CancelLeaveRequestDto, AddLeaveCommentDto, BulkApproveLeaveDto, ApprovalDecision } from '../dto/leave-request/approve-leave.dto';
 import { LeaveRequestStatus, Prisma } from '@prisma/client';
+import { WebSocketGateway } from '../../websocket/websocket.gateway';
+import * as XLSX from 'xlsx';
 
 @Injectable()
 export class LeaveRequestService {
@@ -20,14 +22,17 @@ export class LeaveRequestService {
     private readonly workingDayService: WorkingDayService,
     private readonly approvalService: LeaveApprovalService,
     private readonly balanceService: LeaveBalanceService,
+    private readonly wsGateway: WebSocketGateway,
   ) {}
 
   // ── Tạo đơn xin phép ──────────────────────────────────────────
 
   async createRequest(userId: string, dto: CreateLeaveRequestDto) {
+    // Admin có thể tạo đơn thay cho nhân viên khác qua targetUserId
+    const effectiveUserId = dto.targetUserId ?? userId;
     const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: { id: true, companyId: true, officeId: true, jobPositionId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
+      where: { id: effectiveUserId },
+      select: { id: true, firstName: true, lastName: true, companyId: true, officeId: true, jobPositionId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
     });
 
     let leaveType = await this.prisma.leaveType.findFirst({
@@ -87,7 +92,7 @@ export class LeaveRequestService {
     // Kiểm tra trùng ngày với đơn nghỉ đang active (DRAFT hoặc PENDING hoặc APPROVED)
     const overlapping = await this.prisma.leaveRequest.findFirst({
       where: {
-        userId,
+        userId: effectiveUserId,
         status: { in: ['DRAFT', 'PENDING', 'APPROVED'] },
         startDate: { lte: endDate },
         endDate: { gte: startDate },
@@ -114,7 +119,7 @@ export class LeaveRequestService {
     if (leaveType.isAccruable || leaveType.maxDaysPerYear) {
       const year = startDate.getFullYear();
       // Use leaveType.id (resolved/created leaf type), NOT dto.leaveTypeId (may be category id)
-      const balance = await this.balanceService.getOrCreateBalance(userId, leaveType.id, year, user.companyId);
+      const balance = await this.balanceService.getOrCreateBalance(effectiveUserId, leaveType.id, year, user.companyId);
       const available = this.balanceService.calcAvailable(balance);
       if (available < totalDays) {
         throw new BadRequestException(
@@ -129,7 +134,7 @@ export class LeaveRequestService {
       dto.leaveTypeId,
       user.officeId,
       user.jobPosition?.departmentId ?? null,
-      userId,
+      effectiveUserId,
       user.jobPosition?.jobName ?? null,
     );
 
@@ -140,42 +145,64 @@ export class LeaveRequestService {
       jobPosition: { departmentId: user.jobPosition?.departmentId ?? '', jobName: user.jobPosition?.jobName ?? null },
     };
     const startingLevel = flow
-      ? await this.approvalService.computeStartingLevel(flow, userId, requesterInfo)
+      ? await this.approvalService.computeStartingLevel(flow, effectiveUserId, requesterInfo)
       : 1;
 
-    // Tạo số đơn tự động
-    const requestNumber = await this.generateRequestNumber(user.companyId);
-
+    // Tạo số đơn tự động — retry on unique constraint collision (P2002)
     const status: LeaveRequestStatus = dto.submitImmediately !== false
       ? (leaveType.isAutoApproved ? 'APPROVED' : 'PENDING')
       : 'DRAFT';
 
-    const request = await this.prisma.leaveRequest.create({
-      data: {
-        requestNumber,
-        userId,
-        companyId: user.companyId,
-        leaveTypeId: leaveType.id,
-        flowId: flow?.id ?? null,
-        currentLevel: startingLevel,
-        startDate,
-        endDate,
-        startHalfDay: dto.startHalfDay ?? false,
-        endHalfDay: dto.endHalfDay ?? false,
-        totalDays,
-        reason: dto.reason ?? null,
-        attachmentUrl: dto.attachmentUrl ?? null,
-        status,
-        submittedAt: status !== 'DRAFT' ? new Date() : null,
-        approvedAt: status === 'APPROVED' ? new Date() : null,
-        notifyByEmail: dto.notifyByEmail ?? false,
-      },
-      include: this.requestInclude(),
-    });
+    let request: any;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const requestNumber = await this.generateRequestNumber(user.companyId);
+      try {
+        request = await this.prisma.leaveRequest.create({
+          data: {
+            requestNumber,
+            userId: effectiveUserId,
+            companyId: user.companyId,
+            leaveTypeId: leaveType.id,
+            flowId: flow?.id ?? null,
+            currentLevel: startingLevel,
+            startDate,
+            endDate,
+            startHalfDay: dto.startHalfDay ?? false,
+            endHalfDay: dto.endHalfDay ?? false,
+            totalDays,
+            reason: dto.reason ?? null,
+            attachmentUrl: dto.attachmentUrl ?? null,
+            status,
+            submittedAt: status !== 'DRAFT' ? new Date() : null,
+            approvedAt: status === 'APPROVED' ? new Date() : null,
+            notifyByEmail: dto.notifyByEmail ?? false,
+            createdById: userId, // Track who created (may differ from effectiveUserId for admin-on-behalf)
+          },
+          include: this.requestInclude(),
+        });
+        break; // success
+      } catch (err: any) {
+        if (err?.code === 'P2002' && err?.meta?.target?.includes('requestNumber') && attempt < 4) {
+          this.logger.warn(`requestNumber collision on attempt ${attempt + 1}, retrying...`);
+          continue;
+        }
+        throw err;
+      }
+    }
+    if (!request) throw new Error('Failed to generate unique requestNumber after 5 attempts');
 
     // Cập nhật số dư pending nếu đã submit
     if (status === 'PENDING' && leaveType.isAccruable) {
-      await this.balanceService.adjustPending(userId, dto.leaveTypeId, startDate.getFullYear(), user.companyId, totalDays);
+      await this.balanceService.adjustPending(effectiveUserId, dto.leaveTypeId, startDate.getFullYear(), user.companyId, totalDays);
+    }
+
+    // Thông báo người duyệt khi đơn ở trạng thái PENDING
+    if (status === 'PENDING') {
+      this.notifyLevelApprovers(
+        effectiveUserId, request.flowId, request.currentLevel,
+        `${user.lastName} ${user.firstName} vừa tạo đơn nghỉ phép #${request.requestNumber}`,
+        request.id,
+      ).catch(() => {});
     }
 
     return request;
@@ -185,16 +212,25 @@ export class LeaveRequestService {
 
   async updateRequest(requestId: string, userId: string, dto: UpdateLeaveRequestDto) {
     const request = await this.findRequestForUser(requestId, userId);
-    if (request.status !== 'DRAFT') {
-      throw new BadRequestException('Chỉ có thể chỉnh sửa đơn ở trạng thái Nháp');
+
+    // Allow editing DRAFT, or PENDING with no approvals yet
+    if (request.status !== 'DRAFT' && request.status !== 'PENDING') {
+      throw new BadRequestException('Chỉ có thể chỉnh sửa đơn ở trạng thái Nháp hoặc Chờ duyệt (chưa có ai phê duyệt)');
+    }
+    if (request.status === 'PENDING') {
+      const approvalCount = await this.prisma.leaveApproval.count({ where: { requestId } });
+      if (approvalCount > 0) {
+        throw new BadRequestException('Không thể chỉnh sửa đơn đã có người phê duyệt');
+      }
     }
 
     const updateData: Prisma.LeaveRequestUpdateInput = {};
 
-    if (dto.startDate || dto.endDate) {
+    if (dto.startDate || dto.endDate || dto.leaveTypeId) {
+      const leaveTypeId = dto.leaveTypeId ?? request.leaveTypeId;
       const startDate = new Date(dto.startDate ?? request.startDate.toISOString().split('T')[0]);
       const endDate = new Date(dto.endDate ?? request.endDate.toISOString().split('T')[0]);
-      const leaveType = await this.prisma.leaveType.findUniqueOrThrow({ where: { id: request.leaveTypeId } });
+      const leaveType = await this.prisma.leaveType.findUniqueOrThrow({ where: { id: leaveTypeId } });
 
       const totalDays = await this.workingDayService.calculateWorkingDays(startDate, endDate, {
         startHalfDay: dto.startHalfDay ?? request.startHalfDay,
@@ -206,6 +242,7 @@ export class LeaveRequestService {
       updateData.startDate = startDate;
       updateData.endDate = endDate;
       updateData.totalDays = totalDays;
+      if (dto.leaveTypeId) updateData.leaveType = { connect: { id: dto.leaveTypeId } };
     }
     if (dto.startHalfDay !== undefined) updateData.startHalfDay = dto.startHalfDay;
     if (dto.endHalfDay !== undefined) updateData.endHalfDay = dto.endHalfDay;
@@ -222,8 +259,31 @@ export class LeaveRequestService {
 
   // ── Submit đơn nháp ────────────────────────────────────────────
 
-  async submitRequest(requestId: string, userId: string) {
-    const request = await this.findRequestForUser(requestId, userId);
+  async submitRequest(requestId: string, callerId: string) {
+    // Find request — allow admin (caller may differ from owner when creating on behalf)
+    const request = await this.prisma.leaveRequest.findUnique({ where: { id: requestId } });
+    if (!request) throw new NotFoundException('Đơn xin phép không tồn tại');
+
+    // Allow if caller IS the owner, OR caller is an admin of the same company
+    if (request.userId !== callerId) {
+      const caller = await this.prisma.user.findUnique({
+        where: { id: callerId },
+        select: {
+          companyId: true,
+          roles: { select: { roleDefinition: { select: { code: true } } } },
+        },
+      });
+      const isAdmin = caller?.roles?.some(r =>
+        ['ADMIN', 'SUPERADMIN', 'HR'].includes(r.roleDefinition?.code ?? ''),
+      ) ?? false;
+      if (!isAdmin || caller?.companyId !== request.companyId) {
+        throw new ForbiddenException('Bạn không có quyền thực hiện thao tác này');
+      }
+    }
+
+    // The "owner" of the request — used for balance, notifications, approval flow
+    const ownerId = request.userId;
+
     if (request.status !== 'DRAFT') {
       throw new BadRequestException('Đơn đã được gửi trước đó');
     }
@@ -239,12 +299,12 @@ export class LeaveRequestService {
       });
       if (flow) {
         const user = await this.prisma.user.findUniqueOrThrow({
-          where: { id: userId },
+          where: { id: ownerId },
           select: { companyId: true, officeId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
         });
         startingLevel = await this.approvalService.computeStartingLevel(
           flow,
-          userId,
+          ownerId,
           { companyId: user.companyId, officeId: user.officeId ?? '', jobPosition: { departmentId: user.jobPosition?.departmentId ?? '', jobName: user.jobPosition?.jobName ?? null } },
         );
       }
@@ -263,9 +323,22 @@ export class LeaveRequestService {
 
     if (newStatus === 'PENDING' && leaveType.isAccruable) {
       await this.balanceService.adjustPending(
-        userId, request.leaveTypeId,
+        ownerId, request.leaveTypeId,
         request.startDate.getFullYear(), request.companyId, Number(request.totalDays),
       );
+    }
+
+    // Thông báo người duyệt khi đơn được submit thành PENDING
+    if (newStatus === 'PENDING') {
+      const requester = await this.prisma.user.findUnique({
+        where: { id: ownerId },
+        select: { firstName: true, lastName: true },
+      });
+      this.notifyLevelApprovers(
+        ownerId, updated.flowId, updated.currentLevel,
+        `${requester?.lastName ?? ''} ${requester?.firstName ?? ''} vừa nộp đơn nghỉ phép #${(updated as any).requestNumber}`,
+        requestId,
+      ).catch(() => {});
     }
 
     return updated;
@@ -310,6 +383,29 @@ export class LeaveRequestService {
           data: { used: { decrement: days } },
         });
       }
+    }
+
+    // Thông báo khi đơn đang chờ duyệt bị huỷ
+    if (request.status === 'PENDING') {
+      // Thông báo cho người duyệt hiện tại
+      this.notifyLevelApprovers(
+        request.userId, request.flowId, request.currentLevel ?? 1,
+        `Đơn nghỉ phép #${(updated as any).requestNumber} đã bị huỷ`,
+        requestId,
+        'LEAVE_CANCELLED',
+        'Đơn nghỉ phép đã bị huỷ',
+      ).catch(() => {});
+    }
+
+    // Nếu admin/người duyệt huỷ đơn của người khác → thông báo cho người dùng
+    if (isAdminOrApprover && request.userId !== userId) {
+      this.wsGateway.sendNotification(request.userId, {
+        type: 'LEAVE_CANCELLED',
+        title: 'Đơn nghỉ phép của bạn đã bị huỷ',
+        message: `Đơn nghỉ phép #${(updated as any).requestNumber} đã bị huỷ bởi quản trị viên`,
+        data: { leaveRequestId: requestId },
+        timestamp: new Date(),
+      });
     }
 
     return updated;
@@ -484,27 +580,14 @@ export class LeaveRequestService {
 
         const deptId = targetDepartmentId ?? requesterDeptId;
 
-        if (deptId && requesterJobName) {
-          // VTCV-first: strictly same dept + same VTCV only
-          if (ids.length) {
-            const vtcvApprovers = await this.prisma.user.findMany({
-              where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
-              select: userSelect,
-            });
-            if (vtcvApprovers.length) return vtcvApprovers;
-          }
-          // User has VTCV but no same-VTCV role approver → skip (substitutes added by caller)
-          return [];
-        }
-
         if (deptId && ids.length) {
-          // No VTCV constraint: any role user in same dept or UDM manager
+          // Role-based approver manages ALL VTCV in the dept — match by dept only
           const inDept = await this.prisma.user.findMany({
             where: { id: { in: ids }, isActive: true, jobPosition: { departmentId: deptId } },
             select: userSelect,
           });
           if (inDept.length) return inDept;
-          // UDM fallback only when requester has no VTCV
+          // UDM fallback: cross-dept manager
           const udmRecords = await this.prisma.userDepartmentManagement.findMany({
             where: { departmentId: deptId, isActive: true, userId: { in: ids } },
             select: { userId: true },
@@ -618,15 +701,16 @@ export class LeaveRequestService {
 
   async getAllRequests(companyId: string | null, filters: {
     status?: string; leaveTypeId?: string; year?: number;
-    userId?: string; page?: number; limit?: number;
+    userId?: string; createdById?: string; page?: number; limit?: number;
   }) {
-    const { status, leaveTypeId, year, userId, page = 1, limit = 20 } = filters;
+    const { status, leaveTypeId, year, userId, createdById, page = 1, limit = 20 } = filters;
     const skip = (page - 1) * limit;
     const where: Prisma.LeaveRequestWhereInput = {};
     if (companyId) where.companyId = companyId;   // null = SUPERADMIN sees all companies
     if (status) where.status = status as LeaveRequestStatus;
     if (leaveTypeId) where.leaveTypeId = leaveTypeId;
     if (userId) where.userId = userId;
+    if (createdById) where.createdById = createdById;
     if (year) {
       where.startDate = {
         gte: new Date(Date.UTC(year, 0, 1)),
@@ -825,28 +909,66 @@ export class LeaveRequestService {
 
   private async generateRequestNumber(companyId: string): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.leaveRequest.count({
-      where: { companyId, submittedAt: { gte: new Date(`${year}-01-01`) } },
+    const prefix = `LR-${year}-`;
+    // Find the highest existing number for this year to avoid count-based race conditions
+    const last = await this.prisma.leaveRequest.findFirst({
+      where: { companyId, requestNumber: { startsWith: prefix } },
+      orderBy: { requestNumber: 'desc' },
+      select: { requestNumber: true },
     });
-    return `LR-${year}-${String(count + 1).padStart(5, '0')}`;
+    let next = 1;
+    if (last?.requestNumber) {
+      const parts = last.requestNumber.split('-');
+      const num = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(num)) next = num + 1;
+    }
+    return `${prefix}${String(next).padStart(5, '0')}`;
   }
 
   async getApprovedByMe(
     approverId: string,
     companyId: string,
-    params: { year?: number; page?: number; limit?: number } = {},
+    params: { year?: number; page?: number; limit?: number; dateFilter?: string; search?: string } = {},
   ) {
-    const { year = new Date().getFullYear(), page = 1, limit = 20 } = params;
+    const { year = new Date().getFullYear(), page = 1, limit = 20, dateFilter, search } = params;
     const skip = (page - 1) * limit;
 
-    const where = {
+    // Compute date range based on dateFilter
+    let dateGte: Date;
+    let dateLt: Date;
+    const now = new Date();
+
+    if (dateFilter === 'day') {
+      dateGte = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      dateLt = new Date(dateGte.getTime() + 86400000);
+    } else if (dateFilter === 'week') {
+      const day = now.getDay(); // 0=Sun
+      const diffToMon = (day === 0 ? -6 : 1 - day);
+      dateGte = new Date(now.getFullYear(), now.getMonth(), now.getDate() + diffToMon);
+      dateLt = new Date(dateGte.getTime() + 7 * 86400000);
+    } else if (dateFilter === 'month') {
+      dateGte = new Date(now.getFullYear(), now.getMonth(), 1);
+      dateLt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    } else {
+      // year (default)
+      dateGte = new Date(`${year}-01-01`);
+      dateLt = new Date(`${year + 1}-01-01`);
+    }
+
+    const where: any = {
       approverId,
+      actionAt: { gte: dateGte, lt: dateLt },
       request: {
         companyId,
-        submittedAt: {
-          gte: new Date(`${year}-01-01`),
-          lt: new Date(`${year + 1}-01-01`),
-        },
+        ...(search ? {
+          user: {
+            OR: [
+              { firstName: { contains: search, mode: 'insensitive' } },
+              { lastName: { contains: search, mode: 'insensitive' } },
+              { employeeCode: { contains: search, mode: 'insensitive' } },
+            ],
+          },
+        } : {}),
       },
     };
 
@@ -944,6 +1066,355 @@ export class LeaveRequestService {
         },
         orderBy: { level: 'asc' as const },
       },
+      createdBy: {
+        select: { id: true, firstName: true, lastName: true, employeeCode: true },
+      },
     } as const;
+  }
+
+  /**
+   * Resolve approver IDs for a given flow level and notify them.
+   * Fire-and-forget — caller should .catch(() => {}) to avoid disrupting the main flow.
+   */
+  private async notifyLevelApprovers(
+    requesterId: string,
+    flowId: string | null,
+    level: number,
+    message: string,
+    leaveRequestId: string,
+    type = 'LEAVE_PENDING_APPROVAL',
+    title = 'Có đơn nghỉ phép mới cần duyệt',
+  ): Promise<void> {
+    if (!flowId) return;
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: requesterId },
+      select: { officeId: true, jobPosition: { select: { departmentId: true, jobName: true } } },
+    });
+    if (!user) return;
+
+    const flow = await this.prisma.leaveApprovalFlow.findUnique({
+      where: { id: flowId },
+      include: { levels: { where: { isActive: true, level }, take: 1 } },
+    });
+    const lvl = (flow as any)?.levels?.[0];
+    if (!lvl) return;
+
+    const approvers = await this.resolveApproversForLevel(
+      lvl,
+      user.jobPosition?.departmentId ?? null,
+      user.jobPosition?.jobName ?? null,
+      user.officeId ?? null,
+      requesterId,
+      { id: true },
+    );
+
+    const approverIds = approvers.map((a: any) => a.id).filter(Boolean);
+    if (approverIds.length === 0) return;
+
+    this.wsGateway.sendNotificationToUsers(approverIds, {
+      type,
+      title,
+      message,
+      data: { leaveRequestId },
+      timestamp: new Date(),
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  //  BULK IMPORT
+  // ──────────────────────────────────────────────────────────
+
+  async bulkCreateFromExcel(
+    file: Express.Multer.File,
+    creatorId: string,
+  ): Promise<{ total: number; success: number; failed: number; results: any[] }> {
+    const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+    const results: any[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNum = i + 2; // Excel row (header = 1)
+
+      const employeeCode = String(row['MSNV'] ?? '').trim();
+      // Support "code - name" display format from the template dropdown; extract just the code part
+      const leaveTypeCode = String(row['MÃ PHÉP'] ?? '').trim().split(' - ')[0].trim();
+      const startDateRaw = row['NGÀY BẮT ĐẦU'];
+      const numberOfDays = Number(row['SỐ NGÀY'] ?? 0);
+      const reason = String(row['LÝ DO'] ?? '').trim();
+
+      if (!employeeCode || !leaveTypeCode || !startDateRaw || !numberOfDays) {
+        results.push({ row: rowNum, employeeCode, success: false, error: 'Thiếu dữ liệu bắt buộc' });
+        continue;
+      }
+
+      try {
+        // Parse startDate (dd/MM/yyyy)
+        const startDate = this.parseExcelDate(startDateRaw);
+        if (!startDate) throw new BadRequestException(`Ngày bắt đầu không hợp lệ: ${startDateRaw}`);
+
+        // Find user
+        const user = await this.prisma.user.findFirst({
+          where: { employeeCode },
+          select: {
+            id: true, firstName: true, lastName: true,
+            companyId: true, officeId: true,
+            jobPosition: { select: { departmentId: true, jobName: true } },
+          },
+        });
+        if (!user) throw new BadRequestException(`Không tìm thấy nhân viên: ${employeeCode}`);
+
+        // Find leaveType by code
+        const leaveType = await this.prisma.leaveType.findFirst({
+          where: {
+            code: leaveTypeCode,
+            isActive: true,
+            OR: [{ companyId: null }, { companyId: user.companyId }],
+          },
+        });
+        if (!leaveType) throw new BadRequestException(`Không tìm thấy mã phép: ${leaveTypeCode}`);
+
+        // Calculate endDate by counting working days from startDate
+        const endDate = await this.calculateEndDateFromDays(
+          startDate,
+          numberOfDays,
+          user.companyId,
+          leaveType.countWorkingDaysOnly,
+        );
+
+        // Check overlap
+        const overlapping = await this.prisma.leaveRequest.findFirst({
+          where: {
+            userId: user.id,
+            status: { in: ['DRAFT', 'PENDING', 'APPROVED'] },
+            startDate: { lte: endDate },
+            endDate: { gte: startDate },
+          },
+          select: { requestNumber: true },
+        });
+        if (overlapping) {
+          throw new BadRequestException(`Trùng ngày với đơn ${overlapping.requestNumber}`);
+        }
+
+        // Find approval flow
+        const flow = await this.approvalService.findMatchingFlow(
+          user.companyId,
+          leaveType.id,
+          user.officeId,
+          user.jobPosition?.departmentId ?? null,
+          user.id,
+          user.jobPosition?.jobName ?? null,
+        );
+
+        const requesterInfo = {
+          companyId: user.companyId,
+          officeId: user.officeId ?? '',
+          jobPosition: {
+            departmentId: user.jobPosition?.departmentId ?? '',
+            jobName: user.jobPosition?.jobName ?? null,
+          },
+        };
+        const startingLevel = flow
+          ? await this.approvalService.computeStartingLevel(flow, user.id, requesterInfo)
+          : 1;
+
+        const status: LeaveRequestStatus = leaveType.isAutoApproved ? 'APPROVED' : 'PENDING';
+
+        let request: any;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          const requestNumber = await this.generateRequestNumber(user.companyId);
+          try {
+            request = await this.prisma.leaveRequest.create({
+              data: {
+                requestNumber,
+                userId: user.id,
+                companyId: user.companyId,
+                leaveTypeId: leaveType.id,
+                startDate,
+                endDate,
+                totalDays: numberOfDays,
+                reason,
+                status,
+                submittedAt: new Date(),
+                currentLevel: status === 'PENDING' ? (startingLevel ?? 1) : null,
+                flowId: flow?.id ?? null,
+                createdById: creatorId, // Track HR/admin who imported
+              },
+              select: { id: true, requestNumber: true },
+            });
+            break;
+          } catch (err: any) {
+            if (err?.code === 'P2002' && err?.meta?.target?.includes('requestNumber') && attempt < 4) {
+              continue;
+            }
+            throw err;
+          }
+        }
+        if (!request) throw new Error('Không thể tạo số đơn duy nhất sau 5 lần thử');
+
+        // Adjust pending balance for accruable leave types
+        if (status === 'PENDING' && leaveType.isAccruable) {
+          await this.balanceService.adjustPending(
+            user.id, leaveType.id,
+            startDate.getFullYear(), user.companyId, numberOfDays,
+          ).catch(() => {});
+        }
+
+        // Notify approvers for PENDING requests
+        if (status === 'PENDING') {
+          this.notifyLevelApprovers(
+            user.id, flow?.id ?? null, startingLevel,
+            `${user.lastName} ${user.firstName} có đơn nghỉ phép #${request.requestNumber} (import hàng loạt)`,
+            request.id,
+          ).catch(() => {});
+        }
+
+        results.push({
+          row: rowNum,
+          employeeCode,
+          fullName: `${user.firstName} ${user.lastName}`,
+          requestNumber: request.requestNumber,
+          success: true,
+        });
+      } catch (err: any) {
+        results.push({
+          row: rowNum,
+          employeeCode,
+          success: false,
+          error: err?.response?.message ?? err?.message ?? 'Lỗi không xác định',
+        });
+      }
+    }
+
+    const success = results.filter((r) => r.success).length;
+    return { total: results.length, success, failed: results.length - success, results };
+  }
+
+  private parseExcelDate(raw: unknown): Date | null {
+    if (!raw && raw !== 0) return null;
+    // Already a JS Date (cellDates: true)
+    if (raw instanceof Date) return isNaN(raw.getTime()) ? null : raw;
+    // Excel serial number (numeric)
+    if (typeof raw === 'number') {
+      // Convert Excel serial to JS Date (Excel epoch = Jan 0, 1900; JS uses Jan 1, 1970)
+      // XLSX utility: serial 1 = Jan 1, 1900
+      const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+      const date = new Date(excelEpoch.getTime() + raw * 86400000);
+      return isNaN(date.getTime()) ? null : date;
+    }
+    const str = String(raw).trim();
+    if (!str) return null;
+    // Support dd/MM/yyyy
+    const dmyMatch = str.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (dmyMatch) {
+      const [, d, m, y] = dmyMatch;
+      return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+    }
+    // Support yyyy-MM-dd
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch;
+      return new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+    }
+    // Fallback: let JS parse it
+    const iso = new Date(str);
+    return isNaN(iso.getTime()) ? null : iso;
+  }
+
+  // ── Admin: thống kê số người nghỉ theo ngày ─────────────────────────────────
+
+  async getAdminStats(companyId: string | null, from: string, to: string) {
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate = new Date(to + 'T23:59:59');
+
+    // Fetch all APPROVED leave requests overlapping the date range
+    const requests = await this.prisma.leaveRequest.findMany({
+      where: {
+        status: 'APPROVED',
+        ...(companyId ? { companyId } : {}),
+        startDate: { lte: toDate },
+        endDate: { gte: fromDate },
+      },
+      select: { startDate: true, endDate: true },
+    });
+
+    // Count active employees
+    const totalEmployees = await this.prisma.user.count({
+      where: {
+        isActive: true,
+        ...(companyId ? { companyId } : {}),
+      },
+    });
+
+    // Generate daily data
+    const data: { date: string; count: number; pct: number }[] = [];
+    const cursor = new Date(fromDate);
+    while (cursor <= toDate) {
+      const y = cursor.getFullYear();
+      const m = String(cursor.getMonth() + 1).padStart(2, '0');
+      const d = String(cursor.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${d}`;
+      const dayStart = new Date(`${dateStr}T00:00:00`);
+      const dayEnd = new Date(`${dateStr}T23:59:59`);
+
+      const count = requests.filter(
+        r => r.startDate <= dayEnd && r.endDate >= dayStart,
+      ).length;
+
+      const pct = totalEmployees > 0 ? parseFloat(((count / totalEmployees) * 100).toFixed(2)) : 0;
+      data.push({ date: dateStr, count, pct });
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return { totalEmployees, data };
+  }
+
+  /** Public wrapper for calculateEndDateFromDays — used by the frontend form.
+   * Always skips Sundays and configured holidays so the preview is accurate. */
+  async calculateEndDate(params: {
+    startDate: string;
+    totalDays: number;
+    leaveTypeId: string;
+    companyId: string;
+  }): Promise<{ endDate: string }> {
+    const { startDate, totalDays, companyId } = params;
+    const start = new Date(startDate);
+    // Always use working-day algorithm for the UI preview — skip Sundays + holidays
+    const end = await this.calculateEndDateFromDays(start, totalDays, companyId, true);
+    const endDate = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}-${String(end.getDate()).padStart(2, '0')}`;
+    return { endDate };
+  }
+
+  private async calculateEndDateFromDays(
+    startDate: Date,
+    totalDays: number,
+    companyId: string,
+    countWorkingDaysOnly: boolean,
+  ): Promise<Date> {
+    if (!countWorkingDaysOnly) {
+      const end = new Date(startDate);
+      end.setDate(end.getDate() + totalDays - 1);
+      return end;
+    }
+    // Iterate forward, counting working days
+    const holidaySet = await this.workingDayService['getHolidayDates'](
+      startDate,
+      new Date(startDate.getTime() + 365 * 24 * 60 * 60 * 1000),
+      companyId,
+    );
+    let counted = 0;
+    const current = new Date(startDate);
+    while (counted < totalDays) {
+      const dow = current.getDay();
+      const key = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}-${String(current.getDate()).padStart(2, '0')}`;
+      if (dow !== 0 && !holidaySet.has(key)) {
+        counted++;
+      }
+      if (counted < totalDays) current.setDate(current.getDate() + 1);
+    }
+    return new Date(current);
   }
 }

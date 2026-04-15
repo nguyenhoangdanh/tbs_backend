@@ -3,6 +3,7 @@ import { PrismaService } from 'src/common/prisma.service';
 import { LeaveBalanceService } from './leave-balance.service';
 import { ApproveLeaveDto, ApprovalDecision } from '../dto/leave-request/approve-leave.dto';
 import { ApproverMode, LeaveApprovalAction, LeaveTimeoutAction, Prisma } from '@prisma/client';
+import { WebSocketGateway } from '../../websocket/websocket.gateway';
 
 @Injectable()
 export class LeaveApprovalService {
@@ -11,6 +12,7 @@ export class LeaveApprovalService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly balanceService: LeaveBalanceService,
+    private readonly wsGateway: WebSocketGateway,
   ) {}
 
   // ── Tìm flow phù hợp nhất cho một đơn ────────────────────────
@@ -119,9 +121,9 @@ export class LeaveApprovalService {
       include: {
         flow: { include: { levels: { where: { isActive: true }, orderBy: { level: 'asc' } } } },
         leaveType: true,
-      user: { select: { id: true, companyId: true, officeId: true, jobPosition: { select: { departmentId: true, jobName: true } } } },
+        user: { select: { id: true, firstName: true, lastName: true, companyId: true, officeId: true, jobPosition: { select: { departmentId: true, jobName: true } } } },
       },
-    });
+    }) as any;
 
     if (!request) throw new NotFoundException('Đơn xin phép không tồn tại');
     if (request.status !== 'PENDING') {
@@ -163,6 +165,14 @@ export class LeaveApprovalService {
           -Number(request.totalDays),
         );
       }
+      // Thông báo người tạo đơn bị từ chối
+      this.wsGateway.sendNotification(request.userId, {
+        type: 'LEAVE_REJECTED',
+        title: 'Đơn nghỉ phép bị từ chối',
+        message: `Đơn nghỉ phép #${(request as any).requestNumber} đã bị từ chối${dto.comment ? `: ${dto.comment}` : ''}`,
+        data: { leaveRequestId: requestId },
+        timestamp: new Date(),
+      });
     } else {
       // Duyệt → tìm cấp tiếp theo trong danh sách đã sắp xếp
       const sortedLevels = (request.flow?.levels ?? []).sort((a: any, b: any) => a.level - b.level);
@@ -195,6 +205,18 @@ export class LeaveApprovalService {
           where: { id: requestId },
           data: { currentLevel: nextLevelConfig.level },
         });
+        // Thông báo người duyệt cấp tiếp theo
+        this.resolveApproverIdsForLevel(nextLevelConfig, requesterInfo, approverId).then(approverIds => {
+          if (approverIds.length > 0) {
+            this.wsGateway.sendNotificationToUsers(approverIds, {
+              type: 'LEAVE_PENDING_APPROVAL',
+              title: `Đơn nghỉ phép chờ duyệt cấp ${nextLevelConfig.level}`,
+              message: `Đơn nghỉ phép #${(request as any).requestNumber} đã qua duyệt cấp ${request.currentLevel}, chờ duyệt cấp ${nextLevelConfig.level}`,
+              data: { leaveRequestId: requestId },
+              timestamp: new Date(),
+            });
+          }
+        }).catch(() => {});
       } else {
         // Đã qua tất cả cấp → hoàn toàn duyệt
         await this.prisma.leaveRequest.update({
@@ -209,6 +231,14 @@ export class LeaveApprovalService {
             Number(request.totalDays),
           );
         }
+        // Thông báo người tạo đơn đã được duyệt hoàn toàn
+        this.wsGateway.sendNotification(request.userId, {
+          type: 'LEAVE_APPROVED',
+          title: 'Đơn nghỉ phép đã được duyệt',
+          message: `Đơn nghỉ phép #${(request as any).requestNumber} đã được phê duyệt`,
+          data: { leaveRequestId: requestId },
+          timestamp: new Date(),
+        });
       }
     }
 
@@ -353,42 +383,25 @@ export class LeaveApprovalService {
         whereConditions.push({ ...base, user: { officeId: approver.officeId } });
         continue;
       }
-      // Scope ROLE_IN_DEPARTMENT: filter by dept, then VTCV-aware
+      // Scope ROLE_IN_DEPARTMENT: filter by dept only (role-based approver manages all VTCV)
       if (el.approverMode === 'ROLE_IN_DEPARTMENT') {
-        const approverJobName = approver.jobPosition?.jobName ?? null;
-        // Dept từ flow level hoặc dept của approver
         const primaryDeptId = el.targetDepartmentId ?? approver.jobPosition?.departmentId;
 
         if (el.targetDepartmentId) {
-          // Explicit target dept: scope tightly to that dept
-          if (approverJobName) {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId, jobName: approverJobName } } });
-          } else {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId } } });
-          }
-        } else {
-          // No explicit target dept → use approver's own dept + VTCV (strict 3-condition check)
-          // + UDM-managed depts (cross-dept manager via UserDepartmentManagement)
-          if (primaryDeptId) {
-            if (approverJobName) {
-              whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId, jobName: approverJobName } } });
-            } else {
-              whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
-            }
-          } else if (approver.officeId) {
-            // Approver has no dept → office-wide (pure management role)
-            whereConditions.push({ ...base, user: { officeId: approver.officeId } });
-          }
+          // Explicit target dept: scope tightly to that dept (all VTCV)
+          whereConditions.push({ ...base, user: { jobPosition: { departmentId: el.targetDepartmentId } } });
+        } else if (primaryDeptId) {
+          // No explicit target dept → use approver's own dept (all VTCV)
+          whereConditions.push({ ...base, user: { jobPosition: { departmentId: primaryDeptId } } });
+        } else if (approver.officeId) {
+          // Approver has no dept → office-wide (pure management role)
+          whereConditions.push({ ...base, user: { officeId: approver.officeId } });
         }
 
-        // UDM cross-dept: approver manages other depts (applied regardless of targetDepartmentId)
+        // UDM cross-dept: approver manages other depts
         for (const { departmentId: managedDeptId } of approver.managedDepartments) {
           if (managedDeptId === primaryDeptId) continue;
-          if (approverJobName) {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId, jobName: approverJobName } } });
-          } else {
-            whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
-          }
+          whereConditions.push({ ...base, user: { jobPosition: { departmentId: managedDeptId } } });
         }
         continue;
       }
@@ -502,30 +515,16 @@ export class LeaveApprovalService {
         const userIds = usersWithRole.map(u => u.userId);
 
         if (deptId) {
-          const requesterJobName = requesterInfo.jobPosition?.jobName;
-          if (requesterJobName) {
-            // Case 1: same dept + same VTCV (strict 3-condition)
-            const sameDeptSameVtcv = await this.prisma.user.count({
-              where: { id: { in: userIds }, jobPosition: { departmentId: deptId, jobName: requesterJobName } },
-            });
-            if (sameDeptSameVtcv > 0) return true;
-
-            // Case 2: UDM cross-dept manager (manages requester's dept)
-            const udmManagers = await this.prisma.userDepartmentManagement.count({
-              where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
-            });
-            if (udmManagers > 0) return true;
-          } else {
-            // Requester không có VTCV → cùng phòng ban hoặc quản lý phòng là đủ
-            const inDept = await this.prisma.user.count({
-              where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
-            });
-            if (inDept > 0) return true;
-            const managesDept = await this.prisma.userDepartmentManagement.count({
-              where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
-            });
-            if (managesDept > 0) return true;
-          }
+          // A role-based approver manages ALL workers in the dept regardless of VTCV.
+          // Just check: does someone with this role exist in the dept or manage it?
+          const inDept = await this.prisma.user.count({
+            where: { id: { in: userIds }, jobPosition: { departmentId: deptId } },
+          });
+          if (inDept > 0) return true;
+          const managesDept = await this.prisma.userDepartmentManagement.count({
+            where: { userId: { in: userIds }, departmentId: deptId, isActive: true },
+          });
+          if (managesDept > 0) return true;
         }
 
         return false;
@@ -677,14 +676,8 @@ export class LeaveApprovalService {
         const requesterJobName = requesterInfo.jobPosition?.jobName;
 
         if (deptId) {
-          if (requesterJobName) {
-            // UDM cross-dept manager (manages requester's dept)
-            if (managedDepts.includes(deptId)) return true;
-            // Same dept + same VTCV (strict 3-condition: office + dept + VTCV)
-            if (approverJobName === requesterJobName && approverDept === deptId) return true;
-          } else {
-            if (approverDept === deptId || managedDepts.includes(deptId)) return true;
-          }
+          // Role-based approver manages ALL VTCV in the dept — dept match is sufficient.
+          if (approverDept === deptId || managedDepts.includes(deptId)) return true;
         }
 
         return false;
@@ -838,5 +831,74 @@ export class LeaveApprovalService {
           (rdp.permission.action === 'approve' || rdp.permission.action === 'manage'),
       ),
     );
+  }
+
+  /**
+   * Resolve approver user IDs for a given level config, used for next-level notifications.
+   * Returns IDs excluding the current approver (to avoid self-notification).
+   */
+  private async resolveApproverIdsForLevel(
+    levelConfig: any,
+    requesterInfo: { officeId: string; jobPosition: { departmentId: string; jobName: string | null } },
+    excludeId: string,
+  ): Promise<string[]> {
+    const { approverMode, specificUserId, substitute1Id, substitute2Id, roleDefinitionId, targetDepartmentId } = levelConfig;
+    const ids: string[] = [];
+
+    switch (approverMode) {
+      case 'SPECIFIC_USER': {
+        const candidates = [specificUserId, substitute1Id, substitute2Id].filter(Boolean) as string[];
+        const users = await this.prisma.user.findMany({ where: { id: { in: candidates }, isActive: true }, select: { id: true } });
+        ids.push(...users.map((u: any) => u.id));
+        break;
+      }
+      case 'DEPARTMENT_MANAGERS': {
+        const deptId = targetDepartmentId ?? requesterInfo.jobPosition.departmentId;
+        if (deptId) {
+          const records = await this.prisma.userDepartmentManagement.findMany({ where: { departmentId: deptId, isActive: true }, select: { userId: true } });
+          ids.push(...records.map((r: any) => r.userId));
+        }
+        break;
+      }
+      case 'ROLE_IN_COMPANY': {
+        if (!roleDefinitionId) break;
+        const users = await this.prisma.userRole.findMany({ where: { roleDefinitionId, isActive: true }, select: { userId: true }, take: 5 });
+        ids.push(...users.map((u: any) => u.userId));
+        break;
+      }
+      case 'ROLE_IN_OFFICE': {
+        if (!roleDefinitionId || !requesterInfo.officeId) break;
+        const roleUsers = await this.prisma.userRole.findMany({ where: { roleDefinitionId, isActive: true }, select: { userId: true } });
+        const roleIds = roleUsers.map((r: any) => r.userId);
+        const users = await this.prisma.user.findMany({ where: { id: { in: roleIds }, officeId: requesterInfo.officeId, isActive: true }, select: { id: true } });
+        ids.push(...users.map((u: any) => u.id));
+        break;
+      }
+      case 'ROLE_IN_DEPARTMENT': {
+        if (!roleDefinitionId) break;
+        const deptId = targetDepartmentId ?? requesterInfo.jobPosition.departmentId;
+        if (!deptId) break;
+        const roleUsers = await this.prisma.userRole.findMany({ where: { roleDefinitionId, isActive: true }, select: { userId: true } });
+        const roleIds = roleUsers.map((r: any) => r.userId);
+        const users = await this.prisma.user.findMany({ where: { id: { in: roleIds }, isActive: true, jobPosition: { departmentId: deptId } }, select: { id: true } });
+        ids.push(...users.map((u: any) => u.id));
+        break;
+      }
+    }
+
+    // Append substitutes (for non-SPECIFIC_USER modes)
+    if (approverMode !== 'SPECIFIC_USER') {
+      const subIds = [substitute1Id, substitute2Id].filter(Boolean) as string[];
+      if (subIds.length) {
+        const existing = new Set(ids);
+        const subs = await this.prisma.user.findMany({
+          where: { id: { in: subIds }, isActive: true, NOT: { id: { in: [...existing, excludeId] } } },
+          select: { id: true },
+        });
+        ids.push(...subs.map((u: any) => u.id));
+      }
+    }
+
+    return [...new Set(ids)].filter(id => id !== excludeId);
   }
 }

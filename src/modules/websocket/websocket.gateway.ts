@@ -152,8 +152,8 @@ export class WebSocketGateway implements OnGatewayConnection, OnGatewayDisconnec
     this.pushService.sendToUser(userId, {
       title: notification.title,
       body: notification.message,
-      tag: notification.data?.gatePassId ?? notification.data?.leaveId ?? notification.type,
-      url: notification.data?.gatePassId ? '/gate-pass' : notification.data?.leaveId ? '/leave' : '/',
+      tag: notification.data?.gatePassId ?? notification.data?.leaveRequestId ?? notification.data?.leaveId ?? notification.type,
+      url: notification.data?.gatePassId ? '/gate-pass' : (notification.data?.leaveRequestId || notification.data?.leaveId) ? '/leave' : '/',
     }).catch(() => {});
   }
 

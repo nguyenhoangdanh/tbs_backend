@@ -1,7 +1,9 @@
 import {
   Controller, Get, Post, Put, Delete, Patch,
   Body, Param, Query, ParseUUIDPipe, DefaultValuePipe, ParseIntPipe,
+  UseInterceptors, UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { LeaveRequestService } from '../services/leave-request.service';
 import { LeaveApprovalService } from '../services/leave-approval.service';
 import { CreateLeaveRequestDto } from '../dto/leave-request/create-leave-request.dto';
@@ -19,6 +21,25 @@ export class LeaveRequestController {
     private readonly leaveApprovalService: LeaveApprovalService,
   ) {}
 
+  // ── Admin: thống kê số người nghỉ theo ngày ──────────────────
+
+  @Get('admin/stats')
+  @RequirePermissions('leave-requests:manage')
+  adminGetStats(
+    @GetUser() currentUser: any,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Query('companyId') companyIdParam?: string,
+  ) {
+    const isSuperAdmin = (currentUser?.roles ?? []).some(
+      (r: any) => (r.roleDefinition?.code ?? r.code) === 'SUPERADMIN',
+    );
+    const companyId = isSuperAdmin
+      ? (companyIdParam ?? null)
+      : (currentUser?.companyId ?? null);
+    return this.leaveRequestService.getAdminStats(companyId, from, to);
+  }
+
   // ── Admin: danh sách tất cả đơn ──────────────────────────────
 
   @Get('admin/all')
@@ -29,6 +50,7 @@ export class LeaveRequestController {
     @Query('status') status?: string,
     @Query('leaveTypeId') leaveTypeId?: string,
     @Query('userId') userId?: string,
+    @Query('createdById') createdById?: string,
     @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year?: number,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit?: number,
@@ -41,7 +63,27 @@ export class LeaveRequestController {
       ? (companyIdParam ?? null)
       : (currentUser?.companyId ?? null);
 
-    return this.leaveRequestService.getAllRequests(companyId, { status, leaveTypeId, userId, year, page, limit });
+    return this.leaveRequestService.getAllRequests(companyId, { status, leaveTypeId, userId, createdById, year, page, limit });
+  }
+
+  // ── Tính ngày kết thúc (dùng cho form frontend) ──────────────
+
+  @Get('calculate-end-date')
+  @RequirePermissions('leave-requests:view')
+  calculateEndDate(
+    @GetUser() currentUser: any,
+    @Query('startDate') startDate: string,
+    @Query('totalDays') totalDays: string,
+    @Query('leaveTypeId') leaveTypeId: string,
+    @Query('companyId') companyIdParam?: string,
+  ) {
+    const companyId = companyIdParam ?? (currentUser?.companyId ?? '');
+    return this.leaveRequestService.calculateEndDate({
+      startDate,
+      totalDays: parseFloat(totalDays),
+      leaveTypeId,
+      companyId,
+    });
   }
 
   // ── Tạo đơn ────────────────────────────────────────────────────
@@ -95,8 +137,10 @@ export class LeaveRequestController {
     @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year?: number,
     @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
     @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit?: number,
+    @Query('dateFilter') dateFilter?: string,
+    @Query('search') search?: string,
   ) {
-    return this.leaveRequestService.getApprovedByMe(approverId, companyId, { year, page, limit });
+    return this.leaveRequestService.getApprovedByMe(approverId, companyId, { year, page, limit, dateFilter, search });
   }
 
   // ── Duyệt hàng loạt ──────────────────────────────────────────
@@ -199,5 +243,18 @@ export class LeaveRequestController {
     @Body() dto: AddLeaveCommentDto,
   ) {
     return this.leaveRequestService.addComment(id, userId, dto);
+  }
+
+  // ── Bulk Import ──────────────────────────────────────────────
+
+  @Post('bulk-import')
+  @RequirePermissions('leave-requests:bulk-create')
+  @UseInterceptors(FileInterceptor('file'))
+  bulkImport(
+    @GetUser('id') userId: string,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) throw new Error('File is required');
+    return this.leaveRequestService.bulkCreateFromExcel(file, userId);
   }
 }

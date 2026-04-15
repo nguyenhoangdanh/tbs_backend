@@ -663,8 +663,6 @@ export class GatePassService {
   async getPendingMyApproval(approverId: string, query: { page?: number; limit?: number }) {
     const { page = 1, limit = 20 } = query;
 
-    this.logger.debug(`[getPendingMyApproval] approverId=${approverId}`);
-
     // Case 1: User is SPECIFIC_USER approver/substitute in some config
     const specificConfigsRaw = await this.prisma.gatePassApprovalConfig.findMany({
       where: {
@@ -678,8 +676,6 @@ export class GatePassService {
       ...c,
       requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
     }));
-
-    this.logger.debug(`[getPendingMyApproval] specificConfigs=${specificConfigs.length}, ids=${specificConfigs.map(c => c.id).join(',')}`);
 
     // Case 2: DEPARTMENT_HEAD configs — resolve via UDM or position-based fallback
     const allDeptHeadConfigs = await this.prisma.gatePassApprovalConfig.findMany({
@@ -711,8 +707,6 @@ export class GatePassService {
     }
 
     const managedDeptIds = await this.getManagedDeptIds(approverId, [...candidateDeptIds]);
-
-    this.logger.debug(`[getPendingMyApproval] candidateDeptIds=${[...candidateDeptIds].join(',')}, managedDeptIds=${managedDeptIds.join(',')}`);
 
     const conditions: any[] = [];
 
@@ -819,8 +813,6 @@ export class GatePassService {
       );
       conditions.push(...vtcvConditions);
     }
-
-    this.logger.debug(`[getPendingMyApproval] total conditions=${conditions.length}: ${JSON.stringify(conditions)}`);
 
     if (conditions.length === 0) return { data: [], total: 0, page, limit };
 
@@ -1058,10 +1050,13 @@ export class GatePassService {
 
   /**
    * Throws BadRequestException if the user already has an active (PENDING/DRAFT)
-   * gate pass whose time window overlaps with [startDateTime, endDateTime].
-   * Two passes overlap when: startA < endB AND startB < endA.
-   * If endDateTime is null (open-ended), any existing pass starting on the same
-   * day at the same time is considered a conflict.
+   * gate pass that conflicts with [startDateTime, endDateTime].
+   *
+   * Two rules:
+   * 1. OPEN-ENDED BLOCK: If an existing pass on the same calendar day (VN time)
+   *    has no endDateTime (person left, won't return), block ANY new pass that day.
+   * 2. OVERLAP: Two bounded passes overlap when startA < endB AND startB < endA.
+   *    An existing open-ended pass always overlaps a new pass that starts after it.
    *
    * @param excludeId - pass ID to exclude (used when editing an existing pass)
    */
@@ -1072,31 +1067,50 @@ export class GatePassService {
     excludeId?: string,
   ): Promise<void> {
     const activeStatuses = [GatePassStatus.PENDING, GatePassStatus.DRAFT];
+    const fmt = (d: Date | null) =>
+      d ? d.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false }) : '...';
 
-    // Build the overlap condition.
-    // For a new pass [newStart, newEnd]:
-    //   overlap if existingStart < newEnd  AND  newStart < existingEnd
-    // When either end is null/open-ended, treat it as "far future" by checking
-    // only that the start times don't match exactly (simple but safe heuristic).
+    // ── Rule 1: block if same-day open-ended pass already exists ──────────────
+    // Compute calendar-day boundaries in Vietnam time (UTC+7)
+    const VN_OFFSET_MS = 7 * 60 * 60 * 1000;
+    const startVN = new Date(startDateTime.getTime() + VN_OFFSET_MS);
+    const dayStartUTC = new Date(
+      Date.UTC(startVN.getUTCFullYear(), startVN.getUTCMonth(), startVN.getUTCDate()) - VN_OFFSET_MS,
+    );
+    const dayEndUTC = new Date(dayStartUTC.getTime() + 24 * 60 * 60 * 1000);
+
+    const openEnded = await this.prisma.gatePass.findFirst({
+      where: {
+        userId,
+        status: { in: activeStatuses },
+        endDateTime: null,
+        startDateTime: { gte: dayStartUTC, lt: dayEndUTC },
+        ...(excludeId ? { NOT: { id: excludeId } } : {}),
+      },
+      select: { passNumber: true, startDateTime: true },
+    });
+
+    if (openEnded) {
+      throw new BadRequestException(
+        `Đã tồn tại đơn #${(openEnded as any).passNumber} ra cổng không có giờ vào ` +
+        `(${fmt(openEnded.startDateTime)}). Không thể tạo thêm đơn trong ngày này.`,
+      );
+    }
+
+    // ── Rule 2: standard time-window overlap check ────────────────────────────
+    // overlap if: existingStart < newEnd  AND  newStart < existingEnd
     const overlapping = await this.prisma.gatePass.findFirst({
       where: {
         userId,
         status: { in: activeStatuses },
         ...(excludeId ? { NOT: { id: excludeId } } : {}),
         AND: [
-          // existingStart < newEnd (or newEnd is null → no upper bound check)
+          // existingStart < newEnd (skip if newEnd is null — no upper bound)
           endDateTime ? { startDateTime: { lt: endDateTime } } : {},
-          // newStart < existingEnd (or existingEnd is null → open-ended, always overlaps)
+          // newStart < existingEnd (existingEnd=null means open-ended → always after newStart)
           {
             OR: [
               { endDateTime: null },
-              { endDateTime: { gt: startDateTime } },
-            ],
-          },
-          // Also catch exact same startDateTime even if both have no endDateTime
-          {
-            OR: [
-              { startDateTime: { gte: startDateTime } },
               { endDateTime: { gt: startDateTime } },
             ],
           },
@@ -1106,8 +1120,6 @@ export class GatePassService {
     });
 
     if (overlapping) {
-      const fmt = (d: Date | null) =>
-        d ? d.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', hour12: false }) : '...';
       throw new BadRequestException(
         `Thời gian bị trùng với đơn #${(overlapping as any).passNumber} ` +
         `(${fmt(overlapping.startDateTime)} – ${fmt(overlapping.endDateTime)})`,

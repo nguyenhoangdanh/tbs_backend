@@ -2,6 +2,10 @@ import { IsString, IsDateString, IsBoolean, IsOptional, IsUUID } from 'class-val
 
 export class UpdateLeaveRequestDto {
   @IsOptional()
+  @IsUUID()
+  leaveTypeId?: string;
+
+  @IsOptional()
   @IsDateString()
   startDate?: string;
 

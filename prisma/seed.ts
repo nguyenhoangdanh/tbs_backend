@@ -199,6 +199,8 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-approvals': ['view', 'approve'],
     'leave-visibility': ['view'],
     'public-holidays': ['view'],
+    healthcare:       ['view'],
+    organizations:    ['view'],
   },
 
   USER: {
@@ -228,6 +230,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-balances':  ['view'],
     'leave-approvals': ['view'],
     'public-holidays': ['view'],
+     organizations:    ['view'],
   },
 
   WORKER: {
@@ -243,6 +246,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-types':     ['view'],
     'leave-balances':  ['view'],
     'public-holidays': ['view'],
+     organizations:    ['view'],
   },
 
   MEDICAL_STAFF: {
@@ -255,6 +259,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'medical-records': ['view', 'create', 'update', 'delete', 'manage'],
     inventory:      ['view', 'create', 'update', 'delete', 'manage'],
     healthcare:     ['view', 'create', 'update', 'delete', 'manage'],
+     organizations:    ['view'],
   },
 
   TEAM_LEADER: {
@@ -275,6 +280,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-balances':  ['view'],
     'leave-approvals': ['view', 'approve'],
     'public-holidays': ['view'],
+     organizations:    ['view'],
   },
 
   LINE_MANAGER: {
@@ -295,6 +301,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-balances':  ['view'],
     'leave-approvals': ['view', 'approve'],
     'public-holidays': ['view'],
+     organizations:    ['view'],
   },
 
   FACTORY_DIRECTOR: {
@@ -321,6 +328,7 @@ const ROLE_PERMISSIONS: Record<RoleCode, RolePermissionMap | 'ALL'> = {
     'leave-flows':     ['view'],
     'leave-approvals': ['view', 'approve'],
     'public-holidays': ['view'],
+     organizations:    ['view'],
   },
 };
 

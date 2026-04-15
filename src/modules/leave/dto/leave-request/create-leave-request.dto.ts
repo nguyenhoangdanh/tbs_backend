@@ -35,4 +35,9 @@ export class CreateLeaveRequestDto {
   @IsOptional()
   @IsBoolean()
   notifyByEmail?: boolean = false;
+
+  /** Admin tạo đơn thay cho nhân viên khác (chỉ admin mới được dùng) */
+  @IsOptional()
+  @IsUUID()
+  targetUserId?: string;
 }

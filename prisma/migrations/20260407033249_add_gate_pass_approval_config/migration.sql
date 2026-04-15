@@ -5,7 +5,6 @@ CREATE TYPE "EvaluationType" AS ENUM ('REVIEW', 'APPROVAL', 'REJECTION');
 ALTER TABLE "gate_passes" ADD COLUMN     "companyId" TEXT,
 ADD COLUMN     "currentLevel" INTEGER NOT NULL DEFAULT 1,
 ADD COLUMN     "departmentId" TEXT,
-ADD COLUMN     "destination" TEXT,
 ADD COLUMN     "rejectionReason" TEXT;
 
 -- AlterTable

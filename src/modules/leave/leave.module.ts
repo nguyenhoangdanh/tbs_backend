@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
+import { WebSocketModule } from '../websocket/websocket.module';
 
 // Controllers
 import { LeaveRequestController } from './controllers/leave-request.controller';
@@ -24,7 +25,7 @@ import { WorkingDayService } from './services/working-day.service';
 import { CommonModule } from 'src/common/common.module';
 
 @Module({
-  imports: [CommonModule],
+  imports: [CommonModule, WebSocketModule],
   controllers: [
     LeaveRequestController,
     LeaveBalanceController,

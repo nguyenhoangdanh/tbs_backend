@@ -1,7 +1,9 @@
 import {
   Controller, Get, Post, Put, Delete, Body, Param, Query,
   ParseUUIDPipe, DefaultValuePipe, ParseIntPipe,
+  UseInterceptors, UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { LeaveBalanceService } from '../services/leave-balance.service';
 import { LeaveAccrualService } from '../services/leave-accrual.service';
 import { AdjustBalanceDto } from '../dto/leave-balance/adjust-balance.dto';
@@ -60,5 +62,16 @@ export class LeaveBalanceController {
     @Query('year', ParseIntPipe) year: number,
   ) {
     return this.accrualService.triggerManualAccrual(month, year);
+  }
+
+  /** Admin/HR: Import hàng loạt số dư phép năm từ Excel */
+  @Post('bulk-import')
+  @RequirePermissions('leave-balances:manage')
+  @UseInterceptors(FileInterceptor('file'))
+  bulkImport(
+    @UploadedFile() file: Express.Multer.File,
+    @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year: number,
+  ) {
+    return this.balanceService.bulkImportBalances(file, year);
   }
 }

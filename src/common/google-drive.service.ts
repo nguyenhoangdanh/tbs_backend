@@ -36,10 +36,23 @@ export class GoogleDriveService {
 
   private getDrive(): drive_v3.Drive {
     const refreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
+    const hasServiceAccount = !!(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY);
+
+    // Prefer service account — it uses a fresh JWT on every call and never expires.
+    // OAuth2 refresh tokens expire after ~6 months of inactivity (causes invalid_grant).
+    // Only fall back to OAuth2 when service account is NOT configured.
+    if (hasServiceAccount) {
+      const { client_email, private_key } = this.parseCredentials();
+      const auth = new google.auth.GoogleAuth({
+        credentials: { client_email, private_key },
+        scopes: ['https://www.googleapis.com/auth/drive'],
+      });
+      return google.drive({ version: 'v3', auth });
+    }
 
     if (refreshToken) {
-      // OAuth2 with user refresh token — file is owned by the Google account (uses their quota).
-      // Works with personal My Drive folders shared with the service account.
+      // OAuth2 with user refresh token — works with personal My Drive folders.
+      // NOTE: refresh tokens expire after ~6 months of inactivity (invalid_grant error).
       const oauth2 = new google.auth.OAuth2(
         process.env.GOOGLE_OAUTH_CLIENT_ID,
         process.env.GOOGLE_OAUTH_CLIENT_SECRET,
@@ -48,13 +61,7 @@ export class GoogleDriveService {
       return google.drive({ version: 'v3', auth: oauth2 });
     }
 
-    // Fallback: service account JWT (requires a Shared Drive — no quota on personal Drive).
-    const { client_email, private_key } = this.parseCredentials();
-    const auth = new google.auth.GoogleAuth({
-      credentials: { client_email, private_key },
-      scopes: ['https://www.googleapis.com/auth/drive'],
-    });
-    return google.drive({ version: 'v3', auth });
+    throw new Error('No Google credentials configured. Set GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY or GOOGLE_OAUTH_REFRESH_TOKEN.');
   }
 
   isConfigured(): boolean {
