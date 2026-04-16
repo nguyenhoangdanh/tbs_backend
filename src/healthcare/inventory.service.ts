@@ -119,6 +119,7 @@ export class InventoryService {
       const transaction = await prisma.inventoryTransaction.create({
         data: {
           medicineId: data.medicineId,
+          companyId: data.companyId ?? null,
           type: data.type,
           quantity: dQty.toFixed(),
           unitPrice: dPrice.toFixed(),
@@ -144,6 +145,7 @@ export class InventoryService {
         dQty.toFixed(),
         dPrice.toFixed(),
         data.expiryDate ? new Date(data.expiryDate) : undefined,
+        data.companyId,
       );
 
       return transaction;
@@ -164,10 +166,11 @@ export class InventoryService {
     quantity: number | string,
     unitPrice: number | string,
     expiryDate?: Date,
+    companyId?: string,
   ) {
     // ── Tìm hoặc tạo inventory record cho tháng này ──────────────────────────
     let inventory = await this.prisma.medicineInventory.findUnique({
-      where: { medicineId_month_year: { medicineId, month, year } },
+      where: { company_medicine_period: { companyId: companyId ?? null, medicineId, month, year } },
     });
 
     if (!inventory) {
@@ -176,12 +179,14 @@ export class InventoryService {
         medicineId,
         month,
         year,
+        companyId,
       );
       const sameYear = prev && prev.year === year;
 
       inventory = await this.prisma.medicineInventory.create({
         data: {
           medicineId,
+          companyId: companyId ?? null,
           month,
           year,
           expiryDate,
@@ -368,13 +373,16 @@ export class InventoryService {
     updateData.closingUnitPrice = closingPrice.toFixed();
     updateData.closingTotalAmount = closingAmount.toFixed();
 
-    const updated = await this.prisma.medicineInventory.update({
-      where: { medicineId_month_year: { medicineId, month, year } },
+    await this.prisma.medicineInventory.updateMany({
+      where: { medicineId, month, year, ...(companyId !== undefined ? { companyId } : { companyId: null }) },
       data: updateData,
     });
     // Cascade opening balance to all subsequent months so closing[N] == opening[N+1]
-    await this.propagateOpeningForward(medicineId, month, year);
-    return updated;
+    await this.propagateOpeningForward(medicineId, month, year, companyId);
+    const updated = await this.prisma.medicineInventory.findUnique({
+      where: { company_medicine_period: { companyId: companyId ?? null, medicineId, month, year } },
+    });
+    return updated!;
   }
 
   /**
@@ -385,6 +393,7 @@ export class InventoryService {
     type?: InventoryTransactionTypeDto,
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const where: Prisma.InventoryTransactionWhereInput = {};
 
@@ -394,6 +403,10 @@ export class InventoryService {
 
     if (type) {
       where.type = type;
+    }
+
+    if (companyId) {
+      where.companyId = companyId;
     }
 
     if (startDate || endDate) {
@@ -429,6 +442,190 @@ export class InventoryService {
     });
   }
 
+  // ==================== CANCEL / DELETE TRANSACTION ====================
+
+  /**
+   * Huỷ giao dịch: đảo ngược số liệu tồn kho và đánh dấu isCancelled=true.
+   * Chỉ áp dụng cho giao dịch chưa bị huỷ.
+   */
+  async cancelInventoryTransaction(
+    id: string,
+    cancelledById: string,
+    cancelReason?: string,
+  ) {
+    const txn = await this.prisma.inventoryTransaction.findUnique({
+      where: { id },
+    });
+    if (!txn) throw new NotFoundException('Giao dịch không tồn tại');
+    if (txn.isCancelled)
+      throw new BadRequestException('Giao dịch đã bị huỷ trước đó');
+
+    const month = txn.transactionDate.getMonth() + 1;
+    const year = txn.transactionDate.getFullYear();
+    const companyId = txn.companyId ?? null;
+
+    const qty = D(txn.quantity);       // có thể âm với ADJUSTMENT xuất
+    const amount = D(txn.totalAmount); // Q * unitPrice, có thể âm
+
+    await this.prisma.$transaction(async (prisma) => {
+      // Lấy bản ghi tồn kho hiện tại
+      const inventory = await prisma.medicineInventory.findUnique({
+        where: {
+          company_medicine_period: {
+            companyId,
+            medicineId: txn.medicineId,
+            month,
+            year,
+          },
+        },
+      });
+      if (!inventory) throw new NotFoundException('Không tìm thấy tồn kho');
+
+      let updateData: Partial<Parameters<typeof prisma.medicineInventory.update>[0]['data']> = {};
+
+      if (txn.type === InventoryTransactionTypeDto.IMPORT) {
+        // Đảo ngược IMPORT: trừ ra khỏi phía nhập
+        const newMonthImportQty = D(inventory.monthlyImportQuantity).minus(qty);
+        const newMonthImportAmt = D(inventory.monthlyImportAmount).minus(amount);
+        const newMonthImportPrice = newMonthImportQty.gt(0)
+          ? newMonthImportAmt.div(newMonthImportQty)
+          : D(0);
+        const newYearImportQty = D(inventory.yearlyImportQuantity).minus(qty);
+        const newYearImportAmt = D(inventory.yearlyImportAmount).minus(amount);
+        const newYearImportPrice = newYearImportQty.gt(0)
+          ? newYearImportAmt.div(newYearImportQty)
+          : D(0);
+        updateData = {
+          monthlyImportQuantity: newMonthImportQty.toFixed(),
+          monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+          monthlyImportAmount: newMonthImportAmt.toFixed(),
+          yearlyImportQuantity: newYearImportQty.toFixed(),
+          yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+          yearlyImportAmount: newYearImportAmt.toFixed(),
+        };
+      } else if (txn.type === InventoryTransactionTypeDto.EXPORT) {
+        // Đảo ngược EXPORT: trừ ra khỏi phía xuất (qty & amount đều dương)
+        const newMonthExportQty = D(inventory.monthlyExportQuantity).minus(qty);
+        const newMonthExportAmt = D(inventory.monthlyExportAmount).minus(amount);
+        const newMonthExportPrice = newMonthExportQty.gt(0)
+          ? newMonthExportAmt.div(newMonthExportQty)
+          : D(0);
+        const newYearExportQty = D(inventory.yearlyExportQuantity).minus(qty);
+        const newYearExportAmt = D(inventory.yearlyExportAmount).minus(amount);
+        const newYearExportPrice = newYearExportQty.gt(0)
+          ? newYearExportAmt.div(newYearExportQty)
+          : D(0);
+        updateData = {
+          monthlyExportQuantity: newMonthExportQty.toFixed(),
+          monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+          monthlyExportAmount: newMonthExportAmt.toFixed(),
+          yearlyExportQuantity: newYearExportQty.toFixed(),
+          yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+          yearlyExportAmount: newYearExportAmt.toFixed(),
+        };
+      } else if (txn.type === InventoryTransactionTypeDto.ADJUSTMENT) {
+        // ADJUSTMENT: qty > 0 → đã +nhập; qty < 0 → đã +xuất
+        if (qty.gt(0)) {
+          // Đảo ngược nhập
+          const newMonthImportQty = D(inventory.monthlyImportQuantity).minus(qty);
+          const newMonthImportAmt = D(inventory.monthlyImportAmount).minus(amount);
+          const newMonthImportPrice = newMonthImportQty.gt(0)
+            ? newMonthImportAmt.div(newMonthImportQty)
+            : D(0);
+          const newYearImportQty = D(inventory.yearlyImportQuantity).minus(qty);
+          const newYearImportAmt = D(inventory.yearlyImportAmount).minus(amount);
+          const newYearImportPrice = newYearImportQty.gt(0)
+            ? newYearImportAmt.div(newYearImportQty)
+            : D(0);
+          updateData = {
+            monthlyImportQuantity: newMonthImportQty.toFixed(),
+            monthlyImportUnitPrice: newMonthImportPrice.toFixed(),
+            monthlyImportAmount: newMonthImportAmt.toFixed(),
+            yearlyImportQuantity: newYearImportQty.toFixed(),
+            yearlyImportUnitPrice: newYearImportPrice.toFixed(),
+            yearlyImportAmount: newYearImportAmt.toFixed(),
+          };
+        } else {
+          // Đảo ngược xuất (qty âm, amount âm → dùng abs)
+          const absQty = qty.abs();
+          const absAmt = amount.abs();
+          const newMonthExportQty = D(inventory.monthlyExportQuantity).minus(absQty);
+          const newMonthExportAmt = D(inventory.monthlyExportAmount).minus(absAmt);
+          const newMonthExportPrice = newMonthExportQty.gt(0)
+            ? newMonthExportAmt.div(newMonthExportQty)
+            : D(0);
+          const newYearExportQty = D(inventory.yearlyExportQuantity).minus(absQty);
+          const newYearExportAmt = D(inventory.yearlyExportAmount).minus(absAmt);
+          const newYearExportPrice = newYearExportQty.gt(0)
+            ? newYearExportAmt.div(newYearExportQty)
+            : D(0);
+          updateData = {
+            monthlyExportQuantity: newMonthExportQty.toFixed(),
+            monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
+            monthlyExportAmount: newMonthExportAmt.toFixed(),
+            yearlyExportQuantity: newYearExportQty.toFixed(),
+            yearlyExportUnitPrice: newYearExportPrice.toFixed(),
+            yearlyExportAmount: newYearExportAmt.toFixed(),
+          };
+        }
+      }
+
+      // Tính lại tồn cuối
+      const finalImportQty = D(updateData.monthlyImportQuantity ?? inventory.monthlyImportQuantity);
+      const finalImportAmt = D(updateData.monthlyImportAmount ?? inventory.monthlyImportAmount);
+      const finalExportQty = D(updateData.monthlyExportQuantity ?? inventory.monthlyExportQuantity);
+      const finalExportAmt = D(updateData.monthlyExportAmount ?? inventory.monthlyExportAmount);
+      const closingQty = D(inventory.openingQuantity).plus(finalImportQty).minus(finalExportQty);
+      const closingAmt = D(inventory.openingTotalAmount).plus(finalImportAmt).minus(finalExportAmt);
+      const closingPrice = D(
+        updateData.monthlyExportUnitPrice ?? inventory.monthlyExportUnitPrice,
+      );
+      updateData.closingQuantity = closingQty.toFixed();
+      updateData.closingUnitPrice = closingPrice.toFixed();
+      updateData.closingTotalAmount = closingAmt.toFixed();
+
+      await prisma.medicineInventory.update({
+        where: {
+          company_medicine_period: {
+            companyId,
+            medicineId: txn.medicineId,
+            month,
+            year,
+          },
+        },
+        data: updateData,
+      });
+
+      // Đánh dấu giao dịch là đã huỷ
+      await prisma.inventoryTransaction.update({
+        where: { id },
+        data: {
+          isCancelled: true,
+          cancelledAt: new Date(),
+          cancelledById,
+          cancelReason: cancelReason ?? null,
+        },
+      });
+    });
+
+    // Cascade carry-forward sau khi đảo ngược
+    await this.propagateOpeningForward(txn.medicineId, month, year, companyId);
+
+    return this.prisma.inventoryTransaction.findUnique({ where: { id } });
+  }
+
+  /**
+   * Xoá giao dịch (chỉ xoá record, KHÔNG thay đổi số liệu tồn kho).
+   * Chỉ SUPERADMIN mới được thực hiện.
+   */
+  async deleteInventoryTransaction(id: string) {
+    const txn = await this.prisma.inventoryTransaction.findUnique({
+      where: { id },
+    });
+    if (!txn) throw new NotFoundException('Giao dịch không tồn tại');
+    return this.prisma.inventoryTransaction.delete({ where: { id } });
+  }
+
   // ==================== BULK IMPORT FROM EXCEL ====================
 
   /**
@@ -440,6 +637,7 @@ export class InventoryService {
     console.log(`📅 Target: ${data.month}/${data.year}`);
     console.log(`📦 Medicines to import: ${data.medicines.length}`);
 
+    const companyId = data.companyId ?? null;
     const { month, year, medicines } = data;
     const results = {
       imported: 0,
@@ -592,7 +790,8 @@ export class InventoryService {
 
           await prisma.medicineInventory.upsert({
             where: {
-              medicineId_month_year: {
+              company_medicine_period: {
+                companyId,
                 medicineId: medicine.id,
                 month,
                 year,
@@ -626,6 +825,7 @@ export class InventoryService {
             },
             create: {
               medicineId: medicine.id,
+              companyId,
               month,
               year,
               expiryDate: medicineData.expiryDate
@@ -657,7 +857,7 @@ export class InventoryService {
         });
         // After transaction: cascade opening to all subsequent months
         if (processedMedicineId) {
-          await this.propagateOpeningForward(processedMedicineId, month, year);
+          await this.propagateOpeningForward(processedMedicineId, month, year, companyId);
         }
       } catch (error) {
         results.errors.push({
@@ -679,6 +879,7 @@ export class InventoryService {
     console.log(`📅 Target: ${data.month}/${data.year}`);
     console.log(`📦 Medicines to import: ${data.medicines.length}`);
 
+    const companyId = data.companyId ?? null;
     const { month, year, medicines } = data;
     const results = {
       imported: 0,
@@ -866,7 +1067,8 @@ export class InventoryService {
           // 3.1. Kiểm tra xem đã có inventory record cho tháng này chưa
           const existingInventory = await prisma.medicineInventory.findUnique({
             where: {
-              medicineId_month_year: {
+              company_medicine_period: {
+                companyId,
                 medicineId: medicine.id,
                 month,
                 year,
@@ -930,8 +1132,8 @@ export class InventoryService {
               medicine.id,
               month,
               year,
+              companyId,
             );
-
             // ── Dùng Decimal để giữ toàn bộ chữ số thập phân ──
             const dOpenQty = D(prevInventory?.closingQuantity);
             const dOpenPrice = D(prevInventory?.closingUnitPrice);
@@ -1010,9 +1212,9 @@ export class InventoryService {
             };
             await prisma.medicineInventory.upsert({
               where: {
-                medicineId_month_year: { medicineId: medicine.id, month, year },
+                company_medicine_period: { companyId, medicineId: medicine.id, month, year },
               },
-              create: { medicineId: medicine.id, month, year, ...inventoryData },
+              create: { companyId, medicineId: medicine.id, month, year, ...inventoryData },
               update: inventoryData,
             });
           } else {
@@ -1022,6 +1224,7 @@ export class InventoryService {
               medicine.id,
               month,
               year,
+              companyId,
             );
             const dCurrOpen = prevRecForOpen
               ? D(prevRecForOpen.closingQuantity)
@@ -1068,7 +1271,8 @@ export class InventoryService {
             // Cập nhật CHỈ các field từ template + recalculate closing + yearly
             await prisma.medicineInventory.update({
               where: {
-                medicineId_month_year: {
+                company_medicine_period: {
+                  companyId,
                   medicineId: medicine.id,
                   month,
                   year,
@@ -1143,7 +1347,7 @@ export class InventoryService {
         });
         // After transaction committed: cascade opening to all subsequent months
         if (medicine) {
-          await this.propagateOpeningForward(medicine.id, month, year);
+          await this.propagateOpeningForward(medicine.id, month, year, companyId);
         }
       } catch (error) {
         console.error(`❌ Error processing ${medicineData.name}:`, error);
@@ -1164,7 +1368,7 @@ export class InventoryService {
    * Báo cáo tồn kho theo tháng/năm
    */
   async getInventoryReport(params: GetInventoryReportDto) {
-    const { month, year, categoryId, search } = params;
+    const { month, year, categoryId, search, companyId } = params;
     const currentDate = new Date();
     const targetMonth = month || currentDate.getMonth() + 1;
     const targetYear = year || currentDate.getFullYear();
@@ -1173,6 +1377,7 @@ export class InventoryService {
       month: targetMonth,
       year: targetYear,
       medicine: { isActive: true },
+      ...(companyId !== undefined ? { companyId } : {}),
     };
 
     if (categoryId || search) {
@@ -1254,9 +1459,10 @@ export class InventoryService {
   /**
    * Báo cáo theo năm (tất cả các tháng)
    */
-  async getYearlyInventoryReport(year: number, categoryId?: string) {
+  async getYearlyInventoryReport(year: number, categoryId?: string, companyId?: string) {
     const where: Prisma.MedicineInventoryWhereInput = {
       year,
+      ...(companyId !== undefined ? { companyId } : {}),
     };
 
     if (categoryId) {
@@ -1334,7 +1540,7 @@ export class InventoryService {
    * - Sắp hết hạn: còn 2 tháng (60 ngày)
    */
   async getStockAlerts(params: StockAlertDto) {
-    const { minThreshold = 100, daysUntilExpiry = 60 } = params;
+    const { minThreshold = 100, daysUntilExpiry = 60, companyId } = params;
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
     const currentYear = currentDate.getFullYear();
@@ -1347,6 +1553,7 @@ export class InventoryService {
         month: currentMonth,
         year: currentYear,
         medicine: { isActive: true },
+        ...(companyId !== undefined ? { companyId } : {}),
         closingQuantity: {
           lt: minThreshold,
           gt: 0,
@@ -1367,6 +1574,7 @@ export class InventoryService {
         month: currentMonth,
         year: currentYear,
         medicine: { isActive: true },
+        ...(companyId !== undefined ? { companyId } : {}),
         expiryDate: {
           lte: expiryThreshold,
           gte: currentDate,
@@ -1398,7 +1606,7 @@ export class InventoryService {
    * Lấy tồn kho hiện tại của tất cả các thuốc - GROUPED BY CATEGORY
    * Format giống Excel: Category header → medicines → subtotal
    */
-  async getAllCurrentStock() {
+  async getAllCurrentStock(companyId?: string) {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
     const currentYear = currentDate.getFullYear();
@@ -1416,6 +1624,7 @@ export class InventoryService {
               where: {
                 month: currentMonth,
                 year: currentYear,
+                ...(companyId !== undefined ? { companyId } : {}),
               },
             },
           },
@@ -1586,14 +1795,16 @@ export class InventoryService {
     month: number;
     year: number;
     categoryId?: string;
+    companyId?: string;
   }) {
-    const { month, year, categoryId } = params;
+    const { month, year, categoryId, companyId } = params;
 
     // Lấy tất cả inventories của năm đó
     const inventories = await this.prisma.medicineInventory.findMany({
       where: {
         year,
         medicine: { isActive: true },
+        ...(companyId !== undefined ? { companyId } : {}),
         ...(categoryId && {
           medicine: {
             isActive: true,
@@ -2154,14 +2365,15 @@ export class InventoryService {
   /**
    * Lấy tồn kho hiện tại của 1 thuốc
    */
-  async getCurrentStock(medicineId: string) {
+  async getCurrentStock(medicineId: string, companyId?: string) {
     const currentDate = new Date();
     const currentMonth = currentDate.getMonth() + 1;
     const currentYear = currentDate.getFullYear();
 
     const inventory = await this.prisma.medicineInventory.findUnique({
       where: {
-        medicineId_month_year: {
+        company_medicine_period: {
+          companyId: companyId ?? null,
           medicineId,
           month: currentMonth,
           year: currentYear,
@@ -2218,6 +2430,7 @@ export class InventoryService {
   async reverseExportTransaction(
     medicineId: string,
     referenceId: string,
+    companyId?: string,
   ): Promise<void> {
     // 1. Tìm tất cả EXPORT transactions cho medicineId + referenceId này
     const oldTx = await this.prisma.inventoryTransaction.findMany({
@@ -2248,10 +2461,8 @@ export class InventoryService {
 
     // 5. Đọc inventory record của tháng đó
     const inv = await this.prisma.medicineInventory.findUnique({
-      where: { medicineId_month_year: { medicineId, month, year } },
+      where: { company_medicine_period: { companyId: companyId ?? null, medicineId, month, year } },
     });
-
-    if (!inv) return; // Không có tồn kho tháng đó → không cần cập nhật
 
     // 6. Tính lại export quantities (trừ đi lượng đã hoàn tác)
     const safeQty = (base: unknown, sub: string) => {
@@ -2285,8 +2496,8 @@ export class InventoryService {
       : new Prisma.Decimal(0);
 
     // 8. Cập nhật MedicineInventory
-    await this.prisma.medicineInventory.update({
-      where: { medicineId_month_year: { medicineId, month, year } },
+    await this.prisma.medicineInventory.updateMany({
+      where: { medicineId, month, year, ...(companyId !== undefined ? { companyId } : { companyId: null }) },
       data: {
         monthlyExportQuantity: newMonthExportQty.toFixed(),
         monthlyExportUnitPrice: newMonthExportPrice.toFixed(),
@@ -2300,7 +2511,7 @@ export class InventoryService {
       },
     });
     // Cascade opening forward so subsequent months stay in sync
-    await this.propagateOpeningForward(medicineId, month, year);
+    await this.propagateOpeningForward(medicineId, month, year, companyId);
   }
 
   /**
@@ -2311,7 +2522,7 @@ export class InventoryService {
 
     // Đọc record hiện tại để lấy monthly import/export (giữ nguyên khi cập nhật opening)
     const existing = await this.prisma.medicineInventory.findUnique({
-      where: { medicineId_month_year: { medicineId, month, year } },
+      where: { company_medicine_period: { companyId: data.companyId ?? null, medicineId, month, year } },
     });
 
     // Tính opening bằng Decimal (ưu tiên giá trị mới, fallback về existing)
@@ -2353,7 +2564,8 @@ export class InventoryService {
 
     const result = await this.prisma.medicineInventory.upsert({
       where: {
-        medicineId_month_year: {
+        company_medicine_period: {
+          companyId: data.companyId ?? null,
           medicineId,
           month,
           year,
@@ -2373,6 +2585,7 @@ export class InventoryService {
       },
       create: {
         medicineId,
+        companyId: data.companyId ?? null,
         month,
         year,
         expiryDate: data.expiryDate ? new Date(data.expiryDate) : null,
@@ -2395,7 +2608,7 @@ export class InventoryService {
       },
     });
     // Cascade opening forward to subsequent months
-    await this.propagateOpeningForward(medicineId, month, year);
+    await this.propagateOpeningForward(medicineId, month, year, data.companyId ?? undefined);
     return result;
   }
 
@@ -2496,7 +2709,7 @@ export class InventoryService {
    * Import inventory data from Excel file buffer
    * Auto-detects month/year from title row
    */
-  async importFromExcelFile(fileBuffer: Buffer): Promise<{
+  async importFromExcelFile(fileBuffer: Buffer, companyId?: string): Promise<{
     imported: number;
     updated: number;
     skipped: number;
@@ -2590,10 +2803,15 @@ export class InventoryService {
         medicinesByNameCat.get(key)!.push(med);
       }
     }
-    // Pre-load existing inventory records for this period (for batch upsert)
+    // Pre-load existing inventory records for this company+period (for batch upsert).
+    // Must filter by companyId to avoid matching records of other companies.
     const existingInventorySet = new Set<string>(
       (await this.prisma.medicineInventory.findMany({
-        where: { month, year },
+        where: {
+          month,
+          year,
+          ...(companyId !== undefined ? { companyId } : { companyId: null }),
+        },
         select: { medicineId: true },
       })).map(r => r.medicineId),
     );
@@ -3000,32 +3218,41 @@ export class InventoryService {
       }
     }
 
-    // ── Batch-write all inventory records (createMany + transaction update) ──
+    // ── Batch-write all inventory records ──────────────────────────────────
     const propIds = Array.from(importedMedicineIds);
     if (pendingInventories.length > 0) {
+      const effectiveCompanyId = companyId ?? null;
       const creates = pendingInventories
         .filter(p => !existingInventorySet.has(p.medicineId))
-        .map(({ medicineId, ...fields }) => ({ ...fields, medicineId, month, year }));
+        .map(({ medicineId, ...fields }) => ({ ...fields, medicineId, month, year, companyId: effectiveCompanyId }));
       const updates = pendingInventories.filter(p => existingInventorySet.has(p.medicineId));
 
-      if (creates.length > 0) {
-        await this.prisma.medicineInventory.createMany({ data: creates, skipDuplicates: true });
-      }
+      console.log(`📝 Batch writing ${pendingInventories.length} inventory records (companyId: ${effectiveCompanyId ?? 'null'}, creates: ${creates.length}, updates: ${updates.length})`);
+
+      // updateMany supports null in WHERE (unlike update/upsert with compound unique).
       if (updates.length > 0) {
         await this.prisma.$transaction(
           updates.map(({ medicineId, ...data }) =>
-            this.prisma.medicineInventory.update({
-              where: { medicineId_month_year: { medicineId, month, year } },
+            this.prisma.medicineInventory.updateMany({
+              where: {
+                medicineId,
+                month,
+                year,
+                ...(companyId !== undefined ? { companyId } : { companyId: null }),
+              },
               data,
             }),
           ),
         );
       }
+      if (creates.length > 0) {
+        await this.prisma.medicineInventory.createMany({ data: creates, skipDuplicates: true });
+      }
     }
     // ────────────────────────────────────────────────────────────────────────
 
     // ── Bulk propagate opening forward (2 queries + 1 batch transaction) ────
-    await this.propagateOpeningForwardBulk(propIds, month, year);
+    await this.propagateOpeningForwardBulk(propIds, month, year, companyId);
     // ────────────────────────────────────────────────────────────────────────
 
     console.log(`\n✅ Import completed:`);
@@ -3110,6 +3337,7 @@ export class InventoryService {
   async initializeMonth(
     month: number,
     year: number,
+    companyId?: string,
   ): Promise<{ created: number; skipped: number }> {
     // Lấy tất cả thuốc đang active
     const medicines = await this.prisma.medicine.findMany({
@@ -3123,21 +3351,20 @@ export class InventoryService {
     for (const { id: medicineId } of medicines) {
       // Kiểm tra bản ghi đã tồn tại chưa
       const existing = await this.prisma.medicineInventory.findUnique({
-        where: { medicineId_month_year: { medicineId, month, year } },
+        where: { company_medicine_period: { companyId: companyId ?? null, medicineId, month, year } },
       });
-
-      // Lấy tồn cuối kỳ tháng gần nhất (dùng cho cả create lẫn patch expiryDate)
       const prev = await this.findMostRecentPreviousInventory(
         medicineId,
         month,
         year,
+        companyId,
       );
 
       if (existing) {
         // Nếu expiryDate bị null nhưng tháng trước có → patch lại
         if (!existing.expiryDate && prev?.expiryDate) {
-          await this.prisma.medicineInventory.update({
-            where: { medicineId_month_year: { medicineId, month, year } },
+          await this.prisma.medicineInventory.updateMany({
+            where: { medicineId, month, year, ...(companyId !== undefined ? { companyId } : { companyId: null }) },
             data: { expiryDate: prev.expiryDate },
           });
         }
@@ -3178,6 +3405,7 @@ export class InventoryService {
       await this.prisma.medicineInventory.create({
         data: {
           medicineId,
+          companyId: companyId ?? null,
           month,
           year,
           expiryDate: prev.expiryDate ?? null, // clone từ tháng trước
@@ -3215,7 +3443,7 @@ export class InventoryService {
    * Dùng để sửa dữ liệu lịch sử bị sai sau khi upgrade logic cascade.
    * Invariant: closing[M] = opening[M] + import[M] - export[M]; opening[M+1] = closing[M]
    */
-  async recalculateAllBalances(): Promise<{
+  async recalculateAllBalances(companyId?: string): Promise<{
     medicines: number;
     records: number;
   }> {
@@ -3223,6 +3451,7 @@ export class InventoryService {
     const distinct = await this.prisma.medicineInventory.findMany({
       distinct: ['medicineId'],
       select: { medicineId: true },
+      ...(companyId !== undefined ? { where: { companyId } } : {}),
     });
 
     let totalRecords = 0;
@@ -3230,7 +3459,10 @@ export class InventoryService {
     for (const { medicineId } of distinct) {
       // Lấy tất cả bản ghi của thuốc này, sắp xếp theo thời gian tăng dần
       const records = await this.prisma.medicineInventory.findMany({
-        where: { medicineId },
+        where: {
+          medicineId,
+          ...(companyId !== undefined ? { companyId } : { companyId: null }),
+        },
         orderBy: [{ year: 'asc' }, { month: 'asc' }],
       });
 
@@ -3301,13 +3533,12 @@ export class InventoryService {
           !rec.expiryDate && prevExpiryDate ? { expiryDate: prevExpiryDate } : {};
 
         // Cập nhật bản ghi với dữ liệu tính toán lại
-        await this.prisma.medicineInventory.update({
+        await this.prisma.medicineInventory.updateMany({
           where: {
-            medicineId_month_year: {
-              medicineId,
-              month: rec.month,
-              year: rec.year,
-            },
+            medicineId,
+            month: rec.month,
+            year: rec.year,
+            ...(rec.companyId !== null ? { companyId: rec.companyId } : { companyId: null }),
           },
           data: {
             ...expiryDatePatch,
@@ -3340,6 +3571,35 @@ export class InventoryService {
     return { medicines: distinct.length, records: totalRecords };
   }
 
+  /**
+   * Tích hợp: Tính lại toàn bộ tồn kho + khởi tạo tháng hiện tại nếu chưa có dữ liệu.
+   * Gọi sau recalculate để đảm bảo tháng hiện tại có opening = closing tháng trước.
+   */
+  async recalculateAndInitialize(companyId?: string): Promise<{
+    medicines: number;
+    records: number;
+    initialized: number;
+  }> {
+    const recalcResult = await this.recalculateAllBalances(companyId);
+
+    // Tìm tháng/năm mới nhất trong DB (tháng cuối cùng có dữ liệu)
+    const latestRecord = await this.prisma.medicineInventory.findFirst({
+      where: companyId !== undefined ? { companyId } : { companyId: null },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+      select: { month: true, year: true },
+    });
+
+    let initialized = 0;
+    if (latestRecord) {
+      const nextMonth = latestRecord.month === 12 ? 1 : latestRecord.month + 1;
+      const nextYear = latestRecord.month === 12 ? latestRecord.year + 1 : latestRecord.year;
+      const initResult = await this.initializeMonth(nextMonth, nextYear, companyId);
+      initialized = initResult.created;
+    }
+
+    return { ...recalcResult, initialized };
+  }
+
   // ==================== CUMULATIVE BALANCE HELPERS ====================
 
   /**
@@ -3350,13 +3610,14 @@ export class InventoryService {
     medicineId: string,
     month: number,
     year: number,
+    companyId?: string,
   ) {
     let m = month === 1 ? 12 : month - 1;
     let y = month === 1 ? year - 1 : year;
 
     for (let i = 0; i < 24; i++) {
       const found = await this.prisma.medicineInventory.findUnique({
-        where: { medicineId_month_year: { medicineId, month: m, year: y } },
+        where: { company_medicine_period: { companyId: companyId ?? null, medicineId, month: m, year: y } },
       });
       if (found) return found;
       if (m === 1) {
@@ -3384,19 +3645,26 @@ export class InventoryService {
     medicineIds: string[],
     startMonth: number,
     startYear: number,
+    companyId?: string,
   ): Promise<void> {
     if (medicineIds.length === 0) return;
 
-    // 1 query: get all start records
+    // 1 query: get all start records (scoped to companyId)
     const startRecords = await this.prisma.medicineInventory.findMany({
-      where: { medicineId: { in: medicineIds }, month: startMonth, year: startYear },
+      where: {
+        medicineId: { in: medicineIds },
+        month: startMonth,
+        year: startYear,
+        ...(companyId !== undefined ? { companyId } : { companyId: null }),
+      },
     });
     if (startRecords.length === 0) return;
 
-    // 1 query: get all subsequent records for all medicines
+    // 1 query: get all subsequent records for all medicines (scoped to companyId)
     const allSubsequent = await this.prisma.medicineInventory.findMany({
       where: {
         medicineId: { in: medicineIds },
+        ...(companyId !== undefined ? { companyId } : { companyId: null }),
         OR: [
           { year: { gt: startYear } },
           { year: startYear, month: { gt: startMonth } },
@@ -3414,7 +3682,7 @@ export class InventoryService {
     }
 
     // Process each medicine's chain in memory, collect updates
-    const pendingUpdates: Array<{ medicineId: string; month: number; year: number; data: Record<string, any> }> = [];
+    const pendingUpdates: Array<{ medicineId: string; companyId: string | null; month: number; year: number; data: Record<string, any> }> = [];
 
     for (const startRecord of startRecords) {
       const { medicineId } = startRecord;
@@ -3481,6 +3749,7 @@ export class InventoryService {
 
         pendingUpdates.push({
           medicineId,
+          companyId: rec.companyId ?? null,
           month: rec.month,
           year: rec.year,
           data: {
@@ -3509,12 +3778,17 @@ export class InventoryService {
       }
     }
 
-    // 1 batch transaction: all updates at once
+    // 1 batch transaction: all updates at once (use updateMany — update() rejects null companyId in compound unique)
     if (pendingUpdates.length > 0) {
       await this.prisma.$transaction(
         pendingUpdates.map(u =>
-          this.prisma.medicineInventory.update({
-            where: { medicineId_month_year: { medicineId: u.medicineId, month: u.month, year: u.year } },
+          this.prisma.medicineInventory.updateMany({
+            where: {
+              medicineId: u.medicineId,
+              month: u.month,
+              year: u.year,
+              ...(u.companyId !== null ? { companyId: u.companyId } : { companyId: null }),
+            },
             data: u.data,
           }),
         ),
@@ -3526,11 +3800,13 @@ export class InventoryService {
     medicineId: string,
     startMonth: number,
     startYear: number,
+    companyId?: string,
   ): Promise<void> {
     // Bước 1: Lấy bản ghi gốc để lấy closing và YTD hiện tại
     const startRecord = await this.prisma.medicineInventory.findUnique({
       where: {
-        medicineId_month_year: {
+        company_medicine_period: {
+          companyId: companyId ?? null,
           medicineId,
           month: startMonth,
           year: startYear,
@@ -3543,6 +3819,7 @@ export class InventoryService {
     const subsequentRecords = await this.prisma.medicineInventory.findMany({
       where: {
         medicineId,
+        ...(companyId !== undefined ? { companyId } : { companyId: null }),
         OR: [
           { year: { gt: startYear } },
           { year: startYear, month: { gt: startMonth } },
@@ -3631,13 +3908,12 @@ export class InventoryService {
       }
 
       // ── G. Lưu bản ghi đã cập nhật ───────────────────────────────────
-      await this.prisma.medicineInventory.update({
+      await this.prisma.medicineInventory.updateMany({
         where: {
-          medicineId_month_year: {
-            medicineId,
-            month: rec.month,
-            year: rec.year,
-          },
+          medicineId,
+          month: rec.month,
+          year: rec.year,
+          ...(companyId !== undefined ? { companyId } : { companyId: null }),
         },
         data: {
           openingQuantity: dOpenQty.toFixed(),

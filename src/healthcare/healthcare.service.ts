@@ -59,7 +59,7 @@ export class HealthcareService {
   }
 
   // Dashboard statistics for healthcare
-  async getDashboardStats() {
+  async getDashboardStats(companyId?: string) {
     // "Today" boundaries in Vietnam time (UTC+7): midnight to 23:59:59
     const nowVN = new Date();
     const todayStartVN = new Date(nowVN);
@@ -84,11 +84,14 @@ export class HealthcareService {
         .findMany({
           select: { patientId: true },
           distinct: ['patientId'],
+          ...(companyId ? { where: { patient: { companyId } } } : {}),
         })
         .then((records) => records.length),
 
       // Total medical records (đây chính là "tổng số đơn thuốc")
-      this.prisma.medicalRecord.count(),
+      this.prisma.medicalRecord.count(
+        companyId ? { where: { patient: { companyId } } } : undefined,
+      ),
 
       // Total active medicines
       this.prisma.medicine.count({
@@ -103,6 +106,7 @@ export class HealthcareService {
             gte: todayStart,
             lte: todayEnd,
           },
+          ...(companyId ? { patient: { companyId } } : {}),
         },
       }),
 
@@ -129,11 +133,14 @@ export class HealthcareService {
   }
 
   // Get recent activities
-  async getRecentActivities(limit: number = 20) {
+  async getRecentActivities(limit: number = 20, companyId?: string) {
     const recentRecords = await this.prisma.medicalRecord.findMany({
       take: limit,
       orderBy: {
         visitDate: 'desc',
+      },
+      where: {
+        ...(companyId ? { patient: { companyId } } : {}),
       },
       include: {
         patient: {
@@ -385,6 +392,13 @@ export class HealthcareService {
   }) {
     const { prescriptions, ...recordData } = data;
 
+    // Fetch patient's companyId for inventory scoping
+    const patient = await this.prisma.user.findUnique({
+      where: { id: data.patientId },
+      select: { companyId: true },
+    });
+    const patientCompanyId = patient?.companyId;
+
     // Prepare prescriptions data with auto-dispensed status
     const prescriptionCreateData =
       prescriptions?.map((prescription) => ({
@@ -434,6 +448,7 @@ export class HealthcareService {
             // Lấy thông tin tồn kho hiện tại
             const currentStock = await this.inventoryService.getCurrentStock(
               prescription.medicineId,
+              patientCompanyId,
             );
 
             if (currentStock.currentStock < prescription.quantity) {
@@ -455,6 +470,7 @@ export class HealthcareService {
               referenceId: medicalRecord.id,
               notes: `Xuất thuốc theo đơn - BS: ${data.doctorId}`,
               createdById: data.doctorId,
+              companyId: patientCompanyId,
             });
           } catch (error) {
             console.error(
@@ -498,11 +514,12 @@ export class HealthcareService {
         select: { medicineId: true, quantity: true, isDispensed: true },
       });
 
-      // 2. Lấy thông tin BS từ medical record
+      // 2. Lấy thông tin BS và companyId từ medical record
       const medicalRecord = await prisma.medicalRecord.findUnique({
         where: { id },
-        select: { doctorId: true, visitDate: true },
+        select: { doctorId: true, visitDate: true, patient: { select: { companyId: true } } },
       });
+      const patientCompanyId = medicalRecord?.patient?.companyId;
 
       // 3. Cập nhật thông tin cơ bản của medical record — giữ nguyên giờ khám gốc
       const newVisitDate = data.visitDate && medicalRecord
@@ -527,6 +544,7 @@ export class HealthcareService {
               await this.inventoryService.reverseExportTransaction(
                 old.medicineId,
                 id, // referenceId = medicalRecordId
+                patientCompanyId,
               );
             } catch (err) {
               console.error(
@@ -566,6 +584,7 @@ export class HealthcareService {
           try {
             const currentStock = await this.inventoryService.getCurrentStock(
               p.medicineId,
+              patientCompanyId,
             );
 
             if (currentStock.currentStock < p.quantity) {
@@ -585,6 +604,7 @@ export class HealthcareService {
               referenceId: id,
               notes: `Xuất thuốc theo đơn (cập nhật) - Đơn #${id.slice(-8)}`,
               createdById: medicalRecord?.doctorId || undefined,
+              companyId: patientCompanyId,
             });
           } catch (err) {
             console.error(
@@ -627,12 +647,17 @@ export class HealthcareService {
         quantity: true,
         isDispensed: true,
         medicalRecordId: true,
+        medicalRecord: {
+          select: { patient: { select: { companyId: true } } },
+        },
       },
     });
 
     if (!prescription) {
       throw new Error(`Prescription ${prescriptionId} not found`);
     }
+
+    const patientCompanyId = prescription.medicalRecord?.patient?.companyId;
 
     if (prescription.isDispensed) {
       // Đã cấp rồi → chỉ cập nhật metadata, không trừ kho lần nữa
@@ -655,6 +680,7 @@ export class HealthcareService {
     // 2. Validate stock before dispensing
     const currentStock = await this.inventoryService.getCurrentStock(
       prescription.medicineId,
+      patientCompanyId,
     );
     if (currentStock.currentStock < prescription.quantity) {
       throw new Error(
@@ -691,6 +717,7 @@ export class HealthcareService {
       referenceId: prescription.medicalRecordId,
       notes: `Xuất thuốc thủ công - Người cấp: ${dispenserId}`,
       createdById: dispenserId,
+      companyId: patientCompanyId,
     });
 
     return updated;
@@ -714,10 +741,13 @@ export class HealthcareService {
       instructions?: string;
       notes?: string;
     }>;
-  }) {
+  }, companyId?: string) {
     // Find patient by employee code
     const patient = await this.prisma.user.findFirst({
-      where: { employeeCode: data.patientEmployeeCode },
+      where: {
+        employeeCode: data.patientEmployeeCode,
+        ...(companyId ? { companyId } : {}),
+      },
     });
 
     if (!patient) {
@@ -732,6 +762,7 @@ export class HealthcareService {
       for (const prescription of prescriptions) {
         const stock = await this.inventoryService.getCurrentStock(
           prescription.medicineId,
+          patient.companyId,
         );
         if (stock.currentStock < prescription.quantity) {
           insufficientItems.push(
@@ -803,6 +834,7 @@ export class HealthcareService {
         for (const prescription of prescriptions) {
           const currentStock = await this.inventoryService.getCurrentStock(
             prescription.medicineId,
+            patient.companyId,
           );
           // Throw on inventory error so the outer transaction rolls back
           await this.inventoryService.createInventoryTransaction({
@@ -815,6 +847,7 @@ export class HealthcareService {
             referenceId: medicalRecord.id,
             notes: `Xuất thuốc theo đơn - Bệnh nhân: ${data.patientEmployeeCode}`,
             createdById: data.doctorId,
+            companyId: patient.companyId,
           });
         }
       }
@@ -832,8 +865,9 @@ export class HealthcareService {
     endDate?: string;
     page?: number;
     limit?: number;
+    companyId?: string;
   }) {
-    const { doctorId, patientEmployeeCode, startDate, endDate, page = 1, limit = 20 } = filters;
+    const { doctorId, patientEmployeeCode, startDate, endDate, page = 1, limit = 20, companyId } = filters;
 
     const where: any = {};
     if (doctorId) where.doctorId = doctorId;
@@ -845,6 +879,9 @@ export class HealthcareService {
         ...(startDate ? { gte: new Date(startDate) } : {}),
         ...(endDate ? { lte: new Date(endDate) } : {}),
       };
+    }
+    if (companyId) {
+      where.patient = { ...(typeof where.patient === 'object' ? where.patient : {}), companyId };
     }
 
     const skip = (page - 1) * limit;
@@ -868,6 +905,13 @@ export class HealthcareService {
 
   async deleteMedicalRecord(id: string) {
     return this.prisma.$transaction(async (prisma) => {
+      // Get patient companyId before deletion
+      const medicalRecord = await prisma.medicalRecord.findUnique({
+        where: { id },
+        select: { patient: { select: { companyId: true } } },
+      });
+      const patientCompanyId = medicalRecord?.patient?.companyId;
+
       // Reverse inventory for all dispensed prescriptions
       const prescriptions = await prisma.medicalPrescription.findMany({
         where: { medicalRecordId: id },
@@ -877,7 +921,7 @@ export class HealthcareService {
       for (const p of prescriptions) {
         if (p.isDispensed) {
           try {
-            await this.inventoryService.reverseExportTransaction(p.medicineId, id);
+            await this.inventoryService.reverseExportTransaction(p.medicineId, id, patientCompanyId);
           } catch (err) {
             // Log but continue — the record deletion takes priority
             console.error(`[deleteMedicalRecord] Lỗi hoàn trả tồn kho ${p.medicineId}:`, err);
@@ -896,6 +940,7 @@ export class HealthcareService {
     period: 'day' | 'week' | 'month' | 'year' = 'month',
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
     // Set end date to end of day to include all data from that day
@@ -922,6 +967,7 @@ export class HealthcareService {
               gte: start,
               lte: end,
             },
+            ...(companyId ? { patient: { companyId } } : {}),
           },
         },
         include: {
@@ -949,6 +995,7 @@ export class HealthcareService {
             gte: start,
             lte: end,
           },
+          ...(companyId ? { patient: { companyId } } : {}),
         },
         include: {
           prescriptions: true,
@@ -989,6 +1036,7 @@ export class HealthcareService {
       period,
       start,
       end,
+      companyId,
     );
 
     // Get accurate medicine distribution for the entire period
@@ -997,16 +1045,27 @@ export class HealthcareService {
       10,
       startDate,
       endDate,
+      companyId,
     );
 
     // Get accurate total counts for the entire period — filter by visitDate (consistent with above)
     const totalStats = await Promise.all([
       this.prisma.medicalPrescription.groupBy({
         by: ['medicineId'],
-        where: { medicalRecord: { visitDate: { gte: start, lte: end } } },
+        where: {
+          medicalRecord: {
+            visitDate: { gte: start, lte: end },
+            ...(companyId ? { patient: { companyId } } : {}),
+          },
+        },
       }),
       this.prisma.medicalPrescription.count({
-        where: { medicalRecord: { visitDate: { gte: start, lte: end } } },
+        where: {
+          medicalRecord: {
+            visitDate: { gte: start, lte: end },
+            ...(companyId ? { patient: { companyId } } : {}),
+          },
+        },
       }),
     ]);
 
@@ -1031,6 +1090,7 @@ export class HealthcareService {
     period: 'day' | 'week' | 'month' | 'year',
     start: Date,
     end: Date,
+    companyId?: string,
   ) {
     const trends = [];
 
@@ -1132,6 +1192,7 @@ export class HealthcareService {
                 gte: periodStart,
                 lte: periodEnd,
               },
+              ...(companyId ? { patient: { companyId } } : {}),
             },
           }),
           this.prisma.medicalPrescription.aggregate({
@@ -1141,6 +1202,7 @@ export class HealthcareService {
                   gte: periodStart,
                   lte: periodEnd,
                 },
+                ...(companyId ? { patient: { companyId } } : {}),
               },
             },
             _sum: {
@@ -1185,6 +1247,7 @@ export class HealthcareService {
   async getPrescriptionTrends(
     period: 'day' | 'week' | 'month' | 'year' = 'month',
     limit: number = 12,
+    companyId?: string,
   ) {
     const start = this.getDefaultStartDate(period, limit);
     const end = new Date();
@@ -1195,6 +1258,7 @@ export class HealthcareService {
           gte: start,
           lte: end,
         },
+        ...(companyId ? { medicalRecord: { patient: { companyId } } } : {}),
       },
       include: {
         medicalRecord: {
@@ -1220,6 +1284,7 @@ export class HealthcareService {
     limit: number = 10,
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
     // Set end date to end of day to include all data from that day
@@ -1243,6 +1308,7 @@ export class HealthcareService {
           gte: start,
           lte: end,
         },
+        ...(companyId ? { medicalRecord: { patient: { companyId } } } : {}),
       },
       _count: {
         id: true,
@@ -1447,6 +1513,7 @@ export class HealthcareService {
     period: 'day' | 'week' | 'month' | 'year' = 'month',
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
     if (endDate) end.setHours(23, 59, 59, 999);
@@ -1485,6 +1552,7 @@ export class HealthcareService {
     const records = await this.prisma.medicalRecord.findMany({
       where: {
         visitDate: { gte: start, lte: end },
+        ...(companyId ? { patient: { companyId } } : {}),
       },
       include: {
         prescriptions: {
@@ -1566,6 +1634,7 @@ export class HealthcareService {
     period: 'day' | 'week' | 'month' | 'year' = 'month',
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
     if (endDate) end.setHours(23, 59, 59, 999);
@@ -1605,7 +1674,10 @@ export class HealthcareService {
     const curYear = now.getFullYear();
 
     const records = await this.prisma.medicalRecord.findMany({
-      where: { visitDate: { gte: start, lte: end } },
+      where: {
+        visitDate: { gte: start, lte: end },
+        ...(companyId ? { patient: { companyId } } : {}),
+      },
       orderBy: { visitDate: 'desc' },
       include: {
         patient: {
@@ -1675,6 +1747,7 @@ export class HealthcareService {
     period: 'day' | 'week' | 'month' | 'year' = 'month',
     startDate?: string,
     endDate?: string,
+    companyId?: string,
   ) {
     const end = endDate ? new Date(endDate) : new Date();
     if (endDate) end.setHours(23, 59, 59, 999);
@@ -1710,7 +1783,10 @@ export class HealthcareService {
     }
 
     const records = await this.prisma.medicalRecord.findMany({
-      where: { visitDate: { gte: start, lte: end } },
+      where: {
+        visitDate: { gte: start, lte: end },
+        ...(companyId ? { patient: { companyId } } : {}),
+      },
       orderBy: { visitDate: 'desc' },
       select: {
         id: true,
@@ -1807,7 +1883,7 @@ export class HealthcareService {
   }
 
   // ─── Export medical records to Excel ─────────────────────────────────────────
-  async exportMedicalRecordsExcel(startDate?: string, endDate?: string): Promise<Buffer> {
+  async exportMedicalRecordsExcel(startDate?: string, endDate?: string, companyId?: string): Promise<Buffer> {
     const XLSX = await import('xlsx');
 
     const start = startDate ? new Date(startDate) : new Date(new Date().getFullYear(), 0, 1);
@@ -1816,7 +1892,10 @@ export class HealthcareService {
     end.setHours(23, 59, 59, 999);
 
     const records = await this.prisma.medicalRecord.findMany({
-      where: { visitDate: { gte: start, lte: end } },
+      where: {
+        visitDate: { gte: start, lte: end },
+        ...(companyId ? { patient: { companyId } } : {}),
+      },
       include: {
         patient: { select: { employeeCode: true, firstName: true, lastName: true } },
         doctor: { select: { employeeCode: true, firstName: true, lastName: true } },
@@ -1894,10 +1973,11 @@ export class HealthcareService {
 
     // Build lookup maps
     const [users, medicines] = await Promise.all([
-      this.prisma.user.findMany({ select: { id: true, employeeCode: true } }),
+      this.prisma.user.findMany({ select: { id: true, employeeCode: true, companyId: true } }),
       this.prisma.medicine.findMany({ select: { id: true, name: true } }),
     ]);
     const userByCode = new Map(users.map((u) => [u.employeeCode, u.id]));
+    const userCompanyByCode = new Map(users.map((u) => [u.employeeCode, u.companyId]));
     const medicineByName = new Map(medicines.map((m) => [m.name.trim(), m.id]));
 
     // Group prescriptions by record ID
@@ -1923,6 +2003,7 @@ export class HealthcareService {
 
       const patientId = userByCode.get(patientCode);
       const doctorId = userByCode.get(doctorCode);
+      const patientCompanyId = userCompanyByCode.get(patientCode);
       if (!patientId) { errors.push(`Không tìm thấy nhân viên mã ${patientCode}`); skipped++; continue; }
       if (!doctorId)  { errors.push(`Không tìm thấy bác sĩ mã ${doctorCode}`);    skipped++; continue; }
 
@@ -1980,7 +2061,7 @@ export class HealthcareService {
             if (isDispensed) {
               try {
                 const qty = Number(p['Số lượng cấp']) || 1;
-                const stock = await this.inventoryService.getCurrentStock(medicineId);
+                const stock = await this.inventoryService.getCurrentStock(medicineId, patientCompanyId);
                 await this.inventoryService.createInventoryTransaction({
                   medicineId,
                   type: InventoryTransactionTypeDto.EXPORT,
@@ -1991,6 +2072,7 @@ export class HealthcareService {
                   referenceId: recordId,
                   notes: `[IMPORT] Xuất thuốc theo đơn khám`,
                   createdById: doctorId,
+                  companyId: patientCompanyId,
                 });
               } catch (invErr: any) {
                 // Non-fatal: log but don't fail the whole record import
