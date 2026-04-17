@@ -89,6 +89,11 @@ export class CreateMedicalRecordDto {
   @IsBoolean()
   isWorkAccident?: boolean;
 
+  @ApiPropertyOptional({ description: 'Company ID (for SUPERADMIN to scope to a specific company)' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
+
   @ApiPropertyOptional({
     description: 'List of prescriptions',
     type: [CreatePrescriptionDto],

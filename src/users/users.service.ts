@@ -266,6 +266,7 @@ let departmentId: string | null = null;
         ...userFields,
         password: hashedPassword,
         companyId: office.companyId,
+        isActive: true,
       },
       include: {
         office: true,
@@ -572,7 +573,7 @@ let departmentId: string | null = null;
     return undefined;
   }
 
-  async importUsersFromExcel(file: any) {
+  async importUsersFromExcel(file: any, companyId?: string) {
     try {
       // Read Excel file — parse by column position to avoid header encoding issues
       const workbook = XLSX.read(file.buffer, {
@@ -606,9 +607,11 @@ let departmentId: string | null = null;
         errors: [] as any[],
       };
 
-      // Pre-load all offices, departments, positions, jobPositions for lookup
+      // Pre-load all offices filtered by companyId if provided
       const [offices, departments, positions, jobPositions] = await Promise.all([
-        this.prisma.office.findMany(),
+        this.prisma.office.findMany({
+          where: companyId ? { companyId } : undefined,
+        }),
         this.prisma.department.findMany(),
         this.prisma.position.findMany(),
         this.prisma.jobPosition.findMany({
@@ -778,12 +781,12 @@ let departmentId: string | null = null;
             role,
             jobPositionId: jobPosition.id,
             officeId: office.id,
-            password: '123456',
+            password: 'Abcd123@', // Default password for imported users (will be hashed in service)
           };
 
           // Upsert user — update if employeeCode+companyId already exists, create otherwise
           const { role: userRole, ...userFields } = createUserDto;
-          const hashedPassword = await bcrypt.hash('123456', 10);
+          const hashedPassword = await bcrypt.hash('Abcd123@', 10);
           const upsertData = {
             ...userFields,
             dateOfBirth: dateOfBirthIso ? new Date(dateOfBirthIso) : undefined,

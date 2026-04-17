@@ -136,6 +136,11 @@ export class CreateInventoryTransactionDto {
   @IsOptional()
   @IsString()
   createdById?: string;
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }
 
 // ========== BULK IMPORT DTOs (from Excel) ==========
@@ -317,6 +322,11 @@ export class BulkImportInventoryDto {
   @ValidateNested({ each: true })
   @Type(() => ImportMedicineFromExcelDto)
   medicines: ImportMedicineFromExcelDto[];
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }
 
 // ========== SIMPLIFIED BULK IMPORT DTOs (13-column Template) ==========
@@ -453,6 +463,11 @@ export class SimplifiedBulkImportDto {
   @ValidateNested({ each: true })
   @Type(() => SimplifiedImportMedicineDto)
   medicines: SimplifiedImportMedicineDto[];
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }
 
 // ========== INVENTORY REPORT DTOs ==========
@@ -478,6 +493,11 @@ export class GetInventoryReportDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }
 
 // ========== UPDATE INVENTORY BALANCE DTOs ==========
@@ -535,6 +555,11 @@ export class UpdateInventoryBalanceDto {
   )
   @IsString()
   suggestedPurchaseUnitPrice?: string;
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }
 
 // ========== STOCK ALERT DTOs ==========
@@ -548,4 +573,9 @@ export class StockAlertDto {
   @IsOptional()
   @IsInt()
   daysUntilExpiry?: number;
+
+  @ApiPropertyOptional({ description: 'Company ID for tenant scoping' })
+  @IsOptional()
+  @IsString()
+  companyId?: string;
 }

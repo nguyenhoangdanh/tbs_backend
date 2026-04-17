@@ -1033,8 +1033,8 @@ export class LeaveRequestService {
       user: {
         select: {
           id: true, firstName: true, lastName: true, employeeCode: true,
-          officeId: true,
-          jobPosition: { select: { department: { select: { id: true, name: true } }, jobName: true } },
+          officeId: true, joinDate: true,
+          jobPosition: { select: { department: { select: { id: true, name: true } }, jobName: true, position: { select: { name: true } } } },
         },
       },
       flow: {
@@ -1128,6 +1128,7 @@ export class LeaveRequestService {
   async bulkCreateFromExcel(
     file: Express.Multer.File,
     creatorId: string,
+    companyId?: string,
   ): Promise<{ total: number; success: number; failed: number; results: any[] }> {
     const wb = XLSX.read(file.buffer, { type: 'buffer', cellDates: true });
     const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -1156,9 +1157,9 @@ export class LeaveRequestService {
         const startDate = this.parseExcelDate(startDateRaw);
         if (!startDate) throw new BadRequestException(`Ngày bắt đầu không hợp lệ: ${startDateRaw}`);
 
-        // Find user
+        // Find user (scoped to company if provided)
         const user = await this.prisma.user.findFirst({
-          where: { employeeCode },
+          where: { employeeCode, ...(companyId ? { companyId } : {}) },
           select: {
             id: true, firstName: true, lastName: true,
             companyId: true, officeId: true,

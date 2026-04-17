@@ -130,9 +130,9 @@ export class LeaveBalanceService {
     }));
   }
 
-  async getBalanceSummaryByEmployeeCode(employeeCode: string, year: number) {
+  async getBalanceSummaryByEmployeeCode(employeeCode: string, year: number, companyId?: string) {
     const user = await this.prisma.user.findFirst({
-      where: { employeeCode },
+      where: { employeeCode, ...(companyId ? { companyId } : {}) },
       select: { id: true, firstName: true, lastName: true, employeeCode: true },
     });
     if (!user) throw new Error(`Không tìm thấy nhân viên với mã: ${employeeCode}`);
@@ -143,7 +143,7 @@ export class LeaveBalanceService {
 
   // ── Import hàng loạt số dư phép năm (PN) từ Excel ──────────────
 
-  async bulkImportBalances(file: Express.Multer.File, year: number) {
+  async bulkImportBalances(file: Express.Multer.File, year: number, companyId?: string) {
     if (!file?.buffer) throw new BadRequestException('Không có file');
 
     const wb = XLSX.read(file.buffer, { type: 'buffer' });
@@ -152,9 +152,13 @@ export class LeaveBalanceService {
 
     if (!rows.length) throw new BadRequestException('File không có dữ liệu');
 
-    // Find PN leave type (code = 'PN')
+    // Find PN leave type scoped to company (or global if no company)
     const pnLeaveType = await this.prisma.leaveType.findFirst({
-      where: { code: 'PN', isActive: true },
+      where: {
+        code: 'PN',
+        isActive: true,
+        OR: [{ companyId: null }, ...(companyId ? [{ companyId }] : [])],
+      },
       select: { id: true, code: true, name: true },
     });
     if (!pnLeaveType) throw new BadRequestException('Không tìm thấy loại phép PN trong hệ thống');
@@ -188,7 +192,7 @@ export class LeaveBalanceService {
 
       try {
         const user = await this.prisma.user.findFirst({
-          where: { employeeCode },
+          where: { employeeCode, ...(companyId ? { companyId } : {}) },
           select: { id: true, companyId: true, firstName: true, lastName: true },
         });
 

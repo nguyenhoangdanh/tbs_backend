@@ -32,6 +32,7 @@ import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
 import { Public } from '../common/decorators/public.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
 import { HealthcareService } from './healthcare.service';
 import { HealthcareCron } from './healthcare.cron';
 import {
@@ -53,6 +54,12 @@ export class HealthcareController {
     private readonly healthcareCron: HealthcareCron,
   ) {}
 
+  private resolveCompanyId(user: any, queryCompanyId?: string): string | undefined {
+    const isSuperAdmin = user?.roles?.some((r: any) => r?.roleDefinition?.code === 'SUPERADMIN');
+    if (isSuperAdmin) return queryCompanyId || undefined;
+    return user?.companyId ?? undefined;
+  }
+
   @Get('dashboard')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'Get healthcare dashboard statistics' })
@@ -60,8 +67,12 @@ export class HealthcareController {
     status: 200,
     description: 'Dashboard statistics retrieved successfully',
   })
-  async getDashboard() {
-    return this.healthcareService.getDashboardStats();
+  async getDashboard(
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
+  ) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getDashboardStats(companyId);
   }
 
   @Get('recent-activities')
@@ -73,8 +84,11 @@ export class HealthcareController {
   })
   async getRecentActivities(
     @Query('limit', new ParseIntPipe({ optional: true })) limit?: number,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getRecentActivities(limit);
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getRecentActivities(limit, companyId);
   }
 
   // Medicine Management Endpoints
@@ -139,8 +153,13 @@ export class HealthcareController {
   @Get('medical-records')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({ summary: 'List medical records with filters and pagination' })
-  async getMedicalRecords(@Query() query: GetMedicalRecordsDto) {
-    return this.healthcareService.getMedicalRecords(query);
+  async getMedicalRecords(
+    @Query() query: GetMedicalRecordsDto,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
+  ) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getMedicalRecords({ ...query, companyId });
   }
 
   @Post('medical-records')
@@ -154,8 +173,13 @@ export class HealthcareController {
       transform: true,
     }),
   )
-  async createMedicalRecord(@Body() data: CreateMedicalRecordDto) {
-    return this.healthcareService.createMedicalRecordByEmployeeCode(data);
+  async createMedicalRecord(@Body() data: CreateMedicalRecordDto, @GetUser() user?: any) {
+    let companyId = this.resolveCompanyId(user);
+    if (companyId === undefined) {
+      companyId = data.companyId;
+      if (!companyId) throw new BadRequestException('SUPERADMIN must specify companyId for this operation');
+    }
+    return this.healthcareService.createMedicalRecordByEmployeeCode(data, companyId);
   }
 
   @Patch('medical-records/:id')
@@ -210,12 +234,11 @@ export class HealthcareController {
     @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getMedicineUsageStatistics(
-      period,
-      startDate,
-      endDate,
-    );
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getMedicineUsageStatistics(period, startDate, endDate, companyId);
   }
 
   @Get('statistics/prescription-trends')
@@ -228,8 +251,11 @@ export class HealthcareController {
   async getPrescriptionTrends(
     @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 12,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getPrescriptionTrends(period, limit);
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getPrescriptionTrends(period, limit, companyId);
   }
 
   @Get('statistics/detailed')
@@ -245,12 +271,11 @@ export class HealthcareController {
     @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getDetailedStatistics(
-      period,
-      startDate,
-      endDate,
-    );
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getDetailedStatistics(period, startDate, endDate, companyId);
   }
 
   @Get('statistics/top-medicines')
@@ -265,13 +290,11 @@ export class HealthcareController {
     @Query('limit', new ParseIntPipe({ optional: true })) limit: number = 10,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getTopPrescribedMedicines(
-      period,
-      limit,
-      startDate,
-      endDate,
-    );
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getTopPrescribedMedicines(period, limit, startDate, endDate, companyId);
   }
 
   @Get('statistics/patient-visits')
@@ -281,8 +304,11 @@ export class HealthcareController {
     @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getPatientVisitStats(period, startDate, endDate);
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getPatientVisitStats(period, startDate, endDate, companyId);
   }
 
   @Get('statistics/visits-by-office')
@@ -292,8 +318,11 @@ export class HealthcareController {
     @Query('period') period: 'day' | 'week' | 'month' | 'year' = 'month',
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.healthcareService.getVisitStatsByOffice(period, startDate, endDate);
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.healthcareService.getVisitStatsByOffice(period, startDate, endDate, companyId);
   }
 
   // ─── Export medical records ────────────────────────────────────────────────
@@ -304,8 +333,11 @@ export class HealthcareController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
     @Res() res?: Response,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    const buffer = await this.healthcareService.exportMedicalRecordsExcel(startDate, endDate);
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    const buffer = await this.healthcareService.exportMedicalRecordsExcel(startDate, endDate, companyId);
     const fileName = `lichsu_kham_${(startDate ?? 'all').replace(/-/g, '')}${endDate ? '_' + endDate.replace(/-/g, '') : ''}.xlsx`;
     res!.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -328,33 +360,34 @@ export class HealthcareController {
     return this.healthcareService.importMedicalRecordsExcel(file.buffer);
   }
 
-  // ─── Backup status + trigger ────────────────────────────────────────────────
-  @Get('backup/status')
-  @RequirePermissions('healthcare:manage')
-  @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
-  @ApiOperation({
-    summary: 'Kiểm tra trạng thái cấu hình Google Drive và lần backup gần nhất',
-  })
-  async getBackupStatus() {
-    return this.healthcareCron.getStatus();
-  }
-
+  // ─── Backup toàn bộ lịch sử khám lên Google Drive ────────────────────────
   @Post('backup/trigger')
   @RequirePermissions('healthcare:manage')
   @Roles('MEDICAL_STAFF', 'ADMIN', 'SUPERADMIN')
   @ApiOperation({
-    summary: 'Trigger backup thủ công: xuất toàn bộ lịch sử khám → Google Drive',
+    summary: 'Trigger backup thủ công: xuất lịch sử khám → Google Drive (per company)',
     description:
-      'Upload file Excel lên folder Google Drive đã cấu hình. ' +
-      'Folder chỉ giữ tối đa 3 file gần nhất, file cũ hơn sẽ bị xóa tự động. ' +
-      'Cron job sẽ tự chạy lúc 9 PM giờ VN mỗi ngày.',
+      'Upload file Excel của công ty được chỉ định lên folder Google Drive theo cấu trúc phân cấp L0→LN. ' +
+      'Mỗi công ty có folder riêng, chỉ giữ tối đa 2 file gần nhất. ' +
+      'Cron job sẽ tự chạy lúc 9 PM giờ VN mỗi ngày cho tất cả công ty.',
   })
   @ApiResponse({
     status: 201,
     description: 'Backup thành công',
     schema: { example: { fileName: 'lichsu_kham_2026-04-04.xlsx', fileId: '1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgVE2upms' } },
   })
-  async triggerBackup() {
-    return this.healthcareCron.runBackup();
+  async triggerBackup(@Body() body: { companyId: string }) {
+    if (!body?.companyId) {
+      throw new BadRequestException('companyId is required');
+    }
+    return this.healthcareCron.runBackup(body.companyId);
+  }
+
+  @Get('backup/status')
+  @RequirePermissions('healthcare:manage')
+  @Roles('ADMIN', 'SUPERADMIN')
+  @ApiOperation({ summary: 'Get Google Drive backup status and last backup info per company' })
+  async getBackupStatus() {
+    return this.healthcareCron.getStatus();
   }
 }

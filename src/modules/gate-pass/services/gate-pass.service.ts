@@ -663,6 +663,8 @@ export class GatePassService {
   async getPendingMyApproval(approverId: string, query: { page?: number; limit?: number }) {
     const { page = 1, limit = 20 } = query;
 
+    this.logger.debug(`[getPendingMyApproval] approverId=${approverId}`);
+
     // Case 1: User is SPECIFIC_USER approver/substitute in some config
     const specificConfigsRaw = await this.prisma.gatePassApprovalConfig.findMany({
       where: {
@@ -676,6 +678,8 @@ export class GatePassService {
       ...c,
       requesterFilterIds: (c.requesterFilters ?? []).map((f: any) => f.userId),
     }));
+
+    this.logger.debug(`[getPendingMyApproval] specificConfigs=${specificConfigs.length}, ids=${specificConfigs.map(c => c.id).join(',')}`);
 
     // Case 2: DEPARTMENT_HEAD configs — resolve via UDM or position-based fallback
     const allDeptHeadConfigs = await this.prisma.gatePassApprovalConfig.findMany({
@@ -707,6 +711,8 @@ export class GatePassService {
     }
 
     const managedDeptIds = await this.getManagedDeptIds(approverId, [...candidateDeptIds]);
+
+    this.logger.debug(`[getPendingMyApproval] candidateDeptIds=${[...candidateDeptIds].join(',')}, managedDeptIds=${managedDeptIds.join(',')}`);
 
     const conditions: any[] = [];
 
@@ -813,6 +819,8 @@ export class GatePassService {
       );
       conditions.push(...vtcvConditions);
     }
+
+    this.logger.debug(`[getPendingMyApproval] total conditions=${conditions.length}: ${JSON.stringify(conditions)}`);
 
     if (conditions.length === 0) return { data: [], total: 0, page, limit };
 
@@ -1473,7 +1481,19 @@ export class GatePassService {
    /**  When includeAll=true, returns all active users in scope except NV/CN level positions
    *  (only those eligible to approve, i.e. position name not in NV/CN).
    *  When allUsers=true, returns ALL active users regardless of position (for requester filter). */
-  async getApproverCandidates(officeId?: string, departmentId?: string, includeAll?: boolean, allUsers?: boolean, allPositions?: boolean, jobName?: string) {
+  /** Kiểm tra config phê duyệt thuộc về company — dùng cho ownership check của ADMIN */
+  async assertConfigBelongsToCompany(configId: string, companyId: string) {
+    const config = await this.prisma.gatePassApprovalConfig.findUnique({
+      where: { id: configId },
+      select: { companyId: true },
+    });
+    if (!config) throw new BadRequestException('Không tìm thấy cấu hình phê duyệt');
+    if (config.companyId && config.companyId !== companyId) {
+      throw new ForbiddenException('Bạn không có quyền chỉnh sửa cấu hình của công ty khác');
+    }
+  }
+
+  async getApproverCandidates(officeId?: string, departmentId?: string, includeAll?: boolean, allUsers?: boolean, allPositions?: boolean, jobName?: string, companyId?: string) {
     if (!officeId && !departmentId) return [];
 
     const NV_CN_NAMES = ['NV', 'CN'];
@@ -1497,7 +1517,11 @@ export class GatePassService {
     }
 
     const users = await this.prisma.user.findMany({
-      where: { isActive: true, jobPosition: jobPositionWhere },
+      where: {
+        isActive: true,
+        ...(companyId ? { companyId } : {}),
+        jobPosition: jobPositionWhere,
+      },
       select: CANDIDATE_SELECT,
       orderBy: [
         { jobPosition: { position: { level: 'asc' } } },
@@ -1510,12 +1534,14 @@ export class GatePassService {
 
   /** Returns sorted distinct VTCV (jobName) values for a given office or department.
    *  Used by the admin config UI for the VTCV filter dropdown. */
-  async getDistinctJobNames(officeId?: string, departmentId?: string): Promise<string[]> {
+  async getDistinctJobNames(officeId?: string, departmentId?: string, companyId?: string): Promise<string[]> {
     if (!officeId && !departmentId) return [];
 
-    const where = departmentId
+    const where: any = departmentId
       ? { departmentId }
       : { department: { officeId } };
+
+    if (companyId) where.office = { ...(where.office ?? {}), companyId };
 
     const rows = await this.prisma.jobPosition.findMany({
       where,
@@ -1534,6 +1560,7 @@ export class GatePassService {
   async getDeptHeadPreview(
     departmentId?: string,
     jobName?: string,
+    companyId?: string,
   ): Promise<typeof CANDIDATE_SELECT extends object ? any[] : never> {
     if (!departmentId) return [];
 
@@ -1542,7 +1569,7 @@ export class GatePassService {
     // when querying across all depts of an office.
     if (jobName) {
       const hasVtcvMembers = await this.prisma.user.count({
-        where: { isActive: true, jobPosition: { departmentId, jobName } },
+        where: { isActive: true, ...(companyId ? { companyId } : {}), jobPosition: { departmentId, jobName } },
       });
       if (hasVtcvMembers === 0) return [];
     }
@@ -1565,6 +1592,7 @@ export class GatePassService {
       const posMgrs = await this.prisma.user.findMany({
         where: {
           isActive: true,
+          ...(companyId ? { companyId } : {}),
           id: { notIn: mgrIds },
           jobPosition: { departmentId, jobName, position: { isManagement: true } },
         },
@@ -1579,7 +1607,7 @@ export class GatePassService {
     if (resolvedIds.length === 0) return [];
 
     return this.prisma.user.findMany({
-      where: { id: { in: resolvedIds }, isActive: true },
+      where: { id: { in: resolvedIds }, isActive: true, ...(companyId ? { companyId } : {}) },
       select: CANDIDATE_SELECT,
       orderBy: [
         { jobPosition: { position: { level: 'asc' } } },

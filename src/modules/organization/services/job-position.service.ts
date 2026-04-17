@@ -60,12 +60,16 @@ export class JobPositionService {
     departmentId?: string;
     positionId?: string;
     isActive?: boolean;
+    officeId?: string;
+    companyId?: string;
   }) {
     return this.prisma.jobPosition.findMany({
       where: {
         ...(filters.departmentId && { departmentId: filters.departmentId }),
         ...(filters.positionId && { positionId: filters.positionId }),
         ...(filters.isActive !== undefined && { isActive: filters.isActive }),
+        ...(filters.officeId && { officeId: filters.officeId }),
+        ...(filters.companyId && { department: { office: { companyId: filters.companyId } } }),
       },
       include: {
         position: true,

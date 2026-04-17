@@ -53,11 +53,15 @@ export class JobPositionController {
     @Query('departmentId') departmentId?: string,
     @Query('positionId') positionId?: string,
     @Query('isActive') isActive?: string,
+    @Query('officeId') officeId?: string,
+    @Query('companyId') companyId?: string,
   ) {
     return this.jobPositionService.findAll({
       departmentId,
       positionId,
       isActive: isActive ? isActive === 'true' : undefined,
+      officeId,
+      companyId,
     });
   }
 

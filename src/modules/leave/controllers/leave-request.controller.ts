@@ -251,10 +251,14 @@ export class LeaveRequestController {
   @RequirePermissions('leave-requests:bulk-create')
   @UseInterceptors(FileInterceptor('file'))
   bulkImport(
-    @GetUser('id') userId: string,
+    @GetUser() user: any,
     @UploadedFile() file: Express.Multer.File,
   ) {
     if (!file) throw new Error('File is required');
-    return this.leaveRequestService.bulkCreateFromExcel(file, userId);
+    const isSuperAdmin = (user?.roles ?? []).some(
+      (r: any) => (r.roleDefinition?.code ?? r.code) === 'SUPERADMIN',
+    );
+    const companyId = isSuperAdmin ? undefined : (user?.companyId ?? undefined);
+    return this.leaveRequestService.bulkCreateFromExcel(file, user?.id, companyId);
   }
 }

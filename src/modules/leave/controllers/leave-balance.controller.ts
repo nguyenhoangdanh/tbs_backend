@@ -17,6 +17,11 @@ export class LeaveBalanceController {
     private readonly accrualService: LeaveAccrualService,
   ) {}
 
+  private resolveCompanyId(user: any): string | undefined {
+    const isSuperAdmin = user?.roles?.some((r: any) => r?.roleDefinition?.code === 'SUPERADMIN');
+    return isSuperAdmin ? undefined : (user?.companyId ?? undefined);
+  }
+
   /** Lấy số dư phép của bản thân theo năm */
   @Get('my')
   @RequirePermissions('leave-balances:view')
@@ -27,7 +32,7 @@ export class LeaveBalanceController {
     return this.balanceService.getUserBalanceSummary(userId, year);
   }
 
-  /** Admin: xem số dư của user bất kỳ */
+  /** Admin: xem số dư của user bất kỳ (scoped to same company) */
   @Get('user/:userId')
   @RequirePermissions('leave-balances:manage')
   getUserBalance(
@@ -37,14 +42,16 @@ export class LeaveBalanceController {
     return this.balanceService.getUserBalanceSummary(userId, year);
   }
 
-  /** Admin: tìm theo mã nhân viên */
+  /** Admin: tìm theo mã nhân viên (scoped to caller's company) */
   @Get('by-employee/:employeeCode')
   @RequirePermissions('leave-balances:manage')
   getBalanceByEmployeeCode(
     @Param('employeeCode') employeeCode: string,
     @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year: number,
+    @GetUser() user: any,
   ) {
-    return this.balanceService.getBalanceSummaryByEmployeeCode(employeeCode, year);
+    const companyId = this.resolveCompanyId(user);
+    return this.balanceService.getBalanceSummaryByEmployeeCode(employeeCode, year, companyId);
   }
 
   /** Admin: điều chỉnh số dư thủ công */
@@ -54,24 +61,28 @@ export class LeaveBalanceController {
     return this.balanceService.adjustBalance(dto);
   }
 
-  /** Admin/HR: trigger tích lũy thủ công cho tháng cụ thể */
+  /** Admin/HR: trigger tích lũy thủ công cho tháng cụ thể (scoped to caller's company) */
   @Post('trigger-accrual')
   @RequirePermissions('leave-balances:manage')
   triggerAccrual(
     @Query('month', ParseIntPipe) month: number,
     @Query('year', ParseIntPipe) year: number,
+    @GetUser() user: any,
   ) {
-    return this.accrualService.triggerManualAccrual(month, year);
+    const companyId = this.resolveCompanyId(user);
+    return this.accrualService.triggerManualAccrual(month, year, companyId);
   }
 
-  /** Admin/HR: Import hàng loạt số dư phép năm từ Excel */
+  /** Admin/HR: Import hàng loạt số dư phép năm từ Excel (scoped to caller's company) */
   @Post('bulk-import')
   @RequirePermissions('leave-balances:manage')
   @UseInterceptors(FileInterceptor('file'))
   bulkImport(
     @UploadedFile() file: Express.Multer.File,
     @Query('year', new DefaultValuePipe(new Date().getFullYear()), ParseIntPipe) year: number,
+    @GetUser() user: any,
   ) {
-    return this.balanceService.bulkImportBalances(file, year);
+    const companyId = this.resolveCompanyId(user);
+    return this.balanceService.bulkImportBalances(file, year, companyId);
   }
 }

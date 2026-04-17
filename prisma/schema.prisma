@@ -94,6 +94,9 @@ model Company {
   gatePassRequests     GatePass[]                @relation("GatePassCompany")
   gatePassApprovalConfigs GatePassApprovalConfig[] @relation("GatePassApprovalConfigCompany")
 
+  medicineInventories   MedicineInventory[]   @relation("MedicineInventoryCompany")
+  inventoryTransactions InventoryTransaction[] @relation("InventoryTransactionCompany")
+
   @@index([typeId])
   @@index([parentCompanyId])
   @@index([regionId])
@@ -232,7 +235,8 @@ model User {
   medicalRecordsAsPatient      MedicalRecord[]        @relation("PatientMedicalRecords")
   medicalRecordsAsDoctor       MedicalRecord[]        @relation("DoctorMedicalRecords")
   prescriptionsDispensed       MedicalPrescription[]  @relation("MedicineDispenser")
-  inventoryTransactionsCreated InventoryTransaction[] @relation("InventoryTransactionCreator")
+  inventoryTransactionsCreated    InventoryTransaction[] @relation("InventoryTransactionCreator")
+  inventoryTransactionsCancelled  InventoryTransaction[] @relation("InventoryTransactionCanceller")
 
   feedbackViews      FeedbackView[] @relation("FeedbackViewedBy")
   resolvedFeedbacks  Feedback[]     @relation("FeedbackResolvedBy")
@@ -807,6 +811,7 @@ model MedicineInventory {
   medicineId String
   month      Int // 1-12
   year       Int // 2024, 2025
+  companyId  String?   // tenant isolation — null = legacy records
   expiryDate DateTime? @db.Date // Hạn sử dụng
 
   // Tồn đầu kỳ
@@ -847,9 +852,11 @@ model MedicineInventory {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  medicine Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  medicine Medicine  @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  company  Company?  @relation("MedicineInventoryCompany", fields: [companyId], references: [id])
 
-  @@unique([medicineId, month, year])
+  @@unique([companyId, medicineId, month, year], name: "company_medicine_period")
+  @@index([companyId])
   @@index([medicineId])
   @@index([month, year])
   @@index([year])
@@ -879,14 +886,26 @@ model InventoryTransaction {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  medicine      Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
-  createdByUser User?    @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  // Cancel support
+  isCancelled   Boolean   @default(false)
+  cancelledAt   DateTime?
+  cancelledById String?
+  cancelReason  String?
 
+  medicine        Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  createdByUser   User?    @relation("InventoryTransactionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledByUser User?    @relation("InventoryTransactionCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
+
+  companyId  String?
+  company    Company? @relation("InventoryTransactionCompany", fields: [companyId], references: [id])
+
+  @@index([companyId])
   @@index([medicineId])
   @@index([type])
   @@index([transactionDate])
   @@index([referenceType, referenceId])
   @@index([createdById])
+  @@index([isCancelled])
   @@map("inventory_transactions")
 }
 

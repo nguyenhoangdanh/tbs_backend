@@ -13,7 +13,6 @@ import {
   UseInterceptors,
   UploadedFile,
   BadRequestException,
-  Request,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -28,6 +27,7 @@ import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { RequirePermissions } from '../common/decorators/permissions.decorator';
+import { GetUser } from '../common/decorators/get-user.decorator';
 import { InventoryService } from './inventory.service';
 import {
   CreateMedicineCategoryDto,
@@ -48,6 +48,11 @@ import {
 @ApiBearerAuth('JWT-auth')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
+
+  private resolveCompanyId(user: any, queryCompanyId?: string): string | undefined {
+    const isSuperAdmin = user?.roles?.some((r: any) => r?.roleDefinition?.code === 'SUPERADMIN');
+    return isSuperAdmin ? (queryCompanyId ?? undefined) : (user?.companyId ?? undefined);
+  }
 
   // ==================== MEDICINE CATEGORY ENDPOINTS ====================
 
@@ -104,10 +109,16 @@ export class InventoryController {
     description: 'Transaction created and inventory updated',
   })
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
-  async createTransaction(@Body() data: CreateInventoryTransactionDto, @Request() req: any) {
+  async createTransaction(@Body() data: CreateInventoryTransactionDto, @GetUser() user: any) {
+    let companyId = this.resolveCompanyId(user);
+    if (companyId === undefined) {
+      companyId = data.companyId;
+      if (!companyId) throw new BadRequestException('SUPERADMIN must specify companyId for this operation');
+    }
     return this.inventoryService.createInventoryTransaction({
       ...data,
-      createdById: req.user?.id ?? data.createdById,
+      createdById: user?.id ?? data.createdById,
+      companyId,
     });
   }
 
@@ -123,13 +134,11 @@ export class InventoryController {
     @Query('type') type?: InventoryTransactionTypeDto,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.inventoryService.getInventoryTransactions(
-      medicineId,
-      type,
-      startDate,
-      endDate,
-    );
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getInventoryTransactions(medicineId, type, startDate, endDate, companyId);
   }
 
   // ==================== BULK IMPORT ENDPOINTS ====================
@@ -145,7 +154,7 @@ export class InventoryController {
   @ApiResponse({ status: 201, description: 'Bulk import completed' })
   // ❌ TẮT ValidationPipe để tránh làm tròn số thập phân
   // ValidationPipe với @IsNumber() + enableImplicitConversion làm mất độ chính xác
-  async bulkImport(@Body() data: any) {
+  async bulkImport(@Body() data: any, @GetUser() user: any) {
     console.log('📥 Bulk import request received');
     console.log('📊 Data summary:', {
       month: data.month,
@@ -175,8 +184,14 @@ export class InventoryController {
       );
     }
 
+    let companyId = this.resolveCompanyId(user);
+    if (companyId === undefined) {
+      companyId = data.companyId;
+      if (!companyId) throw new BadRequestException('SUPERADMIN must specify companyId for this operation');
+    }
+
     try {
-      const result = await this.inventoryService.bulkImportInventory(data);
+      const result = await this.inventoryService.bulkImportInventory({ ...data, companyId });
       console.log('✅ Bulk import completed successfully');
       return result;
     } catch (error) {
@@ -198,7 +213,7 @@ export class InventoryController {
     `,
   })
   @ApiResponse({ status: 201, description: 'Simplified import completed' })
-  async simplifiedImport(@Body() data: any) {
+  async simplifiedImport(@Body() data: any, @GetUser() user: any) {
     // Manual validation
     if (!data.month || !data.year || !Array.isArray(data.medicines)) {
       throw new Error(
@@ -206,8 +221,14 @@ export class InventoryController {
       );
     }
 
+    let companyId = this.resolveCompanyId(user);
+    if (companyId === undefined) {
+      companyId = data.companyId;
+      if (!companyId) throw new BadRequestException('SUPERADMIN must specify companyId for this operation');
+    }
+
     try {
-      const result = await this.inventoryService.simplifiedBulkImport(data);
+      const result = await this.inventoryService.simplifiedBulkImport({ ...data, companyId });
       return result;
     } catch (error) {
       console.error('❌ Simplified import failed:', error);
@@ -225,8 +246,9 @@ export class InventoryController {
     status: 200,
     description: 'Monthly report retrieved successfully',
   })
-  async getMonthlyReport(@Query() params: GetInventoryReportDto) {
-    return this.inventoryService.getInventoryReport(params);
+  async getMonthlyReport(@Query() params: GetInventoryReportDto, @GetUser() user?: any, @Query('companyId') queryCompanyId?: string) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getInventoryReport({ ...params, companyId });
   }
 
   @Get('reports/yearly/:year')
@@ -239,11 +261,11 @@ export class InventoryController {
   async getYearlyReport(
     @Param('year') year: string,
     @Query('categoryId') categoryId?: string,
+    @GetUser() user?: any,
+    @Query('companyId') queryCompanyId?: string,
   ) {
-    return this.inventoryService.getYearlyInventoryReport(
-      parseInt(year),
-      categoryId,
-    );
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getYearlyInventoryReport(parseInt(year), categoryId, companyId);
   }
 
   @Get('reports/detailed-yearly')
@@ -258,12 +280,15 @@ export class InventoryController {
     description: 'Detailed yearly inventory retrieved successfully',
   })
   async getDetailedYearlyInventory(
-    @Query() params: { month: string; year: string; categoryId?: string },
+    @Query() params: { month: string; year: string; categoryId?: string; companyId?: string },
+    @GetUser() user?: any,
   ) {
+    const companyId = this.resolveCompanyId(user, params.companyId);
     return this.inventoryService.getDetailedYearlyInventory({
       month: parseInt(params.month),
       year: parseInt(params.year),
       categoryId: params.categoryId,
+      companyId,
     });
   }
 
@@ -276,8 +301,9 @@ export class InventoryController {
     status: 200,
     description: 'Stock alerts retrieved successfully',
   })
-  async getStockAlerts(@Query() params: StockAlertDto) {
-    return this.inventoryService.getStockAlerts(params);
+  async getStockAlerts(@Query() params: StockAlertDto, @GetUser() user?: any, @Query('companyId') queryCompanyId?: string) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getStockAlerts({ ...params, companyId });
   }
 
   @Get('stock/current')
@@ -287,8 +313,9 @@ export class InventoryController {
     status: 200,
     description: 'All current stock retrieved successfully',
   })
-  async getAllCurrentStock() {
-    return this.inventoryService.getAllCurrentStock();
+  async getAllCurrentStock(@GetUser() user?: any, @Query('companyId') queryCompanyId?: string) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getAllCurrentStock(companyId);
   }
 
   @Get('stock/:medicineId/current')
@@ -298,8 +325,9 @@ export class InventoryController {
     status: 200,
     description: 'Current stock retrieved successfully',
   })
-  async getCurrentStock(@Param('medicineId') medicineId: string) {
-    return this.inventoryService.getCurrentStock(medicineId);
+  async getCurrentStock(@Param('medicineId') medicineId: string, @GetUser() user?: any, @Query('companyId') queryCompanyId?: string) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    return this.inventoryService.getCurrentStock(medicineId, companyId);
   }
 
   @Patch('balance')
@@ -323,11 +351,12 @@ export class InventoryController {
       'One-time repair: recomputes closing[M]=opening[M]+import-export, opening[M+1]=closing[M], and yearly accumulators for ALL medicines from their first record. Use after data migration or logic upgrades.',
   })
   @ApiResponse({ status: 200, description: 'Recalculation completed' })
-  async recalculateAllBalances() {
-    const result = await this.inventoryService.recalculateAllBalances();
+  async recalculateAllBalances(@GetUser() user?: any, @Query('companyId') queryCompanyId?: string) {
+    const companyId = this.resolveCompanyId(user, queryCompanyId);
+    const result = await this.inventoryService.recalculateAndInitialize(companyId);
     return {
       success: true,
-      message: `Recalculated ${result.records} records across ${result.medicines} medicines`,
+      message: `Recalculated ${result.records} records across ${result.medicines} medicines${result.initialized > 0 ? `, initialized ${result.initialized} records for next month` : ''}`,
       data: result,
     };
   }
@@ -341,12 +370,17 @@ export class InventoryController {
       'Creates inventory records for all active medicines for the given month with opening = previous month closing, all monthly quantities = 0. Skips medicines that already have a record for this month.',
   })
   @ApiResponse({ status: 200, description: 'Month initialized' })
-  async initializeMonth(@Body() body: { month: number; year: number }) {
+  async initializeMonth(@Body() body: { month: number; year: number }, @GetUser() user: any) {
     const { month, year } = body;
     if (!month || !year || month < 1 || month > 12) {
       throw new BadRequestException('Invalid month or year');
     }
-    const result = await this.inventoryService.initializeMonth(month, year);
+    let companyId = this.resolveCompanyId(user);
+    if (companyId === undefined) {
+      companyId = body['companyId'];
+      if (!companyId) throw new BadRequestException('SUPERADMIN must specify companyId for this operation');
+    }
+    const result = await this.inventoryService.initializeMonth(month, year, companyId);
     return {
       success: true,
       message: `Initialized ${result.created} records for ${month}/${year} (${result.skipped} skipped)`,
@@ -377,7 +411,11 @@ export class InventoryController {
   @UseInterceptors(FileInterceptor('file'))
   @ApiResponse({ status: 200, description: 'Import completed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid file or format' })
-  async importFromExcel(@UploadedFile() file: Express.Multer.File) {
+  async importFromExcel(
+    @UploadedFile() file: Express.Multer.File,
+    @GetUser() user: any,
+    @Query('companyId') queryCompanyId?: string,
+  ) {
     if (!file) {
       throw new BadRequestException('No file uploaded');
     }
@@ -388,9 +426,12 @@ export class InventoryController {
       );
     }
 
+    let companyId = this.resolveCompanyId(user, queryCompanyId);
+
     try {
       const result = await this.inventoryService.importFromExcelFile(
         file.buffer,
+        companyId,
       );
       return {
         success: true,
@@ -400,5 +441,38 @@ export class InventoryController {
     } catch (error) {
       throw new BadRequestException(`Import failed: ${error.message}`);
     }
+  }
+
+  // ==================== CANCEL / DELETE TRANSACTION ====================
+
+  @Patch('transactions/:id/cancel')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPERADMIN')
+  @ApiOperation({ summary: 'Cancel an inventory transaction and reverse inventory balance' })
+  @ApiResponse({ status: 200, description: 'Transaction cancelled and inventory reversed' })
+  @ApiResponse({ status: 400, description: 'Transaction already cancelled' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async cancelTransaction(
+    @Param('id') id: string,
+    @Body() body: { cancelReason?: string },
+    @GetUser() user: any,
+  ) {
+    const result = await this.inventoryService.cancelInventoryTransaction(
+      id,
+      user.id,
+      body.cancelReason,
+    );
+    return { success: true, data: result };
+  }
+
+  @Delete('transactions/:id')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPERADMIN')
+  @ApiOperation({ summary: 'Delete an inventory transaction record (no balance change)' })
+  @ApiResponse({ status: 200, description: 'Transaction deleted' })
+  @ApiResponse({ status: 404, description: 'Transaction not found' })
+  async deleteTransaction(@Param('id') id: string) {
+    await this.inventoryService.deleteInventoryTransaction(id);
+    return { success: true, message: 'Transaction deleted' };
   }
 }

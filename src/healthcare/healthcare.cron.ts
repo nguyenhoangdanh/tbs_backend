@@ -3,25 +3,30 @@ import { Cron, SchedulerRegistry } from '@nestjs/schedule';
 import { format } from 'date-fns';
 import { HealthcareService } from './healthcare.service';
 import { GoogleDriveService } from '../common/google-drive.service';
+import { PrismaService } from '../common/prisma.service';
 
 export interface BackupRecord {
   triggeredAt: Date;
   triggeredBy: 'cron' | 'manual';
   status: 'success' | 'failed';
+  companyId?: string;
+  companyCode?: string;
   fileName?: string;
   fileId?: string;
+  folderPath?: string;
   error?: string;
 }
 
 @Injectable()
 export class HealthcareCron implements OnApplicationBootstrap {
   private readonly logger = new Logger(HealthcareCron.name);
-  private lastBackup: BackupRecord | null = null;
+  private lastBackups: BackupRecord[] = [];
 
   constructor(
     private readonly healthcareService: HealthcareService,
     private readonly googleDriveService: GoogleDriveService,
     private readonly schedulerRegistry: SchedulerRegistry,
+    private readonly prisma: PrismaService,
   ) {}
 
   onApplicationBootstrap() {
@@ -42,37 +47,50 @@ export class HealthcareCron implements OnApplicationBootstrap {
   }
 
   /**
-   * Chạy lúc 9:00 PM giờ Việt Nam (UTC+7) = 14:00 UTC mỗi ngày.
-   * Cron: "0 14 * * *" với timeZone: 'UTC'
+   * Chạy lúc 9:00 PM giờ Việt Nam (UTC+7) = 14:00 UTC, Thứ 2 → Thứ 7 (1-6).
+   * Chủ Nhật (0) bỏ qua vì công ty không làm việc.
    */
-  @Cron('0 14 * * *', {
+  @Cron('0 14 * * 1-6', {
     name: 'backupMedicalRecordsToGoogleDrive',
     timeZone: 'UTC',
   })
   async handleDailyBackup(): Promise<void> {
-    this.logger.log('⏰ [Cron] 9 PM VN — Starting daily medical records backup...');
-    const triggeredAt = new Date();
-    try {
-      const result = await this.runBackupInternal();
-      this.lastBackup = { triggeredAt, triggeredBy: 'cron', status: 'success', ...result };
-      this.logger.log(`✅ [Cron] Backup complete: ${result.fileName} (Drive id: ${result.fileId})`);
-    } catch (err) {
-      const error = (err as Error).message;
-      this.lastBackup = { triggeredAt, triggeredBy: 'cron', status: 'failed', error };
-      this.logger.error(`❌ [Cron] Backup failed: ${error}`);
+    this.logger.log('⏰ [Cron] 9 PM VN (T2-T7) — Starting daily medical records backup for all companies...');
+    const companies = await this.getActiveCompanies();
+    this.logger.log(`📋 Found ${companies.length} active companies to backup`);
+
+    const results: BackupRecord[] = [];
+    for (const company of companies) {
+      const triggeredAt = new Date();
+      try {
+        const result = await this.runBackupInternal(company.id);
+        results.push({ triggeredAt, triggeredBy: 'cron', status: 'success', companyId: company.id, companyCode: company.code, ...result });
+        this.logger.log(`✅ [Cron] ${company.code}: ${result.fileName} (Drive id: ${result.fileId})`);
+      } catch (err) {
+        const error = (err as Error).message;
+        results.push({ triggeredAt, triggeredBy: 'cron', status: 'failed', companyId: company.id, companyCode: company.code, error });
+        this.logger.error(`❌ [Cron] ${company.code} backup failed: ${error}`);
+      }
     }
+    this.lastBackups = results;
   }
 
   /** Dùng cho API trigger thủ công — throws lỗi để caller biết chi tiết. */
-  async runBackup(): Promise<{ fileName: string; fileId: string }> {
+  async runBackup(companyId: string): Promise<{ fileName: string; fileId: string; folderPath: string }> {
     const triggeredAt = new Date();
     try {
-      const result = await this.runBackupInternal();
-      this.lastBackup = { triggeredAt, triggeredBy: 'manual', status: 'success', ...result };
+      const result = await this.runBackupInternal(companyId);
+      const idx = this.lastBackups.findIndex(b => b.companyId === companyId);
+      const record: BackupRecord = { triggeredAt, triggeredBy: 'manual', status: 'success', companyId, ...result };
+      if (idx >= 0) this.lastBackups[idx] = record;
+      else this.lastBackups.push(record);
       return result;
     } catch (err) {
       const error = (err as Error).message;
-      this.lastBackup = { triggeredAt, triggeredBy: 'manual', status: 'failed', error };
+      const idx = this.lastBackups.findIndex(b => b.companyId === companyId);
+      const record: BackupRecord = { triggeredAt, triggeredBy: 'manual', status: 'failed', companyId, error };
+      if (idx >= 0) this.lastBackups[idx] = record;
+      else this.lastBackups.push(record);
       throw err;
     }
   }
@@ -80,7 +98,7 @@ export class HealthcareCron implements OnApplicationBootstrap {
   getStatus(): {
     driveConfigured: boolean;
     envVars: Record<string, boolean>;
-    lastBackup: BackupRecord | null;
+    lastBackups: BackupRecord[];
   } {
     return {
       driveConfigured: this.googleDriveService.isConfigured(),
@@ -92,33 +110,82 @@ export class HealthcareCron implements OnApplicationBootstrap {
         GOOGLE_SERVICE_ACCOUNT_EMAIL: !!(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),
         GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: !!(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY),
       },
-      lastBackup: this.lastBackup,
+      lastBackups: this.lastBackups,
     };
   }
 
-  private async runBackupInternal(): Promise<{ fileName: string; fileId: string }> {
+  private async getActiveCompanies() {
+    return this.prisma.company.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true, name: true },
+      orderBy: { code: 'asc' },
+    });
+  }
+
+  /**
+   * Traverse company hierarchy from root to leaf, return folder path segments.
+   * e.g. ['TBS', 'THTX', 'TS']
+   */
+  private async buildCompanyFolderPath(companyId: string): Promise<string[]> {
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: { companyType: true },
+    });
+    if (!company) throw new Error(`Company ${companyId} not found`);
+
+    const chain: { code: string; level: number }[] = [];
+    let current: (typeof company) | null = company;
+    while (current) {
+      chain.push({ code: current.code, level: current.companyType?.level ?? 99 });
+      if (!current.parentCompanyId) break;
+      current = await this.prisma.company.findUnique({
+        where: { id: current.parentCompanyId },
+        include: { companyType: true },
+      });
+    }
+
+    // Sort L0 (root) → LN (leaf)
+    chain.sort((a, b) => a.level - b.level);
+    return chain.map(c => c.code);
+  }
+
+  private async runBackupInternal(companyId: string): Promise<{ fileName: string; fileId: string; folderPath: string }> {
     if (!this.googleDriveService.isConfigured()) {
       throw new Error(
         'Google Drive chưa được cấu hình. Kiểm tra Railway env vars: ' +
-        'GOOGLE_DRIVE_FOLDER_ID, GOOGLE_OAUTH_REFRESH_TOKEN (hoặc GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY).',
+        'GOOGLE_DRIVE_FOLDER_ID, GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.',
       );
     }
 
-    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
-    // Tên file: lichsu_kham_2024-08-15_21-00.xlsx format for GMT+7 timezone
-    const now = new Date();  // this UTC
-    const vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000); // convert to VN time
-    const fileName = `lichsu_kham_${format(vnTime, 'yyyy-MM-dd_HH-mm')}.xlsx`;
-    // const fileName = `lichsu_kham_${format(new Date(), 'yyyy-MM-dd_HH-mm')}.xlsx`;
+    // NOTE: We do NOT create sub-folders via Service Account.
+    // Folders created by a SA are owned by SA (0 storage quota) → uploading into them fails with 403.
+    // Solution: encode the company hierarchy path into the filename and upload directly to the
+    // root folder (which the user created manually on personal Drive and shared with SA as Editor).
+    const rootFolderId = process.env.GOOGLE_DRIVE_FOLDER_ID!;
 
-    this.logger.log(`📋 Exporting all medical records → ${fileName}`);
-    const buffer = await this.healthcareService.exportMedicalRecordsExcel();
+    const pathSegments = await this.buildCompanyFolderPath(companyId);
+    const folderPath = pathSegments.join(' / ');
+    this.logger.log(`📁 Company path for ${companyId}: ${folderPath}`);
 
-    this.logger.log(`📤 Uploading to Google Drive folder: ${folderId}`);
-    const fileId = await this.googleDriveService.uploadExcelFile(fileName, buffer, folderId);
+    const now = new Date();
+    const vnTime = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+    const companyCode = pathSegments[pathSegments.length - 1] ?? companyId.slice(0, 8);
+    // Base pattern used to locate the pre-created file in Drive (user created it once manually).
+    // e.g. "lichsu_kham_TBS--HANDBAG--TS"
+    const pathPrefix = pathSegments.join('--');
+    const baseNamePattern = `lichsu_kham_${pathPrefix}`;
+    // New name after update — includes timestamp so user can see when it was last written.
+    // e.g. "lichsu_kham_TBS--HANDBAG--TS_2026-04-16_21-05.xlsx"
+    const fileName = `${baseNamePattern}_${format(vnTime, 'yyyy-MM-dd_HH-mm')}.xlsx`;
 
-    await this.googleDriveService.keepOnlyLatestFiles(folderId, 3);
+    this.logger.log(`📦 Exporting medical records for ${companyCode} → ${fileName}`);
+    const buffer = await this.healthcareService.exportMedicalRecordsExcel(undefined, undefined, companyId);
 
-    return { fileName, fileId };
+    // Update existing file (user-created, owned by Gmail → no 403 storage quota issue).
+    // SA renames it with new timestamp + writes new content. File count stays at 1.
+    this.logger.log(`✏️  Updating Drive file (basePattern: ${baseNamePattern})`);
+    const fileId = await this.googleDriveService.updateExcelFile(rootFolderId, baseNamePattern, fileName, buffer);
+
+    return { fileName, fileId, folderPath };
   }
 }

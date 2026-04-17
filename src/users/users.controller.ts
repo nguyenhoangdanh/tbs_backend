@@ -340,7 +340,10 @@ export class UsersController {
       },
     },
   })
-  async importUsersFromExcel(@UploadedFile() file: any) {
+  async importUsersFromExcel(
+    @UploadedFile() file: any,
+    @Query('companyId') companyId?: string,
+  ) {
     // ⭐ FIX: Change to `any`
     if (!file) {
       throw new BadRequestException('No file uploaded');
@@ -350,7 +353,7 @@ export class UsersController {
       throw new BadRequestException('Only Excel files are allowed');
     }
 
-    return this.usersService.importUsersFromExcel(file);
+    return this.usersService.importUsersFromExcel(file, companyId);
   }
 
   // ========== USER ROLES & PERMISSIONS ==========

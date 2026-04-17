@@ -128,7 +128,7 @@ export class OrganizationHierarchyService {
   async getManagementTree(companyId?: string) {
     const whereCompany = companyId ? { id: companyId } : {};
 
-    const [companies, topManagerRows] = await Promise.all([
+    const [companies, topManagerRows, teamLeaderRows] = await Promise.all([
       this.prisma.company.findMany({
         where: whereCompany,
         include: {
@@ -199,6 +199,30 @@ export class OrganizationHierarchyService {
         },
         orderBy: { jobPosition: { position: { level: 'asc' } } },
       }),
+      // Auto-detect TEAM_LEADER users as managers of their jobPosition department
+      this.prisma.user.findMany({
+        where: {
+          isActive: true,
+          ...(companyId ? { companyId } : {}),
+          roles: { some: { roleDefinition: { code: 'TEAM_LEADER' } } },
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          employeeCode: true,
+          avatar: true,
+          isActive: true,
+          jobPosition: {
+            select: {
+              departmentId: true,
+              jobName: true,
+              position: { select: { name: true, level: true, isManagement: true } },
+            },
+          },
+        },
+        orderBy: { lastName: 'asc' },
+      }),
     ]);
 
     // Group top managers by companyId
@@ -209,8 +233,51 @@ export class OrganizationHierarchyService {
       topByCompany.get(u.companyId)!.push(u);
     }
 
+    // Group TEAM_LEADER users by their jobPosition.departmentId
+    const teamLeaderByDept = new Map<string, typeof teamLeaderRows>();
+    for (const u of teamLeaderRows) {
+      const deptId = u.jobPosition?.departmentId;
+      if (!deptId) continue;
+      if (!teamLeaderByDept.has(deptId)) teamLeaderByDept.set(deptId, []);
+      teamLeaderByDept.get(deptId)!.push(u);
+    }
+
     return companies.map((c) => ({
       ...c,
+      offices: c.offices.map((o) => ({
+        ...o,
+        departments: o.departments.map((d) => {
+          // Existing managers (from DepartmentManager table)
+          const existingUserIds = new Set(d.managers.map((m) => m.user.id));
+
+          // Auto-detected TEAM_LEADER managers not already in DepartmentManager
+          const autoManagers = (teamLeaderByDept.get(d.id) ?? [])
+            .filter((u) => !existingUserIds.has(u.id))
+            .map((u) => ({
+              userId: u.id,
+              positionLevel: u.jobPosition?.position?.level ?? 5,
+              user: {
+                id: u.id,
+                firstName: u.firstName,
+                lastName: u.lastName,
+                employeeCode: u.employeeCode,
+                avatar: u.avatar,
+                isActive: u.isActive,
+                jobPosition: u.jobPosition
+                  ? {
+                      jobName: u.jobPosition.jobName,
+                      position: u.jobPosition.position,
+                    }
+                  : null,
+              },
+            }));
+
+          return {
+            ...d,
+            managers: [...d.managers, ...autoManagers],
+          };
+        }),
+      })),
       topManagers: topByCompany.get(c.id) ?? [],
     }));
   }

@@ -119,16 +119,13 @@ export class LeaveAccrualService {
     this.logger.log(`[Accrual] Hoàn thành. Tổng bản ghi được cập nhật: ${totalAccrued}`);
   }
 
-  /** Trigger thủ công — dùng để test hoặc backfill */
-  async triggerManualAccrual(month: number, year: number) {
-    this.logger.log(`[Accrual] Manual trigger cho tháng ${month}/${year}`);
-    // Tạm thời override month/year trong context
-    const originalNow = Date.now;
-    // Dùng trực tiếp với tháng/năm được truyền vào
-    await this.runForMonth(month, year);
+  /** Trigger thủ công — dùng để test hoặc backfill (scoped to companyId if provided) */
+  async triggerManualAccrual(month: number, year: number, companyId?: string) {
+    this.logger.log(`[Accrual] Manual trigger cho tháng ${month}/${year}${companyId ? ` (companyId: ${companyId})` : ' (all companies)'}`);
+    await this.runForMonth(month, year, companyId);
   }
 
-  private async runForMonth(accrualMonth: number, accrualYear: number) {
+  private async runForMonth(accrualMonth: number, accrualYear: number, companyId?: string) {
     const currentYear = accrualMonth === 12 ? accrualYear + 1 : accrualYear;
     const lastDayOfMonth = new Date(accrualYear, accrualMonth, 0);
 
@@ -144,6 +141,7 @@ export class LeaveAccrualService {
       const users = await this.prisma.user.findMany({
         where: { 
           isActive: true,
+          ...(companyId ? { companyId } : {}),
           OR: [
             { joinDate: { lte: lastDayOfMonth } },
             { joinDate: null },
