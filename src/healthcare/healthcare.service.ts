@@ -1690,58 +1690,19 @@ export class HealthcareService {
       },
     });
 
-    // Fetch all EXPORT transactions for these medical records in one query
-    const recordIds = records.map((r) => r.id);
-    const exportTransactions = await this.prisma.inventoryTransaction.findMany({
-      where: {
-        referenceType: 'MEDICAL_RECORD',
-        referenceId: { in: recordIds },
-        type: 'EXPORT',
-        isCancelled: false,
-        ...(companyId ? { companyId } : {}),
-      },
-      select: {
-        referenceId: true,
-        medicineId: true,
-        quantity: true,
-        unitPrice: true,
-        totalAmount: true,
-      },
-    });
-
-    // Build lookup map: recordId -> medicineId -> { unitPrice, totalAmount }
-    // Accumulate multiple transactions for the same (record, medicine) instead of overwriting
-    const txnMap = new Map<string, Map<string, { unitPrice: Prisma.Decimal; totalAmount: Prisma.Decimal; quantity: Prisma.Decimal }>>();
-    for (const txn of exportTransactions) {
-      if (!txn.referenceId) continue;
-      if (!txnMap.has(txn.referenceId)) txnMap.set(txn.referenceId, new Map());
-      const existing = txnMap.get(txn.referenceId)!.get(txn.medicineId);
-      if (existing) {
-        // Accumulate multiple transactions for the same medicine in the same record
-        existing.totalAmount = existing.totalAmount.plus(txn.totalAmount);
-        existing.quantity = existing.quantity.plus(txn.quantity);
-        // Weighted average unitPrice
-        existing.unitPrice = existing.quantity.gt(0)
-          ? existing.totalAmount.div(existing.quantity)
-          : existing.unitPrice;
-      } else {
-        txnMap.get(txn.referenceId)!.set(txn.medicineId, {
-          unitPrice: new Prisma.Decimal(txn.unitPrice),
-          totalAmount: new Prisma.Decimal(txn.totalAmount),
-          quantity: new Prisma.Decimal(txn.quantity),
-        });
-      }
-    }
-
     const D = (v: any) => new Prisma.Decimal(v ?? 0);
 
-    // Fetch inventory balances for fallback pricing (handles historical records where
-    // export transactions were created with unitPrice=0 due to a prior bug).
-    // We query ALL inventory records for the medicines in these prescriptions and pick
-    // the most-recent record whose (year, month) <= the visit's (year, month).
+    // Source of truth for "đơn giá xuất" = MedicineInventory.monthlyExportUnitPrice
+    // for the specific (medicineId, year, month) of each visit.
+    // This matches the WAC formula used in the inventory balance sheet:
+    //   monthlyExportUnitPrice = (openingQty * openingPrice + importQty * importPrice)
+    //                            / (openingQty + importQty)
+    // Using InventoryTransaction.unitPrice would give closingUnitPrice at time of
+    // dispensing — a different value — causing the observed discrepancy.
     const allMedicineIds = [
       ...new Set(records.flatMap((r) => r.prescriptions.map((p) => p.medicineId))),
     ];
+
     const inventoryBalances = allMedicineIds.length
       ? await this.prisma.medicineInventory.findMany({
           where: {
@@ -1752,28 +1713,33 @@ export class HealthcareService {
             medicineId: true,
             month: true,
             year: true,
-            closingUnitPrice: true,
+            monthlyExportUnitPrice: true,
           },
           orderBy: [{ year: 'asc' }, { month: 'asc' }],
         })
       : [];
 
-    // invPriceMap: medicineId -> sorted list of { year, month, price }
-    const invPriceMap = new Map<string, { year: number; month: number; price: Prisma.Decimal }[]>();
+    // invPriceMap: "medicineId|year|month" -> monthlyExportUnitPrice
+    // Also keep sorted list per medicineId for nearest-month fallback
+    const invExactMap = new Map<string, Prisma.Decimal>();
+    const invSortedMap = new Map<string, { year: number; month: number; price: Prisma.Decimal }[]>();
     for (const inv of inventoryBalances) {
-      if (!invPriceMap.has(inv.medicineId)) invPriceMap.set(inv.medicineId, []);
-      invPriceMap.get(inv.medicineId)!.push({
-        year: inv.year,
-        month: inv.month,
-        price: D(inv.closingUnitPrice),
-      });
+      const exactKey = `${inv.medicineId}|${inv.year}|${inv.month}`;
+      const price = D(inv.monthlyExportUnitPrice);
+      invExactMap.set(exactKey, price);
+      if (!invSortedMap.has(inv.medicineId)) invSortedMap.set(inv.medicineId, []);
+      invSortedMap.get(inv.medicineId)!.push({ year: inv.year, month: inv.month, price });
     }
 
-    // Return the most-recent closingUnitPrice for a medicine up to (visitYear, visitMonth)
-    const getInvPrice = (medicineId: string, visitYear: number, visitMonth: number): Prisma.Decimal => {
-      const list = invPriceMap.get(medicineId);
+    // Get monthlyExportUnitPrice: exact match for visit month, or most-recent prior month
+    const getExportPrice = (medicineId: string, visitYear: number, visitMonth: number): Prisma.Decimal => {
+      const exactKey = `${medicineId}|${visitYear}|${visitMonth}`;
+      const exact = invExactMap.get(exactKey);
+      if (exact && exact.gt(0)) return exact;
+      // Fallback: most-recent record with price > 0 up to visit month
+      const list = invSortedMap.get(medicineId);
       if (!list || list.length === 0) return D(0);
-      let best: Prisma.Decimal = D(0);
+      let best = D(0);
       for (const r of list) {
         if (r.year < visitYear || (r.year === visitYear && r.month <= visitMonth)) {
           if (r.price.gt(0)) best = r.price;
@@ -1783,16 +1749,12 @@ export class HealthcareService {
     };
 
     const patients = records.map((r) => {
-      const recordTxns = txnMap.get(r.id);
       const visitYear = r.visitDate.getFullYear();
       const visitMonth = r.visitDate.getMonth() + 1;
 
       const totalValue = r.prescriptions.reduce((sum, p) => {
-        const txn = recordTxns?.get(p.medicineId);
-        if (txn && txn.totalAmount.gt(0)) return sum.plus(txn.totalAmount);
-        // Fallback: use inventory closing price for the visit month
-        const invPrice = getInvPrice(p.medicineId, visitYear, visitMonth);
-        return sum.plus(D(p.quantity).times(invPrice));
+        const unitPrice = getExportPrice(p.medicineId, visitYear, visitMonth);
+        return sum.plus(D(p.quantity).times(unitPrice));
       }, new Prisma.Decimal(0));
 
       return {
@@ -1804,12 +1766,7 @@ export class HealthcareService {
         symptoms: r.symptoms ?? '',
         diagnosis: r.diagnosis ?? '',
         medicines: r.prescriptions.map((p) => {
-          const txn = recordTxns?.get(p.medicineId);
-          const txnPrice = txn ? txn.unitPrice : D(0);
-          // Fallback to inventory closing price when transaction price is 0
-          const unitPrice = txnPrice.gt(0)
-            ? txnPrice
-            : getInvPrice(p.medicineId, visitYear, visitMonth);
+          const unitPrice = getExportPrice(p.medicineId, visitYear, visitMonth);
           return {
             name: p.medicine?.name ?? '',
             units: p.medicine?.units ?? '',
