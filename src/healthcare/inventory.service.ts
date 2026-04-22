@@ -363,11 +363,19 @@ export class InventoryService {
     const closingAmount = D(inventory.openingTotalAmount)
       .plus(finalImportAmount)
       .minus(finalExportAmount);
-    // ĐG tồn cuối = ĐG xuất (col N) = IFERROR((G*H+J*K)/(G+J),0)
-    // Lấy từ updateData nếu vừa tính (EXPORT/ADJUSTMENT), fallback từ inventory
-    const closingPrice = D(
-      updateData.monthlyExportUnitPrice ?? inventory.monthlyExportUnitPrice,
+
+    // ĐG tồn cuối = closingTotalAmount / closingQuantity (bình quân gia quyền)
+    // Nếu closingQty = 0, fallback về giá nhập hoặc giá xuất
+    const fallbackPrice = D(
+      updateData.monthlyImportUnitPrice ??
+      inventory.monthlyImportUnitPrice ??
+      updateData.monthlyExportUnitPrice ??
+      inventory.monthlyExportUnitPrice ??
+      inventory.openingUnitPrice,
     );
+    const closingPrice = closingQty.gt(0)
+      ? closingAmount.div(closingQty)
+      : fallbackPrice;
 
     updateData.closingQuantity = closingQty.toFixed();
     updateData.closingUnitPrice = closingPrice.toFixed();
@@ -577,9 +585,17 @@ export class InventoryService {
       const finalExportAmt = D(updateData.monthlyExportAmount ?? inventory.monthlyExportAmount);
       const closingQty = D(inventory.openingQuantity).plus(finalImportQty).minus(finalExportQty);
       const closingAmt = D(inventory.openingTotalAmount).plus(finalImportAmt).minus(finalExportAmt);
-      const closingPrice = D(
-        updateData.monthlyExportUnitPrice ?? inventory.monthlyExportUnitPrice,
+      // ĐG tồn cuối = closingTotalAmount / closingQuantity (bình quân gia quyền)
+      const fallbackPriceB = D(
+        updateData.monthlyImportUnitPrice ??
+        inventory.monthlyImportUnitPrice ??
+        updateData.monthlyExportUnitPrice ??
+        inventory.monthlyExportUnitPrice ??
+        inventory.openingUnitPrice,
       );
+      const closingPrice = closingQty.gt(0)
+        ? closingAmt.div(closingQty)
+        : fallbackPriceB;
       updateData.closingQuantity = closingQty.toFixed();
       updateData.closingUnitPrice = closingPrice.toFixed();
       updateData.closingTotalAmount = closingAmt.toFixed();
@@ -3582,7 +3598,13 @@ export class InventoryService {
   }> {
     const recalcResult = await this.recalculateAllBalances(companyId);
 
-    // Tìm tháng/năm mới nhất trong DB (tháng cuối cùng có dữ liệu)
+    // Only initialize the "next month" slot if that month is the current calendar month
+    // or earlier — never seed future months to avoid the runaway bug where clicking the
+    // button N times creates N months ahead.
+    const now = new Date();
+    const currentMonth = now.getMonth() + 1;
+    const currentYear = now.getFullYear();
+
     const latestRecord = await this.prisma.medicineInventory.findFirst({
       where: companyId !== undefined ? { companyId } : { companyId: null },
       orderBy: [{ year: 'desc' }, { month: 'desc' }],
@@ -3593,8 +3615,16 @@ export class InventoryService {
     if (latestRecord) {
       const nextMonth = latestRecord.month === 12 ? 1 : latestRecord.month + 1;
       const nextYear = latestRecord.month === 12 ? latestRecord.year + 1 : latestRecord.year;
-      const initResult = await this.initializeMonth(nextMonth, nextYear, companyId);
-      initialized = initResult.created;
+
+      // Guard: only seed nextMonth if it is ≤ current month (never seed future months)
+      const isCurrentOrPast =
+        nextYear < currentYear ||
+        (nextYear === currentYear && nextMonth <= currentMonth);
+
+      if (isCurrentOrPast) {
+        const initResult = await this.initializeMonth(nextMonth, nextYear, companyId);
+        initialized = initResult.created;
+      }
     }
 
     return { ...recalcResult, initialized };

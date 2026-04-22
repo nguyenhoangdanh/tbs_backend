@@ -4,6 +4,7 @@ import { format } from 'date-fns';
 import { HealthcareService } from './healthcare.service';
 import { GoogleDriveService } from '../common/google-drive.service';
 import { PrismaService } from '../common/prisma.service';
+import { InventoryService } from './inventory.service';
 
 export interface BackupRecord {
   triggeredAt: Date;
@@ -27,6 +28,7 @@ export class HealthcareCron implements OnApplicationBootstrap {
     private readonly googleDriveService: GoogleDriveService,
     private readonly schedulerRegistry: SchedulerRegistry,
     private readonly prisma: PrismaService,
+    private readonly inventoryService: InventoryService,
   ) {}
 
   onApplicationBootstrap() {
@@ -73,6 +75,53 @@ export class HealthcareCron implements OnApplicationBootstrap {
       }
     }
     this.lastBackups = results;
+  }
+
+  /**
+   * Chạy lúc 00:00 UTC ngày 1 mỗi tháng = 7:00 AM giờ Việt Nam (UTC+7) ngày 1.
+   * Tự động khởi tạo bản ghi tồn đầu kỳ cho tháng mới (opening = closing tháng trước).
+   * Cron: "0 0 1 * *" — thư viện cron v4 không hỗ trợ alias L (last day).
+   */
+  @Cron('0 0 1 * *', {
+    name: 'initializeInventoryNewMonth',
+    timeZone: 'UTC',
+  })
+  async handleMonthlyInventoryInit(): Promise<void> {
+    const now = new Date();
+    const targetMonth = now.getMonth() + 1; // UTC day 1 → same month in VN
+    const targetYear = now.getFullYear();
+    this.logger.log(
+      `⏰ [Cron] Monthly inventory init — initializing ${targetMonth}/${targetYear} for all companies...`,
+    );
+
+    const companies = await this.getActiveCompanies();
+    let totalCreated = 0;
+
+    for (const company of companies) {
+      try {
+        const result = await this.inventoryService.initializeMonth(targetMonth, targetYear, company.id);
+        totalCreated += result.created;
+        this.logger.log(
+          `✅ [Cron] ${company.code}: created=${result.created}, skipped=${result.skipped}`,
+        );
+      } catch (err) {
+        this.logger.error(
+          `❌ [Cron] ${company.code} initializeMonth failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    // Also initialize for null companyId (global records)
+    try {
+      const result = await this.inventoryService.initializeMonth(targetMonth, targetYear, undefined);
+      totalCreated += result.created;
+    } catch (err) {
+      this.logger.error(`❌ [Cron] global initializeMonth failed: ${(err as Error).message}`);
+    }
+
+    this.logger.log(
+      `✅ [Cron] Monthly inventory init complete — total created: ${totalCreated}`,
+    );
   }
 
   /** Dùng cho API trigger thủ công — throws lỗi để caller biết chi tiết. */
