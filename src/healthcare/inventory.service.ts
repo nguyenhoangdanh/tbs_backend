@@ -1158,9 +1158,29 @@ export class InventoryService {
               ? D(prevInventory.closingTotalAmount)
               : new Prisma.Decimal(0);
 
-            const dImportQty = D(importQty);
-            const dImportPrice = D(importPrice);
-            const dImportAmt = D(importAmount);
+            // Giao dịch IMPORT thủ công (không phải từ Excel) trong tháng: mượn thuốc, v.v.
+            const manualImportAgg0 = await prisma.inventoryTransaction.aggregate({
+              where: {
+                medicineId: medicine.id,
+                type: 'IMPORT',
+                isCancelled: false,
+                transactionDate: {
+                  gte: new Date(year, month - 1, 1),
+                  lt: new Date(year, month, 1),
+                },
+                NOT: { notes: { contains: 'từ Excel' } },
+              },
+              _sum: { quantity: true, totalAmount: true },
+            });
+            const dManualQty0 = D(manualImportAgg0._sum.quantity);
+            const dManualAmt0 = D(manualImportAgg0._sum.totalAmount);
+
+            // Tổng nhập = Excel + thủ công (mượn, v.v.)
+            const dImportQty = D(importQty).plus(dManualQty0);
+            const dImportAmt = D(importAmount).plus(dManualAmt0);
+            const dImportPrice = dImportQty.gt(0)
+              ? dImportAmt.div(dImportQty)
+              : D(importPrice);
 
             // Xuất trong tháng (tính từ MedicalPrescription)
             const exportData = await prisma.medicalPrescription.aggregate({
@@ -1255,9 +1275,29 @@ export class InventoryService {
             const dCurrExport = D(existingInventory.monthlyExportQuantity);
             const dCurrExpAmt = D(existingInventory.monthlyExportAmount);
 
-            const dNewImportQty = D(importQty);
-            const dNewImportPr = D(importPrice);
-            const dNewImportAmt = D(importAmount);
+            // Giao dịch IMPORT thủ công (không phải từ Excel) trong tháng: mượn thuốc, v.v.
+            const manualImportAgg = await prisma.inventoryTransaction.aggregate({
+              where: {
+                medicineId: medicine.id,
+                type: 'IMPORT',
+                isCancelled: false,
+                transactionDate: {
+                  gte: new Date(year, month - 1, 1),
+                  lt: new Date(year, month, 1),
+                },
+                NOT: { notes: { contains: 'từ Excel' } },
+              },
+              _sum: { quantity: true, totalAmount: true },
+            });
+            const dManualImportQty = D(manualImportAgg._sum.quantity);
+            const dManualImportAmt = D(manualImportAgg._sum.totalAmount);
+
+            // Tổng nhập = Excel + thủ công (mượn thuốc, v.v.)
+            const dNewImportQty = D(importQty).plus(dManualImportQty);
+            const dNewImportAmt = D(importAmount).plus(dManualImportAmt);
+            const dNewImportPr = dNewImportQty.gt(0)
+              ? dNewImportAmt.div(dNewImportQty)
+              : D(importPrice);
 
             // Tồn cuối = Tồn đầu + Nhập mới - Xuất hiện tại (balance sheet)
             const dNewClosingQty = dCurrOpen
