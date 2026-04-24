@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma.service';
 import { EnvironmentConfig } from '../../config/config.environment';
 import { CommonModule } from '../../common/common.module';
 
@@ -20,7 +19,6 @@ import { ProductionController } from './production.controller';
     GroupController,
   ],
   providers: [
-    PrismaService,
     EnvironmentConfig,
     TeamService,
     GroupService,

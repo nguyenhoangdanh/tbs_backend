@@ -259,11 +259,13 @@ let departmentId: string | null = null;
     }
 
     // Destructure role out — User model has no `role` scalar, role assigned via UserRole
-    const { role, password: _pw, ...userFields } = createUserDto;
+    const { role, password: _pw, dateOfBirth, joinDate, ...userFields } = createUserDto;
 
     const user = await this.prisma.user.create({
       data: {
         ...userFields,
+        ...(dateOfBirth ? { dateOfBirth: new Date(dateOfBirth) } : {}),
+        ...(joinDate ? { joinDate: new Date(joinDate) } : {}),
         password: hashedPassword,
         companyId: office.companyId,
         isActive: true,
@@ -329,6 +331,7 @@ let departmentId: string | null = null;
       data: {
         ...profileFields,
         ...(profileFields.joinDate ? { joinDate: new Date(profileFields.joinDate) } : {}),
+        ...(profileFields.dateOfBirth ? { dateOfBirth: new Date(profileFields.dateOfBirth) } : {}),
       },
       include: {
         office: true,
@@ -608,7 +611,7 @@ let departmentId: string | null = null;
       };
 
       // Pre-load all offices filtered by companyId if provided
-      const [offices, departments, positions, jobPositions] = await Promise.all([
+      const [offices, departments, positions, jobPositions, roleDefsArray] = await Promise.all([
         this.prisma.office.findMany({
           where: companyId ? { companyId } : undefined,
         }),
@@ -621,7 +624,30 @@ let departmentId: string | null = null;
             office: true,
           },
         }),
+        this.prisma.roleDefinition.findMany(),
       ]);
+
+      // Pre-build roleDefinition lookup map (code → roleDefinition)
+      const roleDefMap = new Map(roleDefsArray.map((r) => [r.code, r]));
+
+      // Pre-hash the default password once (bcrypt.hash is CPU-intensive)
+      const hashedPassword = await bcrypt.hash('Abcd123@', 10);
+
+      // --- Phase 1: Parse all rows synchronously + create missing JobPositions ---
+      // This is sequential to safely handle jobPosition auto-creation with in-memory cache
+      type PreparedRow =
+        | {
+            ok: true;
+            rowNumber: number;
+            employeeCode: string;
+            upsertData: Record<string, any>;
+            userRole: string | undefined;
+            roleDefId: string | undefined;
+            companyId: string;
+          }
+        | { ok: false; rowNumber: number; employeeCode: string; error: string };
+
+      const preparedRows: PreparedRow[] = [];
 
       for (let i = 0; i < dataRows.length; i++) {
         const cols = dataRows[i];
@@ -767,81 +793,101 @@ let departmentId: string | null = null;
             }
           }
 
-          // Email will be null for workers (they don't need email)
-          // Only generate if explicitly provided in Excel
-          const email = undefined; // Let email be null/empty
+          // Resolve role definition from pre-loaded map
+          const roleDefId = roleDefMap.get(role)?.id;
 
-          // Map to CreateUserDto
-          const createUserDto: CreateUserDto = {
+          const upsertData = {
             employeeCode: msnv,
             firstName,
             lastName,
-            email, // Will be undefined -> null in database
             phone: sdt,
-            role,
             jobPositionId: jobPosition.id,
             officeId: office.id,
-            password: 'Abcd123@', // Default password for imported users (will be hashed in service)
-          };
-
-          // Upsert user — update if employeeCode+companyId already exists, create otherwise
-          const { role: userRole, ...userFields } = createUserDto;
-          const hashedPassword = await bcrypt.hash('Abcd123@', 10);
-          const upsertData = {
-            ...userFields,
             dateOfBirth: dateOfBirthIso ? new Date(dateOfBirthIso) : undefined,
             joinDate: joinDateIso ? new Date(joinDateIso) : undefined,
             sex,
             isActive: true,
             companyId: office.companyId,
           };
-          const createdUser = await this.prisma.user.upsert({
-            where: {
-              employeeCode_companyId: {
-                employeeCode: msnv,
-                companyId: office.companyId,
-              },
-            },
-            create: { ...upsertData, password: hashedPassword },
-            update: {
-              firstName: upsertData.firstName,
-              lastName: upsertData.lastName,
-              phone: upsertData.phone,
-              jobPositionId: upsertData.jobPositionId,
-              officeId: upsertData.officeId,
-              dateOfBirth: upsertData.dateOfBirth,
-              joinDate: upsertData.joinDate,
-              sex: upsertData.sex,
-            },
-          });
 
-          // Assign role via UserRole table (upsert to avoid duplicates)
-          if (userRole) {
-            const roleDef = await this.prisma.roleDefinition.findUnique({
-              where: { code: userRole },
+          preparedRows.push({
+            ok: true,
+            rowNumber,
+            employeeCode: msnv,
+            upsertData,
+            userRole: role,
+            roleDefId,
+            companyId: office.companyId,
+          });
+        } catch (error) {
+          preparedRows.push({
+            ok: false,
+            rowNumber,
+            employeeCode: String(cols[0] ?? '').trim(),
+            error: error.message,
+          });
+        }
+      }
+
+      // --- Phase 2: Batch parallel upserts (chunks of 100 concurrent DB operations) ---
+      // Connection pool limit is 9 — each row does up to 2 sequential queries (user.upsert + userRole.upsert)
+      // so keep concurrency at 5 to stay safely within the pool
+      const BATCH_SIZE = 5;
+      for (let b = 0; b < preparedRows.length; b += BATCH_SIZE) {
+        const batch = preparedRows.slice(b, b + BATCH_SIZE);
+        const settled = await Promise.allSettled(
+          batch.map(async (row) => {
+            if (!row.ok) {
+              // Row failed in parse phase — record error
+              results.failed++;
+              const failedRow = row as { ok: false; rowNumber: number; employeeCode: string; error: string };
+              results.errors.push({ row: failedRow.rowNumber, employeeCode: failedRow.employeeCode, error: failedRow.error });
+              return;
+            }
+            const { upsertData, userRole, roleDefId, rowNumber, employeeCode, companyId: rowCompanyId } = row;
+            const createdUser = await this.prisma.user.upsert({
+              where: {
+                employeeCode_companyId: {
+                  employeeCode: upsertData.employeeCode,
+                  companyId: rowCompanyId,
+                },
+              },
+              create: { ...upsertData, password: hashedPassword } as any,
+              update: {
+                firstName: upsertData.firstName,
+                lastName: upsertData.lastName,
+                phone: upsertData.phone,
+                jobPositionId: upsertData.jobPositionId,
+                officeId: upsertData.officeId,
+                dateOfBirth: upsertData.dateOfBirth,
+                joinDate: upsertData.joinDate,
+                sex: upsertData.sex,
+              },
             });
-            if (roleDef) {
+
+            if (userRole && roleDefId) {
               await this.prisma.userRole.upsert({
                 where: {
                   userId_roleDefinitionId: {
                     userId: createdUser.id,
-                    roleDefinitionId: roleDef.id,
+                    roleDefinitionId: roleDefId,
                   },
                 },
-                create: { userId: createdUser.id, roleDefinitionId: roleDef.id },
+                create: { userId: createdUser.id, roleDefinitionId: roleDefId },
                 update: {},
               });
             }
-          }
 
-          results.success++;
-        } catch (error) {
-          results.failed++;
-          results.errors.push({
-            row: rowNumber,
-            employeeCode: String(cols[0] ?? '').trim(),
-            error: error.message,
-          });
+            results.success++;
+          })
+        );
+
+        // Catch any unexpected promise rejections in this batch
+        for (const s of settled) {
+          if (s.status === 'rejected') {
+            results.failed++;
+            results.errors.push({ row: 0, employeeCode: '?', error: String(s.reason) });
+          }
         }
       }
 

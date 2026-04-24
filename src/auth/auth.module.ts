@@ -3,7 +3,6 @@ import { JwtModule, JwtService } from '@nestjs/jwt';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
-import { PrismaService } from '../common/prisma.service';
 import { EnvironmentConfig } from '../config/config.environment';
 import { PermissionsService } from '../common/permissions.service';
 import { PermissionsGuard } from '../common/guards/permissions.guard';
@@ -24,13 +23,8 @@ import { CommonModule } from '../common/common.module';
   providers: [
     AuthService,
     JwtStrategy,
-    PrismaService,
-    EnvironmentConfig,
     JwtService,
-    PermissionsService,
-    PermissionsGuard,
-    RolesGuard,
   ],
-  exports: [AuthService, EnvironmentConfig, JwtService, PermissionsService],
+  exports: [AuthService, JwtService],
 })
 export class AuthModule {}

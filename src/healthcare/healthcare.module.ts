@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MulterModule } from '@nestjs/platform-express';
-import { PrismaService } from '../common/prisma.service';
 import { GoogleDriveService } from '../common/google-drive.service';
 
 // Medicine management modules
@@ -21,7 +20,7 @@ import { InventoryService } from './inventory.service';
     }),
   ],
   controllers: [HealthcareController, InventoryController],
-  providers: [HealthcareService, InventoryService, PrismaService, GoogleDriveService, HealthcareCron],
+  providers: [HealthcareService, InventoryService, GoogleDriveService, HealthcareCron],
   exports: [HealthcareService, InventoryService],
 })
 export class HealthcareModule {}

@@ -6,80 +6,69 @@ import {
   IsUUID,
   IsEnum,
   Length,
+  IsDateString,
 } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { Sex } from '@prisma/client';
 
 export class CreateUserDto {
-  @ApiProperty({
-    example: 'EMP001',
-    description: 'Employee code',
-  })
+  @ApiProperty({ example: 'EMP001', description: 'Employee code' })
   @IsString()
   @IsNotEmpty()
   employeeCode: string;
 
-  @ApiProperty({
-    example: 'user@company.com',
-    description: 'User email address',
-    required: false,
-  })
+  @ApiProperty({ example: 'user@company.com', required: false })
   @IsEmail()
   @IsOptional()
   email?: string;
 
-  @ApiProperty({
-    example: 'John',
-    description: 'User first name',
-  })
+  @ApiProperty({ example: 'John' })
   @IsString()
   @IsNotEmpty()
   firstName: string;
 
-  @ApiProperty({
-    example: 'Doe',
-    description: 'User last name',
-  })
+  @ApiProperty({ example: 'Doe' })
   @IsString()
   @IsNotEmpty()
   lastName: string;
 
-  @ApiProperty({
-    example: '012345678901',
-    description: 'User phone number',
-    required: false,
-  })
+  @ApiProperty({ example: '012345678901', required: false })
   @IsString()
   @IsOptional()
   @Length(10, 12, { message: 'Phone number must be between 10 and 12 digits' })
   phone?: string;
 
-  @ApiProperty({
-    example: 'USER',
-    description: 'User role code (deprecated - use RoleDefinition system)',
-    type: String,
-  })
+  @ApiProperty({ required: false, description: 'Date of birth (ISO string, e.g. 1990-01-15)' })
+  @IsDateString()
+  @IsOptional()
+  dateOfBirth?: string;
+
+  @ApiProperty({ required: false, description: 'Join date (ISO string, e.g. 2020-06-01)' })
+  @IsDateString()
+  @IsOptional()
+  joinDate?: string;
+
+  @ApiProperty({ required: false, enum: Sex })
+  @IsOptional()
+  @IsEnum(Sex)
+  sex?: Sex;
+
+  @ApiProperty({ example: 'USER', description: 'User role code (deprecated — use roleIds)', type: String })
   @IsString()
   @IsOptional()
   role?: string;
 
-  @ApiProperty({
-    example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Job position UUID',
-  })
+  @ApiProperty({ example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' })
   @IsUUID()
   @IsNotEmpty()
   jobPositionId: string;
 
-  @ApiProperty({
-    example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479',
-    description: 'Office UUID where user belongs',
-  })
+  @ApiProperty({ example: 'f47ac10b-58cc-4372-a567-0e02b2c3d479' })
   @IsUUID()
   @IsNotEmpty()
   officeId: string;
 
-  // ⭐ Password is optional - will be set to '123456' if not provided
-  @ApiProperty({ required: false, description: 'Password (default: 123456)' })
+  @ApiProperty({ required: false, description: 'Password (default: Abcd123@)' })
   @IsString()
   @IsOptional()
   password?: string;

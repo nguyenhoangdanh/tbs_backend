@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { PermissionsService } from './permissions.service';
 import { RolesService } from './roles.service';
@@ -9,6 +9,7 @@ import { PermissionsController } from './permissions.controller';
 import { EnvironmentConfig } from '../config/config.environment'; // ⭐ ADD
 import { CloudflareR2Service } from './r2.service'; // ⭐ ADD
 
+@Global()
 @Module({
   controllers: [RolesController, PermissionsController],
   providers: [

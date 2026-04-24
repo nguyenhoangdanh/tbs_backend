@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma.service';
 import { EnvironmentConfig } from '../../config/config.environment';
 
 // Services
@@ -25,7 +24,6 @@ import { OrganizationController } from './organization.controller';
     JobPositionController,
   ],
   providers: [
-    PrismaService,
     EnvironmentConfig,
     OfficeService,
     DepartmentService,

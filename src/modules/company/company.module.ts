@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { PrismaService } from '../../common/prisma.service';
 import { CompanyController } from './company.controller';
 import { CompanyService } from './company.service';
 import { CompanyTypesController } from './company-types.controller';
@@ -17,7 +16,6 @@ import { RegionsService } from './regions.service';
     RegionsController,
   ],
   providers: [
-    PrismaService,
     CompanyService,
     CompanyTypesService,
     BusinessSectorsService,
